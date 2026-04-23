@@ -87,6 +87,7 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    prefix: Mapped[Optional[str]] = mapped_column(String(5), unique=True, nullable=True)
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     type_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("project_types.id"), nullable=False
@@ -182,6 +183,8 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    number: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True)
+    slug: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True)
     project_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("projects.id"), nullable=False
     )

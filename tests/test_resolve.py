@@ -1,6 +1,6 @@
 import pytest
 
-from notion_task_cli.resolve import normalize_page_id
+from atlas.resolve import normalize_page_id
 
 
 def test_normalize_plain_hex():

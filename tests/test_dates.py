@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from notion_task_cli.dates import bucketize, parse_human_date
+from atlas.dates import bucketize, parse_human_date
 
 
 TZ = "Europe/Moscow"

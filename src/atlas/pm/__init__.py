@@ -6,6 +6,6 @@
 Схема БД — в `MODEL.md` того же модуля.
 """
 
-from notion_task_cli.pm import db, models
+from atlas.pm import db, models
 
 __all__ = ["db", "models"]

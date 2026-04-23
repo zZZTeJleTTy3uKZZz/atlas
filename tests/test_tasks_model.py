@@ -1,4 +1,4 @@
-from notion_task_cli.tasks import ACTIVE_STATUSES, STATUS_ALIAS, task_from_page
+from atlas.tasks import ACTIVE_STATUSES, STATUS_ALIAS, task_from_page
 
 
 def test_status_alias_canonical():

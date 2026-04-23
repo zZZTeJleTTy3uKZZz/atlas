@@ -1,6 +1,6 @@
 """Seed data для PM-БД: project_types, project_statuses, participants.
 
-Запускается один раз при `notionctl portfolio init` после первой миграции Alembic.
+Запускается один раз при `atlas portfolio init` после первой миграции Alembic.
 Безопасен к повторному вызову — использует UPSERT-паттерн по уникальным slug.
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from notion_task_cli.pm.models import Participant, ProjectStatus, ProjectType
+from atlas.pm.models import Participant, ProjectStatus, ProjectType
 
 # --------------------------------------------------------------------------- #
 # Seed data                                                                   #

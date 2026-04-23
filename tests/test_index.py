@@ -1,4 +1,4 @@
-from notion_task_cli.index import Index
+from atlas.index import Index
 
 
 def test_index_pairs_and_name():

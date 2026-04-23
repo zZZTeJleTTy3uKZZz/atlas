@@ -1,4 +1,4 @@
-"""Typer-CLI: `notionctl today | overdue | tasks list | ...`."""
+"""Typer-CLI: `atlas today | overdue | tasks list | ...`."""
 from __future__ import annotations
 
 import json as _json

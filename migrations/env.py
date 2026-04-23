@@ -6,8 +6,8 @@ from sqlalchemy import pool
 from alembic import context
 
 # Импортируем наши модели, чтобы Base.metadata знал обо всех таблицах
-from notion_task_cli.pm.db import DEFAULT_DB_PATH
-from notion_task_cli.pm.models import Base
+from atlas.pm.db import DEFAULT_DB_PATH
+from atlas.pm.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -19,11 +19,11 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Переопределяем sqlalchemy.url. Приоритет:
-# 1. env var NOTION_TASK_CLI_DB_URL (production / CI / tests override)
+# 1. env var ATLAS_DB_URL (production / CI / tests override)
 # 2. значение из alembic.ini (если кто-то явно прописал)
-# 3. default — локальный ~/.cifro-pm/portfolio.db
+# 3. default — локальный ~/.atlas/atlas.db
 import os
-env_url = os.environ.get("NOTION_TASK_CLI_DB_URL")
+env_url = os.environ.get("ATLAS_DB_URL")
 ini_url = config.get_main_option("sqlalchemy.url") or ""
 if env_url:
     config.set_main_option("sqlalchemy.url", env_url)

@@ -5,9 +5,9 @@ from sqlalchemy import func, select
 
 
 def test_seed_project_types_creates_five_types():
-    from notion_task_cli.pm.db import make_engine, make_session
-    from notion_task_cli.pm.models import Base, ProjectType
-    from notion_task_cli.pm.seeds import seed_project_types
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.models import Base, ProjectType
+    from atlas.pm.seeds import seed_project_types
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -31,9 +31,9 @@ def test_seed_project_types_creates_five_types():
 
 def test_seed_all_is_idempotent():
     """Повторный вызов seed_all не должен создавать дубликаты."""
-    from notion_task_cli.pm.db import make_engine, make_session
-    from notion_task_cli.pm.models import Base, Participant, ProjectStatus, ProjectType
-    from notion_task_cli.pm.seeds import seed_all
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.models import Base, Participant, ProjectStatus, ProjectType
+    from atlas.pm.seeds import seed_all
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -48,9 +48,9 @@ def test_seed_all_is_idempotent():
 
 
 def test_seed_participants_includes_dmitry_and_claude():
-    from notion_task_cli.pm.db import make_engine, make_session
-    from notion_task_cli.pm.models import Base, Participant
-    from notion_task_cli.pm.seeds import seed_all
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.models import Base, Participant
+    from atlas.pm.seeds import seed_all
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

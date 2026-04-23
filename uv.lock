@@ -39,6 +39,48 @@ wheels = [
 ]
 
 [[package]]
+name = "atlas"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "httpx" },
+    { name = "python-dateutil" },
+    { name = "python-dotenv" },
+    { name = "python-frontmatter" },
+    { name = "pytz" },
+    { name = "rich" },
+    { name = "sqlalchemy" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-httpx" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.32" },
+    { name = "python-dateutil", specifier = ">=2.9" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-frontmatter", specifier = ">=1.1" },
+    { name = "pytz", specifier = ">=2024.1" },
+    { name = "rich", specifier = ">=13.7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "sqlalchemy", specifier = ">=2.0.30" },
+    { name = "typer", specifier = ">=0.12" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "certifi"
 version = "2026.2.25"
 source = { registry = "https://pypi.org/simple" }
@@ -380,48 +422,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec9
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
-
-[[package]]
-name = "notion-task-cli"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "httpx" },
-    { name = "python-dateutil" },
-    { name = "python-dotenv" },
-    { name = "python-frontmatter" },
-    { name = "pytz" },
-    { name = "rich" },
-    { name = "sqlalchemy" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-httpx" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.32" },
-    { name = "python-dateutil", specifier = ">=2.9" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "python-frontmatter", specifier = ">=1.1" },
-    { name = "pytz", specifier = ">=2024.1" },
-    { name = "rich", specifier = ">=13.7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
-    { name = "sqlalchemy", specifier = ">=2.0.30" },
-    { name = "typer", specifier = ">=0.12" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "packaging"

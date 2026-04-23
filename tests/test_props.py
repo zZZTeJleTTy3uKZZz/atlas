@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from notion_task_cli.props import (
+from atlas.props import (
     read_checkbox,
     read_date,
     read_multi_select,

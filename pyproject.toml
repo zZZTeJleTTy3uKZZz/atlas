@@ -1,7 +1,7 @@
 [project]
-name = "notion-task-cli"
+name = "atlas"
 version = "0.1.0"
-description = "CLI для работы с задачами/проектами/файлами в Notion (Прагмат)"
+description = "Atlas — PM-система для портфеля проектов и задач"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
@@ -25,14 +25,14 @@ dev = [
 ]
 
 [project.scripts]
-notionctl = "notion_task_cli.cli:app"
+atlas = "atlas.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/notion_task_cli"]
+packages = ["src/atlas"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

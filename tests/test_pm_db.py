@@ -7,8 +7,8 @@ from sqlalchemy import select
 
 def test_pm_module_imports():
     """PM-модуль должен импортироваться без ошибок."""
-    from notion_task_cli import pm
-    from notion_task_cli.pm import db, models
+    from atlas import pm
+    from atlas.pm import db, models
 
     assert hasattr(db, "make_engine")
     assert hasattr(db, "make_session")
@@ -16,7 +16,7 @@ def test_pm_module_imports():
 
 def test_can_create_sqlite_memory_engine():
     """Engine создаётся в памяти."""
-    from notion_task_cli.pm.db import make_engine
+    from atlas.pm.db import make_engine
 
     engine = make_engine("sqlite:///:memory:")
     assert engine is not None
@@ -28,8 +28,8 @@ def test_can_create_sqlite_memory_engine():
 
 def test_can_create_all_tables():
     """Все MVP-таблицы создаются из Base.metadata."""
-    from notion_task_cli.pm.db import make_engine
-    from notion_task_cli.pm.models import Base
+    from atlas.pm.db import make_engine
+    from atlas.pm.models import Base
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -50,8 +50,8 @@ def test_can_create_all_tables():
 
 def test_can_insert_project_type():
     """Можно создать project_type."""
-    from notion_task_cli.pm.db import make_engine, make_session
-    from notion_task_cli.pm.models import Base, ProjectType
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.models import Base, ProjectType
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -75,8 +75,8 @@ def test_can_insert_project_type():
 
 def test_project_requires_type_and_status():
     """Project нельзя создать без type_id и status_id (FK constraint)."""
-    from notion_task_cli.pm.db import make_engine, make_session
-    from notion_task_cli.pm.models import Base, Project, ProjectStatus, ProjectType
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.models import Base, Project, ProjectStatus, ProjectType
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -104,8 +104,8 @@ def test_project_requires_type_and_status():
 
 def test_action_log_is_append_only_in_contract():
     """action_log.id автоинкрементный, timestamp ставится автоматически."""
-    from notion_task_cli.pm.db import make_engine, make_session
-    from notion_task_cli.pm.models import ActionLog, Base
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.models import ActionLog, Base
 
     engine = make_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

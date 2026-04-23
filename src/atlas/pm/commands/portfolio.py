@@ -1,4 +1,4 @@
-"""CLI-команды `notionctl portfolio ...`.
+"""CLI-команды `atlas portfolio ...`.
 
 MVP (Spike v0.4):
 - `portfolio init` — создать БД, применить миграции, seed справочников.
@@ -19,9 +19,9 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
 
-from notion_task_cli.pm.db import DEFAULT_DB_PATH, make_engine, make_session
-from notion_task_cli.pm.models import Project, ProjectStatus, ProjectType
-from notion_task_cli.pm.seeds import seed_all
+from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.models import Project, ProjectStatus, ProjectType
+from atlas.pm.seeds import seed_all
 
 portfolio_app = typer.Typer(
     no_args_is_help=True, help="Portfolio management: проекты, карта, CRUD."
@@ -31,7 +31,7 @@ console = Console()
 
 def _db_url() -> str:
     """Получить URL БД: env var -> default."""
-    return os.environ.get("NOTION_TASK_CLI_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
 
 
 def _find_project_root() -> Path:
@@ -46,7 +46,7 @@ def _find_project_root() -> Path:
 @portfolio_app.command("init")
 def init_cmd(
     db_url: Optional[str] = typer.Option(
-        None, "--db-url", help="URL БД (override env NOTION_TASK_CLI_DB_URL и default)"
+        None, "--db-url", help="URL БД (override env ATLAS_DB_URL и default)"
     ),
 ) -> None:
     """Инициализировать PM-БД: apply migrations + seed справочников."""
@@ -56,7 +56,7 @@ def init_cmd(
     # Step 1: apply migrations через alembic CLI
     console.print("[cyan]1. Применяю миграции Alembic...[/cyan]")
     env = os.environ.copy()
-    env["NOTION_TASK_CLI_DB_URL"] = url
+    env["ATLAS_DB_URL"] = url
     project_root = _find_project_root()
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],

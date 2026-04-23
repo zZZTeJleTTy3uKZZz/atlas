@@ -1,6 +1,6 @@
 """SQLAlchemy engine и session-factory для PM-системы.
 
-Дефолтное расположение БД: `~/.cifro-pm/portfolio.db` (не коммитится).
+Дефолтное расположение БД: `~/.atlas/atlas.db` (не коммитится).
 Для тестов используется `sqlite:///:memory:`.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-DEFAULT_DB_PATH = Path.home() / ".cifro-pm" / "portfolio.db"
+DEFAULT_DB_PATH = Path.home() / ".atlas" / "atlas.db"
 
 
 def _default_url() -> str:

@@ -42,10 +42,10 @@ CLAUDE.local.md
 .worktrees/
 
 # PM database (local)
-portfolio.db
-portfolio.db-journal
-portfolio.db-wal
-portfolio.db-shm
+atlas.db
+atlas.db-journal
+atlas.db-wal
+atlas.db-shm
 
 # Logs
 *.log

@@ -271,15 +271,20 @@ def init_cmd(
     console.print("[green]   ✓ миграции применены[/green]")
 
     console.print(
-        "[cyan]2. Заселяю справочники (project_types, project_statuses, participants)...[/cyan]"
+        "[cyan]2. Заселяю справочники (project_types, project_statuses, participants, tags)...[/cyan]"
     )
     engine = make_engine(url)
     with make_session(engine) as session:
         counts = seed_all(session)
+    tags_counts = counts.get("tags", {"created": 0, "skipped": 0})
     console.print(
         f"[green]   ✓ project_types={counts['project_types']}, "
         f"project_statuses={counts['project_statuses']}, "
         f"participants={counts['participants']}[/green]"
+    )
+    console.print(
+        f"[green]   ✓ Tags: created {tags_counts['created']}, "
+        f"skipped {tags_counts['skipped']}[/green]"
     )
 
     console.print("[bold green]Готово.[/bold green] PM-БД инициализирована.")

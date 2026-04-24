@@ -8,7 +8,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import Participant, ProjectStatus, ProjectType
+from atlas.pm.models import Participant, ProjectStatus, ProjectType, Tag
 
 # --------------------------------------------------------------------------- #
 # Seed data                                                                   #
@@ -61,6 +61,41 @@ PROJECT_STATUSES: list[dict[str, str | int]] = [
     {"slug": "archived", "name": "Архив", "order_idx": 6,
      "description": "Закрыто, код/доки оставлены как history"},
 ]
+
+BASE_TAGS: list[dict[str, str]] = [
+    # owner (2)
+    {"slug": "cifro-pro", "name": "Cifro.pro", "category": "owner"},
+    {"slug": "dmitry", "name": "Дмитрий", "category": "owner"},
+    # stack (14)
+    {"slug": "b24", "name": "Bitrix24", "category": "stack"},
+    {"slug": "notion", "name": "Notion", "category": "stack"},
+    {"slug": "telegram", "name": "Telegram", "category": "stack"},
+    {"slug": "anthropic-api", "name": "Anthropic API (Claude)", "category": "stack"},
+    {"slug": "openai", "name": "OpenAI API", "category": "stack"},
+    {"slug": "python", "name": "Python", "category": "stack"},
+    {"slug": "typescript", "name": "TypeScript", "category": "stack"},
+    {"slug": "notebooklm", "name": "NotebookLM", "category": "stack"},
+    {"slug": "playwright", "name": "Playwright", "category": "stack"},
+    {"slug": "sqlalchemy", "name": "SQLAlchemy", "category": "stack"},
+    {"slug": "fastapi", "name": "FastAPI", "category": "stack"},
+    {"slug": "sqlite", "name": "SQLite", "category": "stack"},
+    {"slug": "alembic", "name": "Alembic", "category": "stack"},
+    {"slug": "typer", "name": "Typer CLI", "category": "stack"},
+    # domain (12)
+    {"slug": "marketing", "name": "Маркетинг", "category": "domain"},
+    {"slug": "sales", "name": "Продажи", "category": "domain"},
+    {"slug": "ai-agents", "name": "ИИ-агенты", "category": "domain"},
+    {"slug": "knowledge-management", "name": "Управление знаниями", "category": "domain"},
+    {"slug": "dev-tools", "name": "Dev Tools", "category": "domain"},
+    {"slug": "analytics", "name": "Аналитика", "category": "domain"},
+    {"slug": "pm-tools", "name": "PM Tools", "category": "domain"},
+    {"slug": "crm", "name": "CRM / внедрения", "category": "domain"},
+    {"slug": "content", "name": "Контент / SEO", "category": "domain"},
+    {"slug": "finance", "name": "Финансы", "category": "domain"},
+    {"slug": "research", "name": "Ресёрч", "category": "domain"},
+    {"slug": "integrations", "name": "Интеграции", "category": "domain"},
+]
+
 
 PARTICIPANTS_SEED: list[dict[str, str]] = [
     {
@@ -122,14 +157,37 @@ def seed_participants(session: Session) -> list[Participant]:
     return [_upsert(session, Participant, "slug", p) for p in PARTICIPANTS_SEED]
 
 
-def seed_all(session: Session) -> dict[str, int]:
+def seed_base_tags(session: Session) -> dict[str, int]:
+    """Заселить базовый набор owner/stack/domain тегов (идемпотентно).
+
+    Проверяет `SELECT ... WHERE slug = ?` перед INSERT. Если тег уже есть —
+    skip (существующий не перезаписывается). Возвращает `{'created': N,
+    'skipped': M}`.
+    """
+    created = 0
+    skipped = 0
+    for data in BASE_TAGS:
+        existing = session.execute(
+            select(Tag).where(Tag.slug == data["slug"])
+        ).scalar_one_or_none()
+        if existing is not None:
+            skipped += 1
+            continue
+        session.add(Tag(**data))
+        created += 1
+    return {"created": created, "skipped": skipped}
+
+
+def seed_all(session: Session) -> dict[str, int | dict[str, int]]:
     """Запустить все seeds. Возвращает counts."""
     types = seed_project_types(session)
     statuses = seed_project_statuses(session)
     participants = seed_participants(session)
+    tags = seed_base_tags(session)
     session.commit()
     return {
         "project_types": len(types),
         "project_statuses": len(statuses),
         "participants": len(participants),
+        "tags": tags,
     }

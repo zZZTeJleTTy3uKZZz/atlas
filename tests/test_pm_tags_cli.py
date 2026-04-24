@@ -33,12 +33,23 @@ def fresh_engine(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def seeded_engine(fresh_engine):
-    """Чистая БД + полный seed (project_types, project_statuses, participants)."""
+    """Чистая БД + seed справочников БЕЗ базовых тегов.
+
+    Тесты этого модуля проверяют CRUD по тегам с нуля — пред-заселённые
+    базовые теги (`b24`, `notion`, `dmitry` и пр.) создали бы коллизии slug/name.
+    """
     from atlas.pm.db import make_session
-    from atlas.pm.seeds import seed_all
+    from atlas.pm.seeds import (
+        seed_participants,
+        seed_project_statuses,
+        seed_project_types,
+    )
 
     with make_session(fresh_engine) as session:
-        seed_all(session)
+        seed_project_types(session)
+        seed_project_statuses(session)
+        seed_participants(session)
+        session.commit()
     return fresh_engine
 
 

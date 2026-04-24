@@ -1,0 +1,461 @@
+{
+  "object": "data_source",
+  "id": "a1b2a598-c57e-4fc7-a217-0ec2d2785898",
+  "cover": null,
+  "icon": {
+    "type": "emoji",
+    "emoji": "👾"
+  },
+  "created_time": "2024-01-21T15:31:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "d439b070-f406-4175-9b03-539a2b1a6b52"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "d439b070-f406-4175-9b03-539a2b1a6b52"
+  },
+  "last_edited_time": "2026-04-21T21:15:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "_Проекты",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "_Проекты",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "Parent item": {
+      "id": "%3A%3CDr",
+      "name": "Parent item",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "dc1481e0-d887-4e3c-a970-2ed4576410db",
+        "data_source_id": "a1b2a598-c57e-4fc7-a217-0ec2d2785898",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "Sub-item",
+          "synced_property_id": "%3FG%3B%3C"
+        }
+      }
+    },
+    "Статус": {
+      "id": "%3D%7DDg",
+      "name": "Статус",
+      "description": null,
+      "type": "status",
+      "status": {
+        "options": [
+          {
+            "id": "=yAF",
+            "name": "АУТСОРС",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": ";vTC",
+            "name": "КОМПАНИЯ",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "SMsx",
+            "name": "ЛИЧНЫЕ",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "C<hK",
+            "name": "Отказ",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "xuPo",
+            "name": "OFF разовый",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "09ad8e7a-0764-40d7-9c5d-1db68d1f97fd",
+            "name": "В планах",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "=kQ=",
+            "name": "На паузе",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "904ff538-70f4-4f77-ba89-2047bbb76b7d",
+            "name": "Обработка",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "Na=m",
+            "name": "ON разовый",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "hh}F",
+            "name": "VIP",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "c8f1f0a6-bf18-4918-8618-b94c515d5280",
+            "name": "Работаем",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "`OlX",
+            "name": "2 П",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "IApT",
+            "name": "1 Пр",
+            "color": "red",
+            "description": null
+          }
+        ],
+        "groups": [
+          {
+            "id": "99e5f5aa-5fa8-40db-926a-0defd823189b",
+            "name": "To-do",
+            "color": "gray",
+            "option_ids": [
+              "=yAF",
+              ";vTC",
+              "SMsx",
+              "C<hK",
+              "xuPo",
+              "09ad8e7a-0764-40d7-9c5d-1db68d1f97fd"
+            ]
+          },
+          {
+            "id": "6695f051-31ce-4155-8a09-d4f2174e95c3",
+            "name": "In progress",
+            "color": "blue",
+            "option_ids": [
+              "=kQ=",
+              "904ff538-70f4-4f77-ba89-2047bbb76b7d"
+            ]
+          },
+          {
+            "id": "4a59e264-19e2-4487-90ad-2c0388facee2",
+            "name": "Complete",
+            "color": "green",
+            "option_ids": [
+              "IApT",
+              "Na=m",
+              "hh}F",
+              "c8f1f0a6-bf18-4918-8618-b94c515d5280",
+              "`OlX"
+            ]
+          }
+        ]
+      }
+    },
+    "Sub-item": {
+      "id": "%3FG%3B%3C",
+      "name": "Sub-item",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "dc1481e0-d887-4e3c-a970-2ed4576410db",
+        "data_source_id": "a1b2a598-c57e-4fc7-a217-0ec2d2785898",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "Parent item",
+          "synced_property_id": "%3A%3CDr"
+        }
+      }
+    },
+    "b24_contact_id": {
+      "id": "%3FVkV",
+      "name": "b24_contact_id",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "✅ Задачи": {
+      "id": "Etyl",
+      "name": "✅ Задачи",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "d89bde89-e8c9-43b8-8487-b3c58ba27625",
+        "data_source_id": "123d853b-90be-481a-b8a4-1e7eef45c416",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 Проекты",
+          "synced_property_id": "vulK"
+        }
+      }
+    },
+    "Телефон": {
+      "id": "GJ%7D%5D",
+      "name": "Телефон",
+      "description": null,
+      "type": "phone_number",
+      "phone_number": {}
+    },
+    "🪩 Рекламные кампании": {
+      "id": "HoUn",
+      "name": "🪩 Рекламные кампании",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "260bfce2-404c-8042-ae3d-fb57cf2f4fe7",
+        "data_source_id": "260bfce2-404c-80a7-9d08-000b28629a7a",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "XTb%3D"
+        }
+      }
+    },
+    "🧭 Инфо Ресурсы": {
+      "id": "MRct",
+      "name": "🧭 Инфо Ресурсы",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "264bfce2-404c-8021-963e-f129a97b0a2e",
+        "data_source_id": "264bfce2-404c-8098-9718-000b04440b70",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "D_%3Cd"
+        }
+      }
+    },
+    "💫 Ахуительные идеи": {
+      "id": "Q%7CR%3B",
+      "name": "💫 Ахуительные идеи",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "15cbfce2-404c-80dc-b1ef-d03a7a532082",
+        "data_source_id": "03111347-f1ae-4976-af5f-7eb770ed6c67",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "WIxc"
+        }
+      }
+    },
+    "📁 Файлы клиентов": {
+      "id": "S_Rt",
+      "name": "📁 Файлы клиентов",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "1a7bfce2-404c-8078-b76e-c3924580f090",
+        "data_source_id": "1a7bfce2-404c-8081-8448-000b34d72b47",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "V%3A%3Cu"
+        }
+      }
+    },
+    "❤️‍🔥 Зоны экспертности и интересов": {
+      "id": "%60K%3F%3D",
+      "name": "❤️‍🔥 Зоны экспертности и интересов",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "225bfce2-404c-80af-9b98-e629ed9636a2",
+        "data_source_id": "225bfce2-404c-80d9-88e1-000b83664167",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "BGW~"
+        }
+      }
+    },
+    "Проекты": {
+      "id": "c%5BL%5C",
+      "name": "Проекты",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "41be8adb-e5ad-4b2e-894b-07bef822fa73",
+        "data_source_id": "0ad451bd-1348-4aaa-b111-a957c0641593",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "Клиент",
+          "synced_property_id": "npbC"
+        }
+      }
+    },
+    "🍭 Услуги": {
+      "id": "fH%3EJ",
+      "name": "🍭 Услуги",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "c8d63804-3991-4a00-9a37-069fcddf6905",
+        "data_source_id": "1c0711fe-9d03-4123-8ef5-13e950c9cba7",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "AMi%3D"
+        }
+      }
+    },
+    "〽️ Аналитика": {
+      "id": "gK%3AZ",
+      "name": "〽️ Аналитика",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "d60e7046-222a-4a66-89e2-ab2d78f352de",
+        "data_source_id": "a386c52d-19a1-40f4-9ce1-4d37bc2d29b8",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 Клиенты",
+          "synced_property_id": "S%3F%5Eg"
+        }
+      }
+    },
+    "❤️ Забота о клиенте": {
+      "id": "s%3Dci",
+      "name": "❤️ Забота о клиенте",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "18dbfce2-404c-8039-a0fb-fa3af67731dc",
+        "data_source_id": "18dbfce2-404c-804b-b152-000bb0cabba7",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 _Клиенты",
+          "synced_property_id": "daCp"
+        }
+      }
+    },
+    "🥇 _Дейлики": {
+      "id": "s%3E%7Bj",
+      "name": "🥇 _Дейлики",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "17abfce2-404c-804c-8f93-d37f51770c0d",
+        "data_source_id": "8e36ec41-e8e7-47a0-8331-4ff73ff5c0c9",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾Проект",
+          "synced_property_id": "vqqE"
+        }
+      }
+    },
+    "b24_company_id": {
+      "id": "s%5D%3DN",
+      "name": "b24_company_id",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "Связь": {
+      "id": "thcJ",
+      "name": "Связь",
+      "description": null,
+      "type": "multi_select",
+      "multi_select": {
+        "options": [
+          {
+            "id": "=U;j",
+            "name": "Авито",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "CQj<",
+            "name": "Телефон",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "lU}H",
+            "name": "Telegram",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "fPgG",
+            "name": "WhatsApp",
+            "color": "pink",
+            "description": null
+          },
+          {
+            "id": "sZUT",
+            "name": "Instagram",
+            "color": "yellow",
+            "description": null
+          }
+        ]
+      }
+    },
+    "🤑 Услуги": {
+      "id": "%7CvQo",
+      "name": "🤑 Услуги",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "2cfc3abf-fcb3-4472-a63c-070bf0a1a568",
+        "data_source_id": "40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "👾 Клиент",
+          "synced_property_id": "Of%60%60"
+        }
+      }
+    },
+    "Название": {
+      "id": "title",
+      "name": "Название",
+      "description": null,
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "database_id",
+    "database_id": "dc1481e0-d887-4e3c-a970-2ed4576410db"
+  },
+  "database_parent": {
+    "type": "block_id",
+    "block_id": "86d74ef2-b7fc-4a49-9e24-27be00b99544"
+  },
+  "url": "https://www.notion.so/dc1481e0d8874e3ca9702ed4576410db",
+  "public_url": "https://pragmat.notion.site/dc1481e0d8874e3ca9702ed4576410db",
+  "in_trash": false,
+  "archived": false,
+  "request_id": "d9c839fd-0db7-45fc-a256-7ded27b47c13"
+}

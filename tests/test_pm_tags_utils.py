@@ -6,10 +6,10 @@ list_project_tags, filter_projects_by_tags, attach_tags, detach_tags.
 """
 from __future__ import annotations
 
-from datetime import datetime
-
 import pytest
 from sqlalchemy import func, select
+
+from atlas.pm._time import utcnow
 
 
 # --------------------------------------------------------------------------- #
@@ -49,7 +49,7 @@ def _make_project(session, seed_refs, *, slug: str, archived: bool = False):
         status_id=seed_refs["status"].id,
         priority="P1",
         one_line_summary="...",
-        archived_at=datetime.utcnow() if archived else None,
+        archived_at=utcnow() if archived else None,
     )
     session.add(proj)
     session.commit()

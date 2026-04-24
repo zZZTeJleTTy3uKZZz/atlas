@@ -1,0 +1,463 @@
+{
+  "object": "data_source",
+  "id": "40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657",
+  "cover": null,
+  "icon": {
+    "type": "emoji",
+    "emoji": "🤑"
+  },
+  "created_time": "2024-01-21T15:41:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "d439b070-f406-4175-9b03-539a2b1a6b52"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "d439b070-f406-4175-9b03-539a2b1a6b52"
+  },
+  "last_edited_time": "2025-09-01T23:25:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "_Заказы",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "_Заказы",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "ХУЙНЯ": {
+      "id": "BTE%3B",
+      "name": "ХУЙНЯ",
+      "description": null,
+      "type": "rollup",
+      "rollup": {
+        "rollup_property_name": "Деньги Лео",
+        "relation_property_name": "💸 Сметы",
+        "rollup_property_id": "G?kl",
+        "relation_property_id": "kDFN",
+        "function": "sum"
+      }
+    },
+    "ХУЙНЯ (1)": {
+      "id": "CC%5Da",
+      "name": "ХУЙНЯ (1)",
+      "description": null,
+      "type": "rollup",
+      "rollup": {
+        "rollup_property_name": "Деньги Димы",
+        "relation_property_name": "💸 Сметы",
+        "rollup_property_id": "j~;{",
+        "relation_property_id": "kDFN",
+        "function": "sum"
+      }
+    },
+    "Деньги Лео": {
+      "id": "CDAR",
+      "name": "Деньги Лео",
+      "description": null,
+      "type": "formula",
+      "formula": {
+        "expression": "toNumber(format({{notion:block_property:BTE%3B:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}))"
+      }
+    },
+    "Оплачено": {
+      "id": "Dl%3Ck",
+      "name": "Оплачено",
+      "description": null,
+      "type": "rollup",
+      "rollup": {
+        "rollup_property_name": "_Оплачено",
+        "relation_property_name": "💸 Сметы",
+        "rollup_property_id": "NIRG",
+        "relation_property_id": "kDFN",
+        "function": "sum"
+      }
+    },
+    "Предоплата (руч.)": {
+      "id": "HX%3DC",
+      "name": "Предоплата (руч.)",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "ruble"
+      }
+    },
+    "Оплачено1": {
+      "id": "JFt%7C",
+      "name": "Оплачено1",
+      "description": null,
+      "type": "formula",
+      "formula": {
+        "expression": "if(not(empty({{notion:block_property:HX%3DC:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}})),{{notion:block_property:HX%3DC:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}},if({{notion:block_property:dgbr:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}== \"Получена\",{{notion:block_property:fZce:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}},if({{notion:block_property:dgbr:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}} == \"50%\",{{notion:block_property:fZce:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}*0.5,if({{notion:block_property:dgbr:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}} == \"30%\",{{notion:block_property:fZce:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}*0.3,if({{notion:block_property:dgbr:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}} == \"20%\",{{notion:block_property:fZce:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}*0.2,0)))))"
+      }
+    },
+    "ХУЙНЯ 3": {
+      "id": "NdXP",
+      "name": "ХУЙНЯ 3",
+      "description": null,
+      "type": "rollup",
+      "rollup": {
+        "rollup_property_name": "Деньги Насти",
+        "relation_property_name": "💸 Сметы",
+        "rollup_property_id": "vZiY",
+        "relation_property_id": "kDFN",
+        "function": "sum"
+      }
+    },
+    "👾 Клиент": {
+      "id": "Of%60%60",
+      "name": "👾 Клиент",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "dc1481e0-d887-4e3c-a970-2ed4576410db",
+        "data_source_id": "a1b2a598-c57e-4fc7-a217-0ec2d2785898",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "🤑 Услуги",
+          "synced_property_id": "%7CvQo"
+        }
+      }
+    },
+    "Ещё должен": {
+      "id": "Py%60%60",
+      "name": "Ещё должен",
+      "description": null,
+      "type": "formula",
+      "formula": {
+        "expression": "{{notion:block_property:fZce:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}-{{notion:block_property:Dl%3Ck:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}"
+      }
+    },
+    "Деньги Насти": {
+      "id": "SjSv",
+      "name": "Деньги Насти",
+      "description": null,
+      "type": "formula",
+      "formula": {
+        "expression": "toNumber(format({{notion:block_property:NdXP:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}))"
+      }
+    },
+    "Комментарий": {
+      "id": "UBN%5E",
+      "name": "Комментарий",
+      "description": null,
+      "type": "rich_text",
+      "rich_text": {}
+    },
+    "Остаток": {
+      "id": "XYrG",
+      "name": "Остаток",
+      "description": null,
+      "type": "rollup",
+      "rollup": {
+        "rollup_property_name": "Осталось выплатить",
+        "relation_property_name": "💸 Сметы",
+        "rollup_property_id": "i}yF",
+        "relation_property_id": "kDFN",
+        "function": "sum"
+      }
+    },
+    "Деньги Димы": {
+      "id": "ZeU%5B",
+      "name": "Деньги Димы",
+      "description": null,
+      "type": "formula",
+      "formula": {
+        "expression": "toNumber(format({{notion:block_property:CC%5Da:40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657:ce588da0-e030-4567-9fc0-dd1093971641}}))"
+      }
+    },
+    "Статус": {
+      "id": "%5BQ%3BJ",
+      "name": "Статус",
+      "description": null,
+      "type": "status",
+      "status": {
+        "options": [
+          {
+            "id": "42574559-43d9-4ab3-b795-96f2c06190cc",
+            "name": "Запланирована",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": "dba69b04-c52a-4607-a014-94437709f5a2",
+            "name": "В работе",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "E;X\\",
+            "name": "Заказчик моросит",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "QNWy",
+            "name": "Правки",
+            "color": "orange",
+            "description": null
+          },
+          {
+            "id": "6156496b-66cb-45cf-a9cb-9df317d03c5f",
+            "name": "Выполнена",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "@j?>",
+            "name": "Отказ",
+            "color": "red",
+            "description": null
+          }
+        ],
+        "groups": [
+          {
+            "id": "975c03dd-4131-472f-8676-ea1ca3890629",
+            "name": "To-do",
+            "color": "gray",
+            "option_ids": [
+              "42574559-43d9-4ab3-b795-96f2c06190cc"
+            ]
+          },
+          {
+            "id": "1fe943d7-c913-4b17-af12-70a0531bd863",
+            "name": "In progress",
+            "color": "blue",
+            "option_ids": [
+              "dba69b04-c52a-4607-a014-94437709f5a2",
+              "E;X\\",
+              "QNWy"
+            ]
+          },
+          {
+            "id": "63f5ea8f-60e3-4b0f-8af9-3c227ce09df3",
+            "name": "Complete",
+            "color": "green",
+            "option_ids": [
+              "@j?>",
+              "6156496b-66cb-45cf-a9cb-9df317d03c5f"
+            ]
+          }
+        ]
+      }
+    },
+    "⏰ Планирование бизнеса": {
+      "id": "%5CHvy",
+      "name": "⏰ Планирование бизнеса",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "210bfce2-404c-8013-b7cc-fd3b717a2b9d",
+        "data_source_id": "210bfce2-404c-80c8-86c1-000bcdca1107",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "🤑 _Заказы",
+          "synced_property_id": "%40%5DOg"
+        }
+      }
+    },
+    "📝 Договор": {
+      "id": "%5CYbZ",
+      "name": "📝 Договор",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "b1e4e82a-2226-419f-8e8b-3bf51ad2f42b",
+        "data_source_id": "560a35bb-2a2b-4288-9b0e-9bba53875f82",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "🤑 Заказ",
+          "synced_property_id": "%60tLT"
+        }
+      }
+    },
+    "Оплата": {
+      "id": "dgbr",
+      "name": "Оплата",
+      "description": null,
+      "type": "status",
+      "status": {
+        "options": [
+          {
+            "id": "28cd0adb-8b38-400a-ae80-3579e492c15a",
+            "name": "Нет",
+            "color": "default",
+            "description": null
+          },
+          {
+            "id": ">c\\|",
+            "name": "75%",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "aEKS",
+            "name": "20%",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "`;wb",
+            "name": "30%",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "24e91871-bcf4-4ac1-bade-8ae70facf019",
+            "name": "50%",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "FG?l",
+            "name": "Часть",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "EFpl",
+            "name": "Отказ от услуги",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "2b1b960a-b4cd-4627-85d8-c4c278f8685d",
+            "name": "Получена",
+            "color": "green",
+            "description": null
+          }
+        ],
+        "groups": [
+          {
+            "id": "3ef0b337-c73f-409b-967f-b94bc45c4d0e",
+            "name": "To-do",
+            "color": "gray",
+            "option_ids": [
+              "28cd0adb-8b38-400a-ae80-3579e492c15a"
+            ]
+          },
+          {
+            "id": "3a809f9e-5955-4df2-9998-9e6af1191357",
+            "name": "In progress",
+            "color": "blue",
+            "option_ids": [
+              "FG?l",
+              ">c\\|",
+              "aEKS",
+              "`;wb",
+              "24e91871-bcf4-4ac1-bade-8ae70facf019"
+            ]
+          },
+          {
+            "id": "d2573189-1e77-4c57-ad81-fd6bf9eafbba",
+            "name": "Complete",
+            "color": "green",
+            "option_ids": [
+              "EFpl",
+              "2b1b960a-b4cd-4627-85d8-c4c278f8685d"
+            ]
+          }
+        ]
+      }
+    },
+    "Цена": {
+      "id": "fZce",
+      "name": "Цена",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "ruble"
+      }
+    },
+    "Дата платежа": {
+      "id": "gr_I",
+      "name": "Дата платежа",
+      "description": null,
+      "type": "date",
+      "date": {}
+    },
+    "✅ _Задачи": {
+      "id": "ji~A",
+      "name": "✅ _Задачи",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "d89bde89-e8c9-43b8-8487-b3c58ba27625",
+        "data_source_id": "123d853b-90be-481a-b8a4-1e7eef45c416",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "🤑 _Заказы",
+          "synced_property_id": "LEzd"
+        }
+      }
+    },
+    "💸 Сметы": {
+      "id": "kDFN",
+      "name": "💸 Сметы",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "421bdc6d-5e17-440f-bc63-b6c7c4c8fc76",
+        "data_source_id": "eb57289e-f421-4f7d-bff4-27e7328b7efa",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "🤑 Заказ",
+          "synced_property_id": "RGxI"
+        }
+      }
+    },
+    "Статус договора": {
+      "id": "qPY%5C",
+      "name": "Статус договора",
+      "description": null,
+      "type": "rollup",
+      "rollup": {
+        "rollup_property_name": "Статус",
+        "relation_property_name": "📝 Договор",
+        "rollup_property_id": "vOTU",
+        "relation_property_id": "\\YbZ",
+        "function": "show_original"
+      }
+    },
+    "Created time": {
+      "id": "w~OD",
+      "name": "Created time",
+      "description": null,
+      "type": "created_time",
+      "created_time": {}
+    },
+    "Название": {
+      "id": "title",
+      "name": "Название",
+      "description": null,
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "database_id",
+    "database_id": "2cfc3abf-fcb3-4472-a63c-070bf0a1a568"
+  },
+  "database_parent": {
+    "type": "block_id",
+    "block_id": "86d74ef2-b7fc-4a49-9e24-27be00b99544"
+  },
+  "url": "https://www.notion.so/2cfc3abffcb34472a63c070bf0a1a568",
+  "public_url": null,
+  "in_trash": false,
+  "archived": false,
+  "request_id": "100ec797-e49f-4673-9a87-6f4c6f777274"
+}

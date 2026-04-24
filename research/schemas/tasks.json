@@ -1,0 +1,297 @@
+{
+  "object": "data_source",
+  "id": "123d853b-90be-481a-b8a4-1e7eef45c416",
+  "cover": null,
+  "icon": {
+    "type": "emoji",
+    "emoji": "✅"
+  },
+  "created_time": "2024-01-21T17:09:00.000Z",
+  "created_by": {
+    "object": "user",
+    "id": "d439b070-f406-4175-9b03-539a2b1a6b52"
+  },
+  "last_edited_by": {
+    "object": "user",
+    "id": "d439b070-f406-4175-9b03-539a2b1a6b52"
+  },
+  "last_edited_time": "2026-04-21T21:13:00.000Z",
+  "title": [
+    {
+      "type": "text",
+      "text": {
+        "content": "_Задачи",
+        "link": null
+      },
+      "annotations": {
+        "bold": false,
+        "italic": false,
+        "strikethrough": false,
+        "underline": false,
+        "code": false,
+        "color": "default"
+      },
+      "plain_text": "_Задачи",
+      "href": null
+    }
+  ],
+  "description": [],
+  "is_inline": false,
+  "properties": {
+    "Подзадачи": {
+      "id": "%3Aofz",
+      "name": "Подзадачи",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "d89bde89-e8c9-43b8-8487-b3c58ba27625",
+        "data_source_id": "123d853b-90be-481a-b8a4-1e7eef45c416",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "Задачи",
+          "synced_property_id": "HFPg"
+        }
+      }
+    },
+    "Дата": {
+      "id": "%3Bur%3E",
+      "name": "Дата",
+      "description": null,
+      "type": "date",
+      "date": {}
+    },
+    "Задачи": {
+      "id": "HFPg",
+      "name": "Задачи",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "d89bde89-e8c9-43b8-8487-b3c58ba27625",
+        "data_source_id": "123d853b-90be-481a-b8a4-1e7eef45c416",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "Подзадачи",
+          "synced_property_id": "%3Aofz"
+        }
+      }
+    },
+    "Готово?": {
+      "id": "IiNC",
+      "name": "Готово?",
+      "description": null,
+      "type": "status",
+      "status": {
+        "options": [
+          {
+            "id": ">:DV",
+            "name": "В планах",
+            "color": "gray",
+            "description": null
+          },
+          {
+            "id": "5b9c8b5a-f4c4-4a53-9f32-c4178edde4d5",
+            "name": "В работе",
+            "color": "blue",
+            "description": null
+          },
+          {
+            "id": "i^DA",
+            "name": "На паузе",
+            "color": "brown",
+            "description": null
+          },
+          {
+            "id": "pxE~",
+            "name": "Отмена",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "a15ad5ac-e80c-4e5a-95d8-f016a35fd930",
+            "name": "Выполнена",
+            "color": "green",
+            "description": null
+          }
+        ],
+        "groups": [
+          {
+            "id": "b6857d77-c534-417b-b070-e4cdb1950c39",
+            "name": "To-do",
+            "color": "gray",
+            "option_ids": [
+              ">:DV",
+              "5b9c8b5a-f4c4-4a53-9f32-c4178edde4d5"
+            ]
+          },
+          {
+            "id": "72ac8c6f-b78c-46da-8ea8-025da50c4df8",
+            "name": "In progress",
+            "color": "blue",
+            "option_ids": [
+              "i^DA",
+              "pxE~"
+            ]
+          },
+          {
+            "id": "6403a023-785e-4a87-8cdb-c48066e19a83",
+            "name": "Complete",
+            "color": "green",
+            "option_ids": [
+              "a15ad5ac-e80c-4e5a-95d8-f016a35fd930"
+            ]
+          }
+        ]
+      }
+    },
+    "b24_task_id": {
+      "id": "L%3EON",
+      "name": "b24_task_id",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "🤑 _Заказы": {
+      "id": "LEzd",
+      "name": "🤑 _Заказы",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "2cfc3abf-fcb3-4472-a63c-070bf0a1a568",
+        "data_source_id": "40f9b95a-c0f7-4f4c-9f9c-ce5e7f3e8657",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "✅ _Задачи",
+          "synced_property_id": "ji~A"
+        }
+      }
+    },
+    "Ответственный": {
+      "id": "MBf%3A",
+      "name": "Ответственный",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "209e6898-4e37-4997-a9b0-151a4a5cc0c3",
+        "data_source_id": "727f8037-1c54-4280-806b-ccd5f1b80f75",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "✅ Задачи",
+          "synced_property_id": "vhN%3D"
+        }
+      }
+    },
+    "b24_checklist_item_id": {
+      "id": "VscZ",
+      "name": "b24_checklist_item_id",
+      "description": null,
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    },
+    "👾 Под-Проекты": {
+      "id": "aTYD",
+      "name": "👾 Под-Проекты",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "dc1481e0-d887-4e3c-a970-2ed4576410db",
+        "data_source_id": "a1b2a598-c57e-4fc7-a217-0ec2d2785898",
+        "type": "single_property",
+        "single_property": {}
+      }
+    },
+    "Исполнители": {
+      "id": "dKi%3C",
+      "name": "Исполнители",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "209e6898-4e37-4997-a9b0-151a4a5cc0c3",
+        "data_source_id": "727f8037-1c54-4280-806b-ccd5f1b80f75",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "✅ _Задачи",
+          "synced_property_id": "yaVa"
+        }
+      }
+    },
+    "Тип": {
+      "id": "uUfB",
+      "name": "Тип",
+      "description": null,
+      "type": "multi_select",
+      "multi_select": {
+        "options": [
+          {
+            "id": "a~g;",
+            "name": "Встреча",
+            "color": "purple",
+            "description": null
+          },
+          {
+            "id": "BzcA",
+            "name": "Созвон",
+            "color": "yellow",
+            "description": null
+          },
+          {
+            "id": "zqm?",
+            "name": "Съёмка",
+            "color": "red",
+            "description": null
+          },
+          {
+            "id": "Wsqu",
+            "name": "Стрим",
+            "color": "green",
+            "description": null
+          },
+          {
+            "id": "zoAf",
+            "name": "Личное",
+            "color": "brown",
+            "description": null
+          }
+        ]
+      }
+    },
+    "👾 Проекты": {
+      "id": "vulK",
+      "name": "👾 Проекты",
+      "description": null,
+      "type": "relation",
+      "relation": {
+        "database_id": "dc1481e0-d887-4e3c-a970-2ed4576410db",
+        "data_source_id": "a1b2a598-c57e-4fc7-a217-0ec2d2785898",
+        "type": "dual_property",
+        "dual_property": {
+          "synced_property_name": "✅ Задачи",
+          "synced_property_id": "Etyl"
+        }
+      }
+    },
+    "Задача": {
+      "id": "title",
+      "name": "Задача",
+      "description": null,
+      "type": "title",
+      "title": {}
+    }
+  },
+  "parent": {
+    "type": "database_id",
+    "database_id": "d89bde89-e8c9-43b8-8487-b3c58ba27625"
+  },
+  "database_parent": {
+    "type": "block_id",
+    "block_id": "86d74ef2-b7fc-4a49-9e24-27be00b99544"
+  },
+  "url": "https://www.notion.so/d89bde89e8c943b88487b3c58ba27625",
+  "public_url": "https://pragmat.notion.site/d89bde89e8c943b88487b3c58ba27625",
+  "in_trash": false,
+  "archived": false,
+  "request_id": "cf63bbb4-396c-4ff6-88b7-139cb1ab3cf4"
+}

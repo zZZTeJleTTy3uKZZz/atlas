@@ -331,6 +331,42 @@ class TestResolveTaskRef:
         assert result is not None
         assert result.id == t.id
 
+    def test_resolve_by_short_uuid_when_prefix_is_all_digits(
+        self, fresh_db, seed_refs
+    ):
+        """Регрессия: ref = '12345678' (всё цифры, ≥ 7) — должен резолвиться
+        как UUID prefix, а не как Task.number."""
+        from atlas.pm.models import Project, Task
+        from atlas.pm.slugs import resolve_task_ref
+
+        proj = Project(
+            slug="alpha", name="A",
+            type_id=seed_refs["type"].id,
+            status_id=seed_refs["status"].id,
+            priority="P1", one_line_summary="...",
+        )
+        fresh_db.add(proj)
+        fresh_db.commit()
+
+        # Конструируем UUID, начинающийся с цифровой последовательности — детерминированно.
+        forced_uuid = "12345678-aaaa-bbbb-cccc-dddddddddddd"
+        t = Task(
+            id=forced_uuid,
+            project_id=proj.id,
+            title="Fix",
+            cpp_description="cpp",
+            priority="P2",
+            number=1,
+            slug="alpha-fix",
+        )
+        fresh_db.add(t)
+        fresh_db.commit()
+
+        # Резолв по 8-символьному цифровому префиксу UUID.
+        result = resolve_task_ref(fresh_db, "12345678")
+        assert result is not None
+        assert result.id == forced_uuid
+
     def test_unknown_number_returns_none(self, fresh_db, seed_refs):
         from atlas.pm.slugs import resolve_task_ref
 

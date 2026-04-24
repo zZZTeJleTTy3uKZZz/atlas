@@ -262,10 +262,16 @@ def resolve_task_ref(session: Session, ref: str) -> Optional[Task]:
     """Найти Task по number (int) / slug / UUID full / UUID short.
 
     Порядок:
-    1. Если ref — целое число → Task.number.
+    1. Если ref — короткое число (< UUID_SHORT_MIN) → сразу Task.number.
     2. По slug (exact match).
-    3. По UUID full (36 chars).
-    4. По UUID short prefix (≥ 7 chars) через LIKE.
+    3. Если ref — full UUID (36 chars) → Task.id.
+    4. Если ref ≥ UUID_SHORT_MIN и из hex-алфавита → пробуем как UUID prefix.
+       Если не найден — fallback на Task.number (для рефов из одних цифр).
+    5. Если ref — длинное число и не нашлось как UUID prefix — Task.number.
+
+    Семантика: короткий int (1..6 знаков) = почти наверняка номер задачи.
+    Длинная цифровая строка (≥ 7) может оказаться UUID prefix — пробуем его сначала
+    (это сильнее: точное совпадение префикса), и только потом — как номер.
 
     Returns None если не найден.
     Raises AmbiguousRefError если UUID prefix матчит >1 запись.
@@ -273,14 +279,14 @@ def resolve_task_ref(session: Session, ref: str) -> Optional[Task]:
     if not ref:
         return None
 
-    # 1. Число → Task.number
-    if ref.isdigit():
+    # 1. Короткое число (< UUID_SHORT_MIN) → однозначно Task.number
+    if ref.isdigit() and len(ref) < UUID_SHORT_MIN:
         n = int(ref)
         return session.execute(
             select(Task).where(Task.number == n)
         ).scalar_one_or_none()
 
-    # 2. Slug
+    # 2. Slug (точное совпадение)
     task = session.execute(
         select(Task).where(Task.slug == ref)
     ).scalar_one_or_none()
@@ -293,18 +299,25 @@ def resolve_task_ref(session: Session, ref: str) -> Optional[Task]:
             select(Task).where(Task.id == ref)
         ).scalar_one_or_none()
 
-    # 4. UUID short prefix
+    # 4. UUID short prefix (включая случай когда ref = одни цифры длиной ≥ 7)
     if len(ref) >= UUID_SHORT_MIN and _looks_like_uuid_prefix(ref):
         matches = session.execute(
             select(Task).where(Task.id.like(f"{ref}%"))
         ).scalars().all()
-        if len(matches) == 0:
-            return None
+        if len(matches) == 1:
+            return matches[0]
         if len(matches) > 1:
             raise AmbiguousRefError(
                 f"UUID prefix '{ref}' матчит {len(matches)} задач; "
                 "уточни больше символов"
             )
-        return matches[0]
+        # len == 0 — fallthrough к попытке number, если ref всё-таки число
+
+    # 5. Fallback: длинное число, не найденное как UUID prefix → Task.number
+    if ref.isdigit():
+        n = int(ref)
+        return session.execute(
+            select(Task).where(Task.number == n)
+        ).scalar_one_or_none()
 
     return None

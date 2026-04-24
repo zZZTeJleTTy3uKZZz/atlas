@@ -29,6 +29,10 @@ from .resolve import (
 
 from .pm.commands.projects import projects_app as pm_projects_app
 from .pm.commands.pm_tasks import pm_tasks_app
+from .pm.commands.participants import app as pm_participants_app
+from .pm.commands.types import app as pm_types_app
+from .pm.commands.statuses import app as pm_statuses_app
+from .pm.commands.action_log import app as pm_action_log_app
 
 app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.")
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
@@ -39,6 +43,10 @@ app.add_typer(notion_projects_app, name="notion-projects")  # бывшая ко�
 app.add_typer(files_app, name="files")
 app.add_typer(pm_projects_app, name="projects")  # локальная PM-БД (NP-005)
 app.add_typer(pm_tasks_app, name="pm-tasks")  # PM-tasks (NP-005)
+app.add_typer(pm_participants_app, name="participants")  # PM-Participants (NP-005)
+app.add_typer(pm_types_app, name="types")  # PM-Project Types (NP-005)
+app.add_typer(pm_statuses_app, name="statuses")  # PM-Project Statuses (NP-005)
+app.add_typer(pm_action_log_app, name="action-log")  # PM-Action Log (NP-005)
 
 console = Console()
 

@@ -1,6 +1,6 @@
 """CLI-команды `atlas projects ...`.
 
-CRUD по проектам портфеля + init/list-references.
+CRUD по проектам портфеля + init.
 
 Команды:
 - ``init``    — создать БД, применить миграции, seed справочников.
@@ -9,8 +9,9 @@ CRUD по проектам портфеля + init/list-references.
 - ``get``     — карточка проекта (по slug, full UUID или short UUID prefix).
 - ``update``  — изменить поля проекта (любые, кроме slug).
 - ``delete``  — soft archive (по умолчанию) или ``--hard`` для физ. удаления.
-- ``types``   — справочник project_types.
-- ``statuses``— справочник project_statuses.
+
+Справочники types/statuses вынесены в отдельные top-level subapp
+(`atlas types ...`, `atlas statuses ...`) — см. types.py и statuses.py.
 """
 from __future__ import annotations
 
@@ -750,44 +751,7 @@ def delete_cmd(
 
 
 # --------------------------------------------------------------------------- #
-# types / statuses                                                            #
+# Note: справочники types/statuses вынесены в отдельные top-level subapp:    #
+# `atlas types ...` (src/atlas/pm/commands/types.py)                         #
+# `atlas statuses ...` (src/atlas/pm/commands/statuses.py)                   #
 # --------------------------------------------------------------------------- #
-
-
-@projects_app.command("types")
-def types_cmd() -> None:
-    """Список справочника project_types."""
-    url = _db_url()
-    engine = make_engine(url)
-    with make_session(engine) as session:
-        rows = session.execute(
-            select(ProjectType).order_by(ProjectType.name)
-        ).scalars().all()
-
-    table = Table(title="Project Types")
-    table.add_column("slug", style="cyan")
-    table.add_column("name")
-    table.add_column("description", overflow="fold")
-    for t in rows:
-        table.add_row(t.slug, t.name, t.description or "")
-    console.print(table)
-
-
-@projects_app.command("statuses")
-def statuses_cmd() -> None:
-    """Список справочника project_statuses."""
-    url = _db_url()
-    engine = make_engine(url)
-    with make_session(engine) as session:
-        rows = session.execute(
-            select(ProjectStatus).order_by(ProjectStatus.order_idx)
-        ).scalars().all()
-
-    table = Table(title="Project Statuses")
-    table.add_column("#", justify="right")
-    table.add_column("slug", style="cyan")
-    table.add_column("name")
-    table.add_column("description", overflow="fold")
-    for s in rows:
-        table.add_row(str(s.order_idx), s.slug, s.name, s.description or "")
-    console.print(table)

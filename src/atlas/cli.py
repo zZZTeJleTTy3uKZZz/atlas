@@ -28,8 +28,9 @@ from .resolve import (
 
 
 from .pm.commands.projects import projects_app as pm_projects_app
+from .pm.commands.pm_tasks import pm_tasks_app
 
-app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects.")
+app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.")
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
 notion_projects_app = typer.Typer(no_args_is_help=True, help="Проекты/клиенты (Notion).")
 files_app = typer.Typer(no_args_is_help=True, help="Файлы клиентов (Notion).")
@@ -37,6 +38,7 @@ app.add_typer(tasks_app, name="tasks")
 app.add_typer(notion_projects_app, name="notion-projects")  # бывшая команда `projects`
 app.add_typer(files_app, name="files")
 app.add_typer(pm_projects_app, name="projects")  # локальная PM-БД (NP-005)
+app.add_typer(pm_tasks_app, name="pm-tasks")  # PM-tasks (NP-005)
 
 console = Console()
 

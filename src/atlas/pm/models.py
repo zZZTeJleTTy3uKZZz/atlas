@@ -213,6 +213,7 @@ class Task(Base):
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     __table_args__ = (
         CheckConstraint(

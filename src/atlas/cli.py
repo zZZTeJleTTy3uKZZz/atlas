@@ -27,16 +27,16 @@ from .resolve import (
 )
 
 
-from .pm.commands.portfolio import portfolio_app
+from .pm.commands.projects import projects_app as pm_projects_app
 
-app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой portfolio.")
+app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects.")
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
-projects_app = typer.Typer(no_args_is_help=True, help="Проекты/клиенты (Notion).")
+notion_projects_app = typer.Typer(no_args_is_help=True, help="Проекты/клиенты (Notion).")
 files_app = typer.Typer(no_args_is_help=True, help="Файлы клиентов (Notion).")
 app.add_typer(tasks_app, name="tasks")
-app.add_typer(projects_app, name="projects")
+app.add_typer(notion_projects_app, name="notion-projects")  # бывшая команда `projects`
 app.add_typer(files_app, name="files")
-app.add_typer(portfolio_app, name="portfolio")  # локальная PM-БД (NP-005)
+app.add_typer(pm_projects_app, name="projects")  # локальная PM-БД (NP-005)
 
 console = Console()
 
@@ -303,7 +303,7 @@ def cmd_tasks_archive(id_or_url: str, unarchive: bool = typer.Option(False, "--u
 # ---------- projects ----------
 
 
-@projects_app.command("list")
+@notion_projects_app.command("list")
 def cmd_projects_list(
     status: str | None = typer.Option(None, "--status"),
     as_json: bool = typer.Option(False, "--json"),
@@ -325,7 +325,7 @@ def cmd_projects_list(
         console.print(table)
 
 
-@projects_app.command("show")
+@notion_projects_app.command("show")
 def cmd_projects_show(name_or_id: str) -> None:
     with _client()[0] as c:
         s = load_settings()

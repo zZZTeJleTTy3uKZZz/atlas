@@ -37,7 +37,9 @@ from atlas.pm.models import (
     Project,
     ProjectParticipant,
     ProjectStatus,
+    ProjectTag,
     ProjectType,
+    Tag,
 )
 from atlas.pm.seeds import seed_all
 from atlas.pm.slugs import (
@@ -47,6 +49,15 @@ from atlas.pm.slugs import (
     generate_unique_slug,
     resolve_project_ref,
     slugify_text,
+)
+from atlas.pm.tags import (
+    AmbiguousTagRefError,
+    InvalidTagCategoryError,
+    attach_tags,
+    detach_tags,
+    filter_projects_by_tags,
+    list_project_tags,
+    resolve_tag_ref,
 )
 
 projects_app = typer.Typer(
@@ -155,6 +166,32 @@ def _prefix_exists_fn(session: Session):
     return _check
 
 
+def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
+    """Резолв списка tag-refs: raise typer.Exit на несуществующий.
+
+    Подсказка в сообщении: `atlas tags add --slug ... --category ...`.
+    """
+    resolved: list[Tag] = []
+    for ref in tag_refs:
+        try:
+            tag = resolve_tag_ref(session, ref)
+        except (AmbiguousTagRefError, InvalidTagCategoryError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+
+        if tag is None:
+            console.print(
+                f"[red]Tag '{ref}' не найден. "
+                f"Создайте: `atlas tags add --slug ... --category ...`.[/red]"
+            )
+            raise typer.Exit(code=1)
+        resolved.append(tag)
+    return resolved
+
+
 def _generate_unique_prefix(
     session: Session,
     base: str,
@@ -254,6 +291,10 @@ def add_cmd(
     deadline: Optional[str] = typer.Option(None, "--deadline", help="ISO-дата YYYY-MM-DD"),
     git_repo_url: Optional[str] = typer.Option(None, "--git-repo-url"),
     local_path: Optional[str] = typer.Option(None, "--local-path"),
+    tags: Optional[list[str]] = typer.Option(
+        None, "--tag", "-t",
+        help="Тег: 'slug', 'category:slug' или UUID. Можно несколько раз.",
+    ),
 ) -> None:
     """Создать новый проект в портфеле."""
     _validate_priority(priority)
@@ -358,18 +399,29 @@ def add_cmd(
         session.add(project)
         session.flush()  # получить project.id
 
+        # ----- tags -----
+        tag_slugs_for_log: list[str] = []
+        if tags:
+            resolved_tags = _resolve_tags_or_die(session, tags)
+            tag_slugs_for_log = [t.slug for t in resolved_tags]
+            attach_tags(session, project.id, [t.id for t in resolved_tags])
+
+        details: dict[str, Any] = {
+            "slug": final_slug,
+            "prefix": final_prefix,
+            "name": name,
+            "type": type_slug,
+            "priority": priority,
+            "status": status_slug,
+        }
+        if tag_slugs_for_log:
+            details["tags"] = tag_slugs_for_log
+
         _log_action(
             session,
             action="project_created",
             entity_id=project.id,
-            details={
-                "slug": final_slug,
-                "prefix": final_prefix,
-                "name": name,
-                "type": type_slug,
-                "priority": priority,
-                "status": status_slug,
-            },
+            details=details,
         )
         session.commit()
 
@@ -399,10 +451,32 @@ def list_cmd(
         False, "--archived/--no-archived",
         help="Показывать архивные (по умолчанию скрыты)",
     ),
+    tags: Optional[list[str]] = typer.Option(
+        None, "--tag", "-t",
+        help="Фильтр по тегу (AND-семантика, можно несколько раз).",
+    ),
 ) -> None:
     """Список проектов (табличный вывод)."""
     url = _db_url()
     engine = make_engine(url)
+
+    # AND-фильтр по тегам отдельной функцией.
+    # Если есть теги — сначала получаем id'шники проходящих, потом
+    # добавляем их в общий запрос как фильтр.
+    tag_project_ids: Optional[set[str]] = None
+    if tags:
+        engine_tmp = engine
+        with make_session(engine_tmp) as session_tmp:
+            # Резолвим каждый tag ref и собираем фактические slug'и.
+            resolved_tags = _resolve_tags_or_die(session_tmp, tags)
+            resolved_slugs = [t.slug for t in resolved_tags]
+            matching = filter_projects_by_tags(
+                session_tmp, resolved_slugs, archived=archived,
+            )
+            tag_project_ids = {p.id for p in matching}
+        if not tag_project_ids:
+            console.print("[yellow]Проектов не найдено.[/yellow]")
+            return
 
     with make_session(engine) as session:
         stmt = select(
@@ -426,6 +500,8 @@ def list_cmd(
             stmt = stmt.where(ProjectStatus.slug == status_slug)
         if not archived:
             stmt = stmt.where(Project.archived_at.is_(None))
+        if tag_project_ids is not None:
+            stmt = stmt.where(Project.id.in_(tag_project_ids))
 
         rows = session.execute(stmt).all()
 
@@ -495,6 +571,9 @@ def get_cmd(
             .where(ProjectParticipant.project_id == project.id)
         ).all()
 
+        # теги
+        project_tags = list_project_tags(session, project.id)
+
         # последние записи action_log
         log_rows = session.execute(
             select(ActionLog)
@@ -548,6 +627,24 @@ def get_cmd(
             )
     else:
         console.print("\n[dim]Participants: —[/dim]")
+
+    if project_tags:
+        console.print("\n[bold]Tags:[/bold]")
+        tags_table = Table(show_header=True, header_style="bold")
+        tags_table.add_column("Category", style="magenta")
+        tags_table.add_column("Slug", style="cyan")
+        tags_table.add_column("Name")
+        tags_table.add_column("Color", style="dim")
+        for tag in project_tags:
+            tags_table.add_row(
+                tag.category,
+                tag.slug,
+                tag.name,
+                tag.color or "—",
+            )
+        console.print(tags_table)
+    else:
+        console.print("\n[dim]Tags: —[/dim]")
 
     if log_rows:
         console.print("\n[bold]Recent activity:[/bold]")
@@ -748,6 +845,91 @@ def delete_cmd(
         )
         session.commit()
         console.print(f"[green]✓ Project '{slug_for_msg}' archived[/green]")
+
+
+# --------------------------------------------------------------------------- #
+# add-tags / remove-tags                                                      #
+# --------------------------------------------------------------------------- #
+
+
+@projects_app.command("add-tags")
+def add_tags_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+    tags: list[str] = typer.Option(
+        ..., "--tag", "-t",
+        help="Тег (можно несколько --tag).",
+    ),
+) -> None:
+    """Прикрепить теги к проекту (идемпотентно)."""
+    url = _db_url()
+    engine = make_engine(url)
+
+    with make_session(engine) as session:
+        try:
+            project = resolve_project_ref(session, ref)
+        except AmbiguousRefError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+        if project is None:
+            console.print(f"[red]Project '{ref}' не найден.[/red]")
+            raise typer.Exit(code=1)
+
+        resolved = _resolve_tags_or_die(session, tags)
+        slugs = [t.slug for t in resolved]
+        added = attach_tags(session, project.id, [t.id for t in resolved])
+
+        _log_action(
+            session,
+            action="project_tags_added",
+            entity_id=project.id,
+            details={"tag_slugs": slugs, "added": added},
+        )
+        session.commit()
+
+        console.print(
+            f"[green]✓ Project '{project.slug}': attached {added} "
+            f"tag(s) ({', '.join(slugs)})[/green]"
+        )
+
+
+@projects_app.command("remove-tags")
+def remove_tags_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+    tags: list[str] = typer.Option(
+        ..., "--tag", "-t",
+        help="Тег (можно несколько --tag).",
+    ),
+) -> None:
+    """Открепить теги от проекта (graceful — отсутствующая связь игнорируется)."""
+    url = _db_url()
+    engine = make_engine(url)
+
+    with make_session(engine) as session:
+        try:
+            project = resolve_project_ref(session, ref)
+        except AmbiguousRefError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
+        if project is None:
+            console.print(f"[red]Project '{ref}' не найден.[/red]")
+            raise typer.Exit(code=1)
+
+        resolved = _resolve_tags_or_die(session, tags)
+        slugs = [t.slug for t in resolved]
+        removed = detach_tags(session, project.id, [t.id for t in resolved])
+
+        _log_action(
+            session,
+            action="project_tags_removed",
+            entity_id=project.id,
+            details={"tag_slugs": slugs, "removed": removed},
+        )
+        session.commit()
+
+        console.print(
+            f"[green]✓ Project '{project.slug}': detached {removed} "
+            f"tag(s) ({', '.join(slugs)})[/green]"
+        )
 
 
 # --------------------------------------------------------------------------- #

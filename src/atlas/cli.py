@@ -33,6 +33,7 @@ from .pm.commands.participants import app as pm_participants_app
 from .pm.commands.types import app as pm_types_app
 from .pm.commands.statuses import app as pm_statuses_app
 from .pm.commands.action_log import app as pm_action_log_app
+from .pm.commands.tags import app as pm_tags_app
 
 app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.")
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
@@ -47,6 +48,7 @@ app.add_typer(pm_participants_app, name="participants")  # PM-Participants (NP-0
 app.add_typer(pm_types_app, name="types")  # PM-Project Types (NP-005)
 app.add_typer(pm_statuses_app, name="statuses")  # PM-Project Statuses (NP-005)
 app.add_typer(pm_action_log_app, name="action-log")  # PM-Action Log (NP-005)
+app.add_typer(pm_tags_app, name="tags")  # PM-Tags (NP-005)
 
 console = Console()
 

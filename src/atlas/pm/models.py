@@ -26,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from atlas.pm._time import utcnow
+from atlas.pm._time import msk_now
 
 
 class Base(DeclarativeBase):
@@ -58,7 +58,7 @@ class ProjectType(Base):
     color: Mapped[Optional[str]] = mapped_column(String(20))
     is_archived: Mapped[bool] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
 
 
@@ -73,7 +73,7 @@ class ProjectStatus(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     order_idx: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
 
 
@@ -109,10 +109,10 @@ class Project(Base):
     renewal_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     archived_group: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, onupdate=utcnow, nullable=False
+        DateTime, default=msk_now, onupdate=msk_now, nullable=False
     )
     last_touched_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -151,7 +151,7 @@ class Participant(Base):
     metadata_json: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
 
     __table_args__ = (
@@ -175,7 +175,7 @@ class ProjectParticipant(Base):
     role_in_project: Mapped[str] = mapped_column(String(100), nullable=False)
     allocated_weekly_hours: Mapped[Optional[float]] = mapped_column()
     joined_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
     left_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
@@ -214,10 +214,10 @@ class Task(Base):
     superpowers_plan_path: Mapped[Optional[str]] = mapped_column(String(500))
     quality_tier: Mapped[Optional[str]] = mapped_column(String(3))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, onupdate=utcnow, nullable=False
+        DateTime, default=msk_now, onupdate=msk_now, nullable=False
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -255,7 +255,7 @@ class ActionLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
     actor_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("participants.id")
@@ -292,7 +292,7 @@ class Tag(Base):
     color: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
 
     __table_args__ = (
@@ -320,7 +320,7 @@ class ProjectTag(Base):
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
+        DateTime, default=msk_now, nullable=False
     )
 
     __table_args__ = (

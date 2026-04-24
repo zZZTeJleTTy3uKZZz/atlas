@@ -38,7 +38,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import utcnow
+from atlas.pm._time import msk_now
 from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
 from atlas.pm.models import (
     ActionLog,
@@ -783,7 +783,7 @@ def update_cmd(
             console.print("[yellow]Нечего обновлять.[/yellow]")
             return
 
-        project.last_touched_at = utcnow()
+        project.last_touched_at = msk_now()
         _log_action(
             session,
             action="project_updated",
@@ -860,7 +860,7 @@ def delete_cmd(
             )
             return
 
-        project.archived_at = utcnow()
+        project.archived_at = msk_now()
         _log_action(
             session,
             action="project_archived",
@@ -1087,7 +1087,7 @@ def archive_cmd(
                 console.print(f"[yellow]⚠ {warning}[/yellow]")
 
         # БД-обновления.
-        now = utcnow()
+        now = msk_now()
         project.archived_at = now
         project.archived_group = group
         project.status_id = target_status.id
@@ -1204,7 +1204,7 @@ def unarchive_cmd(
                 console.print(f"[yellow]⚠ {warning}[/yellow]")
 
         # БД-обновления.
-        now = utcnow()
+        now = msk_now()
         project.archived_at = None
         project.archived_group = None
         project.status_id = target_status.id
@@ -1307,7 +1307,7 @@ def renew_cmd(
 
         project.renewal_count = count_before + 1
         project.status_id = active_status.id
-        project.last_touched_at = utcnow()
+        project.last_touched_at = msk_now()
 
         details = {
             "renewal_count_before": count_before,
@@ -1414,7 +1414,7 @@ def move_cmd(
                 project.local_path = str(dst)
 
         project.type_id = new_type.id
-        project.last_touched_at = utcnow()
+        project.last_touched_at = msk_now()
 
         details = {
             "old_type": old_type.slug,

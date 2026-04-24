@@ -1,37 +1,43 @@
-"""Unit tests for ``atlas.pm._time.utcnow``."""
+"""Unit tests for ``atlas.pm._time.now``."""
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from atlas.pm._time import utcnow
-
-
-def _baseline_naive_utc() -> datetime:
-    """Return naive-UTC `datetime` without using the deprecated `utcnow()`."""
-    return datetime.now(UTC).replace(tzinfo=None)
+from atlas.pm._time import MOSCOW_TZ, msk_now
 
 
-class TestUtcNow:
+def _baseline_naive_moscow() -> datetime:
+    """Naive Moscow time baseline без использования самого `now()`."""
+    return datetime.now(MOSCOW_TZ).replace(tzinfo=None)
+
+
+class TestNow:
     def test_returns_datetime_instance(self) -> None:
-        assert isinstance(utcnow(), datetime)
+        assert isinstance(msk_now(), datetime)
 
     def test_is_naive_no_tzinfo(self) -> None:
         """Result must be naive so it stores cleanly into DateTime (no tz) columns."""
-        now = utcnow()
-        assert now.tzinfo is None
+        observed = msk_now()
+        assert observed.tzinfo is None
 
-    def test_is_recent(self) -> None:
-        """Returned value must be close to current wall-clock UTC."""
-        before = _baseline_naive_utc()
-        observed = utcnow()
-        after = _baseline_naive_utc()
+    def test_is_recent_moscow_time(self) -> None:
+        """Returned value must be close to current Moscow wall-clock."""
+        before = _baseline_naive_moscow()
+        observed = msk_now()
+        after = _baseline_naive_moscow()
 
-        # observed must fall within [before - 1s, after + 1s] to tolerate any
-        # microsecond-level skew on slow CI.
         assert before - timedelta(seconds=1) <= observed <= after + timedelta(seconds=1)
 
+    def test_offset_is_plus_three_hours(self) -> None:
+        """Moscow time должно опережать UTC ровно на 3 часа."""
+        observed = msk_now()
+        utc_now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        delta = observed - utc_now_naive
+        # допускаем ± 2 секунды на выполнение двух вызовов
+        assert timedelta(hours=3) - timedelta(seconds=2) <= delta <= timedelta(hours=3) + timedelta(seconds=2)
+
     def test_triggers_no_deprecation_warning(self, recwarn) -> None:
-        """Calling utcnow() must not raise the datetime.utcnow() deprecation."""
-        utcnow()
+        """Calling msk_now() must not raise the datetime.utcnow() deprecation."""
+        msk_now()
         for w in recwarn.list:
             assert "utcnow" not in str(w.message).lower()

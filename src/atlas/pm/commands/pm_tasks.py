@@ -26,7 +26,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import utcnow
+from atlas.pm._time import msk_now
 from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
 from atlas.pm.models import (
     ActionLog,
@@ -629,7 +629,7 @@ def update_cmd(
             diffs["status"] = {"old": old_status, "new": status}
             task.status = status
 
-            now = utcnow()
+            now = msk_now()
             if status == "in_progress" and task.started_at is None:
                 task.started_at = now
                 diffs["started_at"] = {"old": None, "new": now}
@@ -727,7 +727,7 @@ def delete_cmd(
             )
             return
 
-        task.archived_at = utcnow()
+        task.archived_at = msk_now()
         _log_action(
             session,
             action="task_archived",

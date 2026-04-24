@@ -1,26 +1,31 @@
 """Time helpers for PM-system.
 
-Provides a drop-in replacement for the deprecated ``datetime.utcnow()``.
-See Python 3.12+ deprecation notice; ``datetime.utcnow()`` is removed in 3.14.
+Naive Moscow time (UTC+3) — канонический timestamp всей PM-БД.
 
-Rationale for returning a **naive** UTC datetime (not tz-aware):
-- SQLAlchemy columns in ``atlas.pm.models`` are declared as ``DateTime`` without
-  ``timezone=True``. Persisting tz-aware values would either (a) silently drop
-  tz info on SQLite or (b) raise on PostgreSQL. Keeping semantics identical to
-  the former ``datetime.utcnow()`` avoids any schema migration.
-- Callers that compare timestamps coming from the DB expect naive datetimes.
+Почему Moscow time, а не UTC:
+- Дмитрий работает в Москве (UTC+3). Timestamp'ы в `action_log`, `created_at`,
+  `last_touched_at` читаются глазами и должны совпадать с часами на стене.
+- Россия с 2014 не переходит на летнее время — offset константный, без DST-сюрпризов.
+
+Почему naive (без tzinfo):
+- SQLAlchemy columns в `atlas.pm.models` объявлены как `DateTime` без
+  `timezone=True`. Запись tz-aware значений либо (a) молча теряет tz в SQLite,
+  либо (b) бросает на PostgreSQL. Naive — совместимо и с SQLite, и с будущим
+  PostgreSQL (с условием что все пишут в одной tz).
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timedelta, timezone
 
 
-def utcnow() -> datetime:
-    """Return current UTC time as a **naive** ``datetime`` (no tzinfo).
+MOSCOW_TZ = timezone(timedelta(hours=3), name="MSK")
 
-    Equivalent to the deprecated ``datetime.utcnow()`` but uses the modern
-    ``datetime.now(UTC)`` under the hood, then strips the tzinfo so the result
-    is compatible with SQLAlchemy ``DateTime`` columns that lack
-    ``timezone=True``.
+
+def msk_now() -> datetime:
+    """Текущее московское время как naive datetime (UTC+3, без tzinfo).
+
+    Заменитель устаревшего `datetime.utcnow()` (который возвращал naive UTC —
+    отличался от стенных часов на 3 часа). Именовано `msk_now` а не `now`,
+    чтобы не конфликтовать с локальными переменными `now = ...` в кодовой базе.
     """
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(MOSCOW_TZ).replace(tzinfo=None)

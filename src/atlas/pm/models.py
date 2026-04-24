@@ -104,6 +104,8 @@ class Project(Base):
     notion_project_id: Mapped[Optional[str]] = mapped_column(String(100))
     notebooklm_id: Mapped[Optional[str]] = mapped_column(String(100))
     b24_company_id: Mapped[Optional[str]] = mapped_column(String(100))
+    renewal_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    archived_group: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
@@ -116,6 +118,10 @@ class Project(Base):
     __table_args__ = (
         CheckConstraint(
             "priority IN ('P0','P1','P2','P3')", name="ck_projects_priority"
+        ),
+        CheckConstraint(
+            "archived_group IS NULL OR archived_group IN ('clients','products','tests')",
+            name="ck_projects_archived_group",
         ),
         Index("idx_projects_type", "type_id"),
         Index("idx_projects_status", "status_id"),
@@ -261,4 +267,60 @@ class ActionLog(Base):
         Index("idx_action_log_entity", "entity_type", "entity_id"),
         Index("idx_action_log_actor", "actor_id"),
         Index("idx_action_log_timestamp", "timestamp"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Tags                                                                        #
+# --------------------------------------------------------------------------- #
+
+
+class Tag(Base):
+    """Тег — произвольный ярлык на проект (owner/stack/domain/other).
+
+    slug глобально уникален; category — отдельное поле (не вплетается в slug).
+    """
+
+    __tablename__ = "tags"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(20), nullable=False)
+    color: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('owner','stack','domain','other')",
+            name="ck_tags_category",
+        ),
+        Index("idx_tags_category", "category"),
+    )
+
+
+class ProjectTag(Base):
+    """M:N между projects и tags."""
+
+    __tablename__ = "project_tags"
+
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_project_tags_tag", "tag_id"),
     )

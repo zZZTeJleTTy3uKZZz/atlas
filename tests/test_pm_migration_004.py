@@ -83,12 +83,12 @@ def test_004_upgrade_seeds_new_type_and_statuses(tmp_db):
 
 def test_004_roundtrip_upgrade_downgrade_upgrade(tmp_db):
     cfg = _cfg(tmp_db)
-    # up
+    # up до конца и явно к ревизии PRED-004, чтобы после любых будущих миграций
+    # (например 005) тест проверял именно откат 004 — а не просто "-1".
     command.upgrade(cfg, "head")
-    # down -1
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "c55f75e76e5b")
 
-    # После downgrade -1 таблицы tags/project_tags нет.
+    # После downgrade до ревизии ДО 004: tags/project_tags нет.
     tables = [r[0] for r in _query(
         tmp_db,
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",

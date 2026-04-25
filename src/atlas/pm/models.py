@@ -122,7 +122,7 @@ class Project(Base):
             "priority IN ('P0','P1','P2','P3')", name="ck_projects_priority"
         ),
         CheckConstraint(
-            "archived_group IS NULL OR archived_group IN ('clients','products','tests')",
+            "archived_group IS NULL OR archived_group IN ('clients','products','tests','inbox')",
             name="ck_projects_archived_group",
         ),
         Index("idx_projects_type", "type_id"),

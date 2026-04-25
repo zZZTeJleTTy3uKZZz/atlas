@@ -22,14 +22,17 @@ from typing import Literal, Optional
 # Types & Mappings                                                            #
 # --------------------------------------------------------------------------- #
 
-Group = Literal["clients", "products", "tests"]
+Group = Literal["clients", "products", "tests", "inbox"]
 
 # Имя папки на диске для каждой группы.
 # Нижний регистр в БД (archived_group), TitleCase на диске.
+# inbox использует префикс "_" (как _Archive) — это специальная зона для
+# материалов на переработку, а не обычная группа проектов.
 GROUP_FOLDER_NAMES: dict[str, str] = {
     "clients": "Clients",
     "products": "Products",
     "tests": "Tests",
+    "inbox": "_Inbox",
 }
 
 # Какой project_type.slug в какую группу попадает физически.
@@ -40,6 +43,7 @@ TYPE_TO_GROUP: dict[str, Group] = {
     "personal-project": "products",
     "shared-infrastructure": "products",
     "test": "tests",
+    "inbox": "inbox",
 }
 
 

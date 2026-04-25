@@ -45,6 +45,10 @@ class TestTypeSlugToGroup:
         from atlas.pm.paths import type_slug_to_group
         assert type_slug_to_group("test") == "tests"
 
+    def test_type_slug_to_group_inbox(self):
+        from atlas.pm.paths import type_slug_to_group
+        assert type_slug_to_group("inbox") == "inbox"
+
     def test_type_slug_unknown_raises(self):
         from atlas.pm.paths import type_slug_to_group
         with pytest.raises(ValueError) as excinfo:
@@ -78,6 +82,13 @@ class TestPathBuilders:
             "C:/PROJECT/_Archive/tests/spike"
         )
 
+    def test_archive_path_with_inbox_group(self):
+        from atlas.pm.paths import archive_path
+        root = Path("C:/PROJECT")
+        assert archive_path(root, "inbox", "cifro") == Path(
+            "C:/PROJECT/_Archive/inbox/cifro"
+        )
+
     def test_group_path_client_project(self):
         from atlas.pm.paths import group_path
         root = Path("C:/PROJECT")
@@ -104,6 +115,14 @@ class TestPathBuilders:
         root = Path("C:/PROJECT")
         assert group_path(root, "test", "spike") == Path(
             "C:/PROJECT/Tests/spike"
+        )
+
+    def test_group_path_inbox(self):
+        """inbox project_type → физическая папка PROJECT/_Inbox/<slug>/."""
+        from atlas.pm.paths import group_path
+        root = Path("C:/PROJECT")
+        assert group_path(root, "inbox", "cifro") == Path(
+            "C:/PROJECT/_Inbox/cifro"
         )
 
 
@@ -160,6 +179,23 @@ class TestExpectedProjectPath:
             root, "client-project", "cifro",
             archived=True, archived_group=None,
         ) == Path("C:/PROJECT/_Archive/clients/cifro")
+
+    def test_expected_project_path_inbox_active(self):
+        """inbox type, active → root / _Inbox / <slug>."""
+        from atlas.pm.paths import expected_project_path
+        root = Path("C:/PROJECT")
+        assert expected_project_path(
+            root, "inbox", "cifro", archived=False,
+        ) == Path("C:/PROJECT/_Inbox/cifro")
+
+    def test_expected_project_path_inbox_archived(self):
+        """inbox type, archived → root / _Archive / inbox / <slug>."""
+        from atlas.pm.paths import expected_project_path
+        root = Path("C:/PROJECT")
+        assert expected_project_path(
+            root, "inbox", "cifro",
+            archived=True, archived_group="inbox",
+        ) == Path("C:/PROJECT/_Archive/inbox/cifro")
 
 
 # --------------------------------------------------------------------------- #

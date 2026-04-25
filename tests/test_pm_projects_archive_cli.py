@@ -24,7 +24,7 @@ from typer.testing import CliRunner
 def projects_root(tmp_path, monkeypatch):
     """Корневая директория для физических репозиториев проектов.
 
-    Создаёт пустые поддиректории Clients/Products/Tests/_Archive сразу,
+    Создаёт пустые поддиректории Clients/Products/Tests/_Inbox/_Archive сразу,
     чтобы тесты не падали на `mkdir -p` нужной родительской директории.
     """
     root = tmp_path / "PROJECT"
@@ -32,6 +32,7 @@ def projects_root(tmp_path, monkeypatch):
     (root / "Clients").mkdir()
     (root / "Products").mkdir()
     (root / "Tests").mkdir()
+    (root / "_Inbox").mkdir()
     (root / "_Archive").mkdir()
     monkeypatch.setenv("ATLAS_PROJECTS_ROOT", str(root))
     return root
@@ -94,6 +95,18 @@ def seeded_engine(fresh_engine):
                 name="Экспериментальные проекты",
                 description="Проекты в стадии быстрого прототипирования",
                 color="#6B7280",
+            ))
+
+        # project_type 'inbox' из миграции 005
+        existing_inbox = session.execute(
+            select(ProjectType).where(ProjectType.slug == "inbox")
+        ).scalar_one_or_none()
+        if existing_inbox is None:
+            session.add(ProjectType(
+                slug="inbox",
+                name="Inbox",
+                description="Материалы на переработку",
+                color="#F59E0B",
             ))
 
         session.commit()
@@ -370,6 +383,25 @@ class TestArchive:
         )
         runner.invoke(app, ["archive", "spike", "--status", "completed"])
         assert (projects_root / "_Archive" / "tests" / "spike").exists()
+
+    def test_archive_inbox_project_goes_to_archive_inbox(
+        self, runner, app, seeded_engine, projects_root,
+    ):
+        """inbox-проект архивируется в _Archive/inbox/<slug>/."""
+        _add_project_with_path(
+            runner, app, projects_root,
+            name="Raw", slug="raw-item", type_slug="inbox",
+        )
+        # Физика должна быть в _Inbox/raw-item
+        assert (projects_root / "_Inbox" / "raw-item").exists()
+
+        result = runner.invoke(app, ["archive", "raw-item", "--status", "completed"])
+        assert result.exit_code == 0, _combined(result)
+        assert (projects_root / "_Archive" / "inbox" / "raw-item").exists()
+        assert not (projects_root / "_Inbox" / "raw-item").exists()
+
+        proj = _get_project(seeded_engine, "raw-item")
+        assert proj.archived_group == "inbox"
 
 
 # --------------------------------------------------------------------------- #

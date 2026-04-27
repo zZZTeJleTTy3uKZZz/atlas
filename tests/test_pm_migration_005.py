@@ -117,20 +117,27 @@ def test_005_upgrade_allows_inbox_archived_group(tmp_db):
     assert rows == [("inbox",)]
 
 
+REV_005 = "a2950921f1c4"  # add inbox project_type
+
+
 def test_005_roundtrip_upgrade_downgrade_upgrade(tmp_db):
-    """Roundtrip: up→down→up — clean, inbox seed идемпотентен."""
+    """Roundtrip: up→down→up — clean, inbox seed идемпотентен.
+
+    Привязан к ревизии 005 явно (не head), чтобы оставаться валидным после
+    добавления более поздних миграций (006+).
+    """
     cfg = _cfg(tmp_db)
-    # up
-    command.upgrade(cfg, "head")
+    # up до 005
+    command.upgrade(cfg, REV_005)
     assert _query(tmp_db, "SELECT slug FROM project_types WHERE slug='inbox'") == [("inbox",)]
 
-    # down -1
+    # down -1 (005 → 004)
     command.downgrade(cfg, "-1")
     # inbox seed удалён.
     assert _query(tmp_db, "SELECT slug FROM project_types WHERE slug='inbox'") == []
 
-    # up снова — без ошибок дубликатов.
-    command.upgrade(cfg, "head")
+    # up до 005 снова — без ошибок дубликатов.
+    command.upgrade(cfg, REV_005)
     assert _query(tmp_db, "SELECT slug FROM project_types WHERE slug='inbox'") == [("inbox",)]
 
 
@@ -139,7 +146,7 @@ def test_005_downgrade_restores_old_check_constraint(tmp_db):
     import sqlite3
 
     cfg = _cfg(tmp_db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REV_005)
     command.downgrade(cfg, "-1")
 
     # Попытка вставить с archived_group='inbox' должна провалиться.

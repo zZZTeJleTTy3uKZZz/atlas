@@ -108,6 +108,15 @@ class Project(Base):
     b24_company_id: Mapped[Optional[str]] = mapped_column(String(100))
     renewal_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     archived_group: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # --- Git integration (миграция 006) ------------------------------------
+    git_remote_url: Mapped[Optional[str]] = mapped_column(String(500))
+    git_default_branch: Mapped[str] = mapped_column(
+        String(100), default="main", server_default="main", nullable=False
+    )
+    git_provider: Mapped[Optional[str]] = mapped_column(String(20))
+    git_initialized_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    git_last_pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, nullable=False
     )
@@ -124,6 +133,10 @@ class Project(Base):
         CheckConstraint(
             "archived_group IS NULL OR archived_group IN ('clients','products','tests','inbox')",
             name="ck_projects_archived_group",
+        ),
+        CheckConstraint(
+            "git_provider IS NULL OR git_provider IN ('gitlab','github')",
+            name="ck_projects_git_provider",
         ),
         Index("idx_projects_type", "type_id"),
         Index("idx_projects_status", "status_id"),

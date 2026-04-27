@@ -82,6 +82,11 @@ projects_app = typer.Typer(
 )
 console = Console()
 
+# Git/GitLab integration: sub-typer `atlas projects git ...` (см. projects_git.py).
+from atlas.pm.commands.projects_git import git_app as _git_app  # noqa: E402
+
+projects_app.add_typer(_git_app, name="git")
+
 # --------------------------------------------------------------------------- #
 # Constants                                                                   #
 # --------------------------------------------------------------------------- #
@@ -1638,6 +1643,18 @@ def reorganize_cmd(
             console.print("[green]✓ Applied.[/green]")
         else:
             console.print("[dim]Нечего применять.[/dim]")
+
+
+# --------------------------------------------------------------------------- #
+# layout sub-app: `atlas projects layout ...`                                 #
+# --------------------------------------------------------------------------- #
+from atlas.pm.commands.projects_layout import layout_app as _layout_app  # noqa: E402
+
+projects_app.add_typer(
+    _layout_app,
+    name="layout",
+    help="Junction-based layout: `_storage/` + junction-ссылки.",
+)
 
 
 # --------------------------------------------------------------------------- #

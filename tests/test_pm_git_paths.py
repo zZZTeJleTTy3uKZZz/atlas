@@ -140,3 +140,101 @@ def test_top_level_group_is_cifropro1():
     from atlas.pm.git_paths import TOP_LEVEL_GROUP
 
     assert TOP_LEVEL_GROUP == "cifropro1"
+
+
+def test_personal_top_level_group_constant():
+    from atlas.pm.git_paths import PERSONAL_TOP_LEVEL_GROUP
+
+    assert PERSONAL_TOP_LEVEL_GROUP == "zzztejletty3ukzzz"
+
+
+# ----------------------------------------------------------------------
+# Owner-aware namespace selection
+# ----------------------------------------------------------------------
+
+
+class TestOwnerAwareNamespace:
+    """Если у проекта есть тег `owner:dmitry` — namespace = личный
+    (`zzztejletty3ukzzz/...`), иначе по умолчанию `cifropro1/...`.
+
+    Передавать список owner_tags явно (slug-ов из category=owner): как из
+    проекта они «прилетают».
+    """
+
+    def test_owner_dmitry_personal_namespace_for_personal_utility(self):
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path(
+                "personal-utility", "active", None, owner_tags=["dmitry"]
+            )
+            == "zzztejletty3ukzzz/products"
+        )
+
+    def test_owner_dmitry_personal_namespace_for_client_project(self):
+        """У Дмитрия есть собственные клиентские проекты (личные клиенты)."""
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path(
+                "client-project", "active", None, owner_tags=["dmitry"]
+            )
+            == "zzztejletty3ukzzz/clients"
+        )
+
+    def test_owner_dmitry_archive(self):
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path(
+                "client-project", "archived", "clients", owner_tags=["dmitry"]
+            )
+            == "zzztejletty3ukzzz/archive/clients"
+        )
+
+    def test_owner_cifro_pro_uses_business_namespace(self):
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path(
+                "client-project", "active", None, owner_tags=["cifro-pro"]
+            )
+            == "cifropro1/clients"
+        )
+
+    def test_owner_dmitry_wins_over_cifro_pro_when_both_present(self):
+        """Если у проекта оба owner-тега — личный приоритетнее.
+
+        (Этого почти не должно быть, но защищаемся.)
+        """
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path(
+                "client-project", "active", None,
+                owner_tags=["cifro-pro", "dmitry"],
+            )
+            == "zzztejletty3ukzzz/clients"
+        )
+
+    def test_no_owner_tags_defaults_to_cifropro1(self):
+        """Без owner-тегов — fallback на бизнес-namespace.
+
+        Так работает legacy-вызов без kwarg owner_tags.
+        """
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path("business-product", "active", None)
+            == "cifropro1/products"
+        )
+
+    def test_empty_owner_tags_list_defaults_to_cifropro1(self):
+        from atlas.pm.git_paths import derive_group_path
+
+        assert (
+            derive_group_path(
+                "business-product", "active", None, owner_tags=[]
+            )
+            == "cifropro1/products"
+        )

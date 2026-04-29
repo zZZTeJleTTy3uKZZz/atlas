@@ -128,3 +128,72 @@ def expected_project_path(
         group = archived_group if archived_group else type_slug_to_group(type_slug)
         return archive_path(root, group, project_slug)
     return group_path(root, type_slug, project_slug)
+
+
+# --------------------------------------------------------------------------- #
+# Entity-kind routing (W45-39)                                                #
+# --------------------------------------------------------------------------- #
+# Логика физики записи зависит от entity_kind:
+#   - 'project' — стандартный routing через TYPE_TO_GROUP.
+#   - 'idea'    — единая папка `_Ideas/` (один MD-файл на идею).
+#   - 'inbox'   — единая папка `_Inbox/` (свалка для AI-разбора).
+IDEAS_FOLDER_NAME: str = "_Ideas"
+INBOX_FOLDER_NAME: str = "_Inbox"
+VALID_ENTITY_KINDS: tuple[str, ...] = ("project", "idea", "inbox")
+
+
+def entity_kind_to_root(
+    entity_kind: str,
+    type_slug: Optional[str] = None,
+    *,
+    root: Optional[Path] = None,
+) -> Path:
+    """Корневая папка для записи по ``entity_kind``.
+
+    - 'project' → ``<root>/<Clients|Products|Tests|_Inbox>`` (через TYPE_TO_GROUP).
+        ``type_slug`` обязателен.
+    - 'idea'    → ``<root>/_Ideas`` (type ignored — все идеи в одной папке).
+    - 'inbox'   → ``<root>/_Inbox`` (type ignored).
+
+    Raises:
+        ValueError: если entity_kind не в VALID_ENTITY_KINDS, или для
+                    entity_kind='project' если type_slug=None.
+    """
+    if entity_kind not in VALID_ENTITY_KINDS:
+        raise ValueError(
+            f"Неизвестный entity_kind '{entity_kind}'. "
+            f"Допустимые: {', '.join(VALID_ENTITY_KINDS)}."
+        )
+    root = root or get_projects_root()
+
+    if entity_kind == "idea":
+        return root / IDEAS_FOLDER_NAME
+    if entity_kind == "inbox":
+        return root / INBOX_FOLDER_NAME
+
+    if type_slug is None:
+        raise ValueError(
+            "entity_kind='project' требует type_slug для определения группы."
+        )
+    group = type_slug_to_group(type_slug)
+    folder = GROUP_FOLDER_NAMES[group]
+    return root / folder
+
+
+def entity_logical_path(
+    entity_kind: str,
+    slug: str,
+    type_slug: Optional[str] = None,
+    *,
+    root: Optional[Path] = None,
+) -> Path:
+    """Полный логический путь к записи.
+
+    - kind=project → ``<root>/<Group>/<slug>``     (директория или junction).
+    - kind=idea    → ``<root>/_Ideas/<slug>.md``    (один MD-файл!).
+    - kind=inbox   → ``<root>/_Inbox/<slug>``       (директория/файл).
+    """
+    base = entity_kind_to_root(entity_kind, type_slug, root=root)
+    if entity_kind == "idea":
+        return base / f"{slug}.md"
+    return base / slug

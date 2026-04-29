@@ -42,7 +42,9 @@ def test_seed_all_is_idempotent():
         seed_all(session)
         seed_all(session)  # второй вызов
 
-        for model, expected in [(ProjectType, 5), (ProjectStatus, 6), (Participant, 2)]:
+        # W45-39: канонический набор статусов сжат до 5
+        # (experiment/active/paused/archived/cancelled).
+        for model, expected in [(ProjectType, 5), (ProjectStatus, 5), (Participant, 2)]:
             count = session.execute(select(func.count()).select_from(model)).scalar()
             assert count == expected, f"{model.__tablename__} count {count} != {expected}"
 

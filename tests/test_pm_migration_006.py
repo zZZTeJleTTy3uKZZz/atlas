@@ -190,26 +190,33 @@ def test_006_git_default_branch_value_main_for_new_project(tmp_db):
 
 
 def test_006_roundtrip_upgrade_downgrade_upgrade(tmp_db):
-    """Roundtrip: up→down→up — clean."""
+    """Roundtrip миграции 006: up до 006 → down -1 (= 005) → up до head — clean.
+
+    NOTE: после миграции 007 (entity_kind) head — это `ca84c1d9b54e`. Чтобы
+    тестировать конкретно 006, upgrade'имся явно до её ревизии, потом
+    откатываемся на 1, потом до head обратно.
+    """
     cfg = _cfg(tmp_db)
 
-    # up
-    command.upgrade(cfg, "head")
+    # up до миграции 006 (rev 237c08c450f6).
+    command.upgrade(cfg, "237c08c450f6")
     cols_after_up = _columns(tmp_db, "projects")
     assert "git_remote_url" in cols_after_up
 
-    # down -1
+    # down -1 (006 → 005)
     command.downgrade(cfg, "-1")
     cols_after_down = _columns(tmp_db, "projects")
-    # Колонки должны исчезнуть.
+    # Колонки 006 должны исчезнуть.
     assert "git_remote_url" not in cols_after_down
     assert "git_default_branch" not in cols_after_down
     assert "git_provider" not in cols_after_down
     assert "git_initialized_at" not in cols_after_down
     assert "git_last_pushed_at" not in cols_after_down
 
-    # up снова — без ошибок
+    # up до head — без ошибок (включая 006 + 007).
     command.upgrade(cfg, "head")
     cols_after_up2 = _columns(tmp_db, "projects")
     assert "git_remote_url" in cols_after_up2
     assert "git_default_branch" in cols_after_up2
+    # 007 тоже применилась.
+    assert "entity_kind" in cols_after_up2

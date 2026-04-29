@@ -48,18 +48,22 @@ PROJECT_TYPES: list[dict[str, str]] = [
 ]
 
 PROJECT_STATUSES: list[dict[str, str | int]] = [
+    # Канонический набор (W45-39, 2026-04-29). Раньше было 6+ статусов
+    # (experiment, active, maintained, dormant, graduating, archived,
+    # plus paused/frozen/idea/research/planned добавленные в разных миграциях).
+    # Большинство не использовалось — сжали до 5 канонических.
+    # Legacy-статусы остаются в таблице (если уже есть в БД), но
+    # рекомендованный набор для новых проектов — этот.
     {"slug": "experiment", "name": "Эксперимент", "order_idx": 1,
-     "description": "Проба гипотезы, 1-30 дней"},
+     "description": "Короткоживущий эксперимент / спайк, 1-30 дней"},
     {"slug": "active", "name": "Активный", "order_idx": 2,
      "description": "В работе, есть цель и критерий завершения"},
-    {"slug": "maintained", "name": "Поддержка", "order_idx": 3,
-     "description": "Готово, поддерживаем, не развиваем активно"},
-    {"slug": "dormant", "name": "Пауза", "order_idx": 4,
-     "description": "Осознанная пауза, ждём внешнего события"},
-    {"slug": "graduating", "name": "Graduating", "order_idx": 5,
-     "description": "Утилита/эксперимент готовится стать business-product"},
-    {"slug": "archived", "name": "Архив", "order_idx": 6,
-     "description": "Закрыто, код/доки оставлены как history"},
+    {"slug": "paused", "name": "На паузе", "order_idx": 3,
+     "description": "Временно остановлен; есть причина возврата"},
+    {"slug": "archived", "name": "Архив", "order_idx": 4,
+     "description": "Закрыто, оставлено как history (read-only)"},
+    {"slug": "cancelled", "name": "Отменено", "order_idx": 5,
+     "description": "Решено не делать; идея/проект закрыт без архивирования истории"},
 ]
 
 BASE_TAGS: list[dict[str, str]] = [

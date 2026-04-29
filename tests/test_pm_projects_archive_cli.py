@@ -211,7 +211,7 @@ class TestArchive:
         )
         assert src.exists()
 
-        result = runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        result = runner.invoke(app, ["archive", "cifro", "--status", "archived"])
         assert result.exit_code == 0, _combined(result)
 
         # Физика: src больше нет, dst в _Archive/clients/cifro.
@@ -224,31 +224,37 @@ class TestArchive:
         proj = _get_project(seeded_engine, "cifro")
         assert proj.archived_at is not None
         assert proj.archived_group == "clients"
-        assert _get_status_slug(seeded_engine, proj.status_id) == "completed"
+        assert _get_status_slug(seeded_engine, proj.status_id) == "archived"
         assert proj.local_path == str(dst)
 
-    def test_archive_paused_moves_to_archive(
+    def test_archive_cancelled_moves_to_archive(
         self, runner, app, seeded_engine, projects_root,
     ):
+        """W45-39: archive --status cancelled — отказ от проекта.
+        Раньше тестировались status=paused/frozen — после canon-stcatuses
+        VALID_ARCHIVE_STATUSES сужен до {archived, cancelled}."""
+        _add_project_with_path(
+            runner, app, projects_root,
+            name="Cifro", slug="cifro", type_slug="client-project",
+        )
+        result = runner.invoke(app, ["archive", "cifro", "--status", "cancelled"])
+        assert result.exit_code == 0, _combined(result)
+        proj = _get_project(seeded_engine, "cifro")
+        assert _get_status_slug(seeded_engine, proj.status_id) == "cancelled"
+        assert proj.archived_at is not None
+
+    def test_archive_rejects_active_status(
+        self, runner, app, seeded_engine, projects_root,
+    ):
+        """W45-39: archive отвергает не-архивные статусы (active/paused/experiment)."""
         _add_project_with_path(
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
         result = runner.invoke(app, ["archive", "cifro", "--status", "paused"])
-        assert result.exit_code == 0, _combined(result)
-        proj = _get_project(seeded_engine, "cifro")
-        assert _get_status_slug(seeded_engine, proj.status_id) == "paused"
-        assert proj.archived_at is not None
-
-    def test_archive_frozen(self, runner, app, seeded_engine, projects_root):
-        _add_project_with_path(
-            runner, app, projects_root,
-            name="Cifro", slug="cifro", type_slug="client-project",
-        )
-        result = runner.invoke(app, ["archive", "cifro", "--status", "frozen"])
-        assert result.exit_code == 0, _combined(result)
-        proj = _get_project(seeded_engine, "cifro")
-        assert _get_status_slug(seeded_engine, proj.status_id) == "frozen"
+        assert result.exit_code != 0
+        # paused — это не «архивный» статус (проект на паузе ≠ закрыт)
+        assert "paused" in _combined(result)
 
     def test_archive_status_archived(self, runner, app, seeded_engine, projects_root):
         _add_project_with_path(
@@ -267,7 +273,7 @@ class TestArchive:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        r1 = runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        r1 = runner.invoke(app, ["archive", "cifro", "--status", "archived"])
         assert r1.exit_code == 0
 
         r2 = runner.invoke(app, ["archive", "cifro", "--status", "paused"])
@@ -292,7 +298,7 @@ class TestArchive:
         )
 
         result = runner.invoke(
-            app, ["archive", "cifro", "--status", "completed", "--keep-path"],
+            app, ["archive", "cifro", "--status", "archived", "--keep-path"],
         )
         assert result.exit_code == 0, _combined(result)
 
@@ -325,7 +331,7 @@ class TestArchive:
         ])
         assert result.exit_code == 0, _combined(result)
 
-        result2 = runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        result2 = runner.invoke(app, ["archive", "cifro", "--status", "archived"])
         assert result2.exit_code == 0, _combined(result2)
 
         proj = _get_project(seeded_engine, "cifro")
@@ -342,7 +348,7 @@ class TestArchive:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
 
         with make_session(seeded_engine) as session:
             entries = session.execute(
@@ -357,7 +363,7 @@ class TestArchive:
             assert len(found) >= 1
             details = json.loads(found[0].details_json)
             assert details["archived_group"] == "clients"
-            assert details["status"] == "completed"
+            assert details["status"] == "archived"
 
     def test_archive_client_project_goes_to_clients_subfolder(
         self, runner, app, seeded_engine, projects_root,
@@ -366,7 +372,7 @@ class TestArchive:
             runner, app, projects_root,
             name="C", slug="cif", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cif", "--status", "completed"])
+        runner.invoke(app, ["archive", "cif", "--status", "archived"])
         assert (projects_root / "_Archive" / "clients" / "cif").exists()
 
     def test_archive_business_product_goes_to_products_subfolder(
@@ -376,7 +382,7 @@ class TestArchive:
             runner, app, projects_root,
             name="NP-005", slug="np-005", type_slug="business-product",
         )
-        runner.invoke(app, ["archive", "np-005", "--status", "completed"])
+        runner.invoke(app, ["archive", "np-005", "--status", "archived"])
         assert (projects_root / "_Archive" / "products" / "np-005").exists()
 
     def test_archive_test_type_goes_to_tests_subfolder(
@@ -386,7 +392,7 @@ class TestArchive:
             runner, app, projects_root,
             name="Spike", slug="spike", type_slug="test",
         )
-        runner.invoke(app, ["archive", "spike", "--status", "completed"])
+        runner.invoke(app, ["archive", "spike", "--status", "archived"])
         assert (projects_root / "_Archive" / "tests" / "spike").exists()
 
     def test_archive_inbox_project_goes_to_archive_inbox(
@@ -400,7 +406,7 @@ class TestArchive:
         # Физика должна быть в _Inbox/raw-item
         assert (projects_root / "_Inbox" / "raw-item").exists()
 
-        result = runner.invoke(app, ["archive", "raw-item", "--status", "completed"])
+        result = runner.invoke(app, ["archive", "raw-item", "--status", "archived"])
         assert result.exit_code == 0, _combined(result)
         assert (projects_root / "_Archive" / "inbox" / "raw-item").exists()
         assert not (projects_root / "_Inbox" / "raw-item").exists()
@@ -422,7 +428,7 @@ class TestUnarchive:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
 
         result = runner.invoke(app, ["unarchive", "cifro"])
         assert result.exit_code == 0, _combined(result)
@@ -448,11 +454,11 @@ class TestUnarchive:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
-        result = runner.invoke(app, ["unarchive", "cifro", "--status", "maintained"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
+        result = runner.invoke(app, ["unarchive", "cifro", "--status", "paused"])
         assert result.exit_code == 0, _combined(result)
         proj = _get_project(seeded_engine, "cifro")
-        assert _get_status_slug(seeded_engine, proj.status_id) == "maintained"
+        assert _get_status_slug(seeded_engine, proj.status_id) == "paused"
 
     def test_unarchive_not_archived_errors(
         self, runner, app, seeded_engine, projects_root,
@@ -474,7 +480,7 @@ class TestUnarchive:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
         runner.invoke(app, ["unarchive", "cifro"])
 
         with make_session(seeded_engine) as session:
@@ -483,7 +489,7 @@ class TestUnarchive:
             ).scalar_one()
             details = json.loads(entry.details_json)
             assert details["new_status"] == "active"
-            assert details["old_status"] == "completed"
+            assert details["old_status"] == "archived"
 
     def test_unarchive_type_changed_uses_current_type(
         self, runner, app, seeded_engine, projects_root,
@@ -495,7 +501,7 @@ class TestUnarchive:
             name="Cifro", slug="cifro", type_slug="client-project",
         )
         # Archive (идёт в _Archive/clients)
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
 
         # Теперь поменяем type в БД напрямую на business-product
         from atlas.pm.db import make_session
@@ -531,7 +537,7 @@ class TestRenew:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
 
         result = runner.invoke(app, ["renew", "cifro"])
         assert result.exit_code == 0, _combined(result)
@@ -595,7 +601,7 @@ class TestRenew:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
         runner.invoke(app, ["renew", "cifro"])
 
         with make_session(seeded_engine) as session:
@@ -606,7 +612,7 @@ class TestRenew:
             assert details["renewal_count_after"] == 1
             assert details["renewal_count_before"] == 0
             assert details["was_archived"] is True
-            assert details["previous_status"] == "completed"
+            assert details["previous_status"] == "archived"
             assert details["new_status"] == "active"
 
 
@@ -675,7 +681,7 @@ class TestMove:
             runner, app, projects_root,
             name="Cifro", slug="cifro", type_slug="client-project",
         )
-        runner.invoke(app, ["archive", "cifro", "--status", "completed"])
+        runner.invoke(app, ["archive", "cifro", "--status", "archived"])
 
         result = runner.invoke(app, ["move", "cifro", "--to-type", "business-product"])
         assert result.exit_code != 0

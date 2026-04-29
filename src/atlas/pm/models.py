@@ -117,6 +117,16 @@ class Project(Base):
     git_initialized_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     git_last_pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     # ----------------------------------------------------------------------
+    # --- Entity model refactor (миграция 007) ----------------------------
+    # entity_kind определяет роль записи в портфеле:
+    #   - 'project' (default) — полноценный проект с _storage/<slug>/ + junction.
+    #   - 'idea'    — стадия 0: 1 MD-файл в _Ideas/<slug>.md, без storage.
+    #   - 'inbox'   — сырой материал для разбора AI: _Inbox/<slug>/.
+    # Routing физики: см. atlas.pm.paths.entity_kind_to_root().
+    entity_kind: Mapped[str] = mapped_column(
+        String(20), default="project", server_default="project", nullable=False
+    )
+    # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, nullable=False
     )
@@ -133,6 +143,10 @@ class Project(Base):
         CheckConstraint(
             "archived_group IS NULL OR archived_group IN ('clients','products','tests','inbox')",
             name="ck_projects_archived_group",
+        ),
+        CheckConstraint(
+            "entity_kind IN ('project','idea','inbox')",
+            name="ck_projects_entity_kind",
         ),
         CheckConstraint(
             "git_provider IS NULL OR git_provider IN ('gitlab','github')",

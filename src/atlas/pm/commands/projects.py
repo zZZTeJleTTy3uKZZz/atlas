@@ -103,7 +103,8 @@ PREFIX_RE = re.compile(r"^[a-z0-9]{1,5}$")
 DEFAULT_ACTOR_SLUG = "dmitry"
 
 # Статусы, с которыми можно архивировать проект (status в момент archive).
-VALID_ARCHIVE_STATUSES = {"completed", "paused", "frozen", "archived"}
+# Канон W45-39: только `archived` и `cancelled` (отказ).
+VALID_ARCHIVE_STATUSES = {"archived", "cancelled"}
 
 
 # --------------------------------------------------------------------------- #

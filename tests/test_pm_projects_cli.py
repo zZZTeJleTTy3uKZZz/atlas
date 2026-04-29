@@ -19,6 +19,22 @@ from typer.testing import CliRunner
 # --------------------------------------------------------------------------- #
 
 
+@pytest.fixture(autouse=True)
+def isolated_projects_root(tmp_path, monkeypatch):
+    """Изолируем все CRUD-тесты от реального ~/Documents/PROJECT.
+
+    autouse: применяется ко всем тестам в файле (даже если они напрямую не
+    используют layout). Защищает от неочевидной утечки junction'ов в реальный fs
+    при изменениях default behavior add_cmd (напр. --setup-layout/--canonical).
+    """
+    root = tmp_path / "PROJECT"
+    root.mkdir()
+    for sub in ("Clients", "Products", "Tests", "_Inbox", "_Archive", "_storage"):
+        (root / sub).mkdir(exist_ok=True)
+    monkeypatch.setenv("ATLAS_PROJECTS_ROOT", str(root))
+    return root
+
+
 @pytest.fixture()
 def fresh_engine(tmp_path, monkeypatch):
     """Чистая SQLite БД на диске + ATLAS_DB_URL в env, чтобы CLI её увидел."""
@@ -77,8 +93,13 @@ def _combined(result) -> str:
 
 
 def _add_project(runner, app, *args):
-    """Утилита: вызывает `add` с переданными args. Возвращает Result."""
-    return runner.invoke(app, ["add", *args])
+    """Утилита: вызывает `add` с переданными args. Возвращает Result.
+
+    Безусловно выключает `--setup-layout` и `--canonical` чтобы CRUD-тесты
+    не создавали junction'ы и canonical-файлы в файловой системе.
+    """
+    base = ["add", "--no-setup-layout", "--no-canonical"]
+    return runner.invoke(app, [*base, *args])
 
 
 # --------------------------------------------------------------------------- #

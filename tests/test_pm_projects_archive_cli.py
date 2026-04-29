@@ -164,6 +164,11 @@ def _add_project_with_path(
         "--slug", slug,
         "--type", type_slug,
         "--status", status_slug,
+        # Archive-тесты управляют физикой сами через `_add_project_with_path`
+        # (mkdir + README) — не даём `add` создавать `_storage/<slug>/` и
+        # canonical-файлы поверх.
+        "--no-setup-layout",
+        "--no-canonical",
     ]
     if local_path is not None:
         args.extend(["--local-path", str(local_path)])

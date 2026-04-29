@@ -108,7 +108,13 @@ def _add_project(
     local_path: Path | None = None,
     extra_args: list[str] | None = None,
 ):
-    args = ["add", "--name", name, "--slug", slug, "--type", type_slug]
+    # Для git CLI тестов отключаем layout/canonical/init-git defaults —
+    # эти тесты только про БД-уровень. layout/canonical-кейсы покрываются
+    # отдельно в test_pm_projects_cli.py / smoke-тестах.
+    args = [
+        "add", "--name", name, "--slug", slug, "--type", type_slug,
+        "--no-setup-layout", "--no-canonical",
+    ]
     if local_path is not None:
         args.extend(["--local-path", str(local_path)])
     if extra_args:
@@ -195,11 +201,13 @@ class TestGitInit:
             local_path=local,
         )
 
-        # Поток вызовов:
+        # Поток вызовов (W45-32a):
         # LocalGitOps.init: ["git", "init"]
         # LocalGitOps.add_all_commit: add(0,"",""); commit(0,"",""); rev-parse(0,"sha\n","")
         # LocalGitOps.set_default_branch: symbolic-ref
-        # GitLabBackend.create_remote: glab repo create -> URL on stdout
+        # GitLabBackend.create_remote:
+        #   glab api groups/<encoded> → JSON с id
+        #   glab api -X POST projects → JSON с http_url_to_repo
         # LocalGitOps.add_remote: git remote add origin URL
         # LocalGitOps.push: git push -u origin main
         fake_run["set"](
@@ -208,7 +216,12 @@ class TestGitInit:
             (0, "", ""),                                              # git commit
             (0, "abc123\n", ""),                                      # git rev-parse HEAD
             (0, "", ""),                                              # git symbolic-ref
-            (0, "https://gitlab.com/cifropro1/clients/cifro\n", ""),  # glab repo create
+            (0, '{"id": 11, "full_path": "cifropro1/clients"}', ""),  # glab api groups/...
+            (
+                0,
+                '{"http_url_to_repo": "https://gitlab.com/cifropro1/clients/cifro.git"}',
+                "",
+            ),                                                         # glab api POST projects
             (0, "", ""),                                              # git remote add
             (0, "", ""),                                              # git push -u
         )
@@ -218,7 +231,9 @@ class TestGitInit:
 
         # Проверяем БД
         proj = _get_project(seeded_engine, "cifro")
-        assert proj.git_remote_url == "https://gitlab.com/cifropro1/clients/cifro"
+        assert proj.git_remote_url == "https://gitlab.com/cifropro1/clients/cifro.git"
+        # W45-32k: legacy git_repo_url синхронизирован с git_remote_url.
+        assert proj.git_repo_url == proj.git_remote_url
         assert proj.git_default_branch == "main"
         assert proj.git_provider == "gitlab"
         assert proj.git_initialized_at is not None
@@ -242,17 +257,23 @@ class TestGitInit:
 
         fake_run["set"](
             (0, "", ""), (0, "", ""), (0, "", ""), (0, "abc\n", ""), (0, "", ""),
-            (0, "https://gitlab.com/zzztejletty3ukzzz/products/myutil\n", ""),
+            (0, '{"id": 22, "full_path": "zzztejletty3ukzzz/products"}', ""),
+            (
+                0,
+                '{"http_url_to_repo": "https://gitlab.com/zzztejletty3ukzzz/products/myutil.git"}',
+                "",
+            ),
             (0, "", ""), (0, "", ""),
         )
         result = runner.invoke(app, ["git", "init", "myutil"])
         assert result.exit_code == 0, _combined(result)
 
-        # Должен быть вызов glab с zzztejletty3ukzzz/products/...
+        # Должен быть вызов glab api groups/zzztejletty3ukzzz%2Fproducts
         flat = [" ".join(c["cmd"]) for c in fake_run["calls"]]
         assert any(
-            "glab" in s and "zzztejletty3ukzzz/products" in s for s in flat
-        ), f"expected personal namespace, got: {flat}"
+            "glab" in s and "zzztejletty3ukzzz" in s and "products" in s
+            for s in flat
+        ), f"expected personal namespace in glab call, got: {flat}"
 
     def test_init_aborts_when_local_path_missing(
         self, runner, app, seeded_engine, projects_root, fake_run
@@ -296,7 +317,12 @@ class TestGitInit:
         )
         fake_run["set"](
             (0, "", ""), (0, "", ""), (0, "", ""), (0, "abc\n", ""), (0, "", ""),
-            (0, "https://gitlab.com/foo/bar/explicit\n", ""),
+            (0, '{"id": 33, "full_path": "foo/bar"}', ""),
+            (
+                0,
+                '{"http_url_to_repo": "https://gitlab.com/foo/bar/explicit.git"}',
+                "",
+            ),
             (0, "", ""), (0, "", ""),
         )
         result = runner.invoke(
@@ -304,7 +330,10 @@ class TestGitInit:
         )
         assert result.exit_code == 0, _combined(result)
         flat = [" ".join(c["cmd"]) for c in fake_run["calls"]]
-        assert any("foo/bar/explicit" in s for s in flat)
+        # encoded foo%2Fbar в groups/, либо foo/bar/explicit на push.
+        assert any(
+            "foo%2Fbar" in s or "foo/bar/explicit" in s for s in flat
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -504,9 +533,18 @@ class TestGitMove:
             seeded_engine, "mv1",
             "https://gitlab.com/cifropro1/clients/mv1",
         )
-        # glab transfer → URL; git remote set-url → ok
+        # W45-32j: transfer_to_group теперь через `glab api PUT
+        # /transfer`. Поток: 1) glab api projects/<id> → JSON; 2) glab api
+        # groups/<group> → JSON; 3) glab api -X PUT
+        # projects/<id>/transfer → JSON. Затем git remote set-url.
         fake_run["set"](
-            (0, "https://gitlab.com/cifropro1/archive/clients/mv1\n", ""),  # glab
+            (0, '{"id": 100, "path_with_namespace": "cifropro1/clients/mv1"}', ""),
+            (0, '{"id": 200, "full_path": "cifropro1/archive/clients"}', ""),
+            (
+                0,
+                '{"http_url_to_repo": "https://gitlab.com/cifropro1/archive/clients/mv1.git"}',
+                "",
+            ),
             (0, "", ""),  # git remote set-url
         )
         result = runner.invoke(
@@ -519,7 +557,11 @@ class TestGitMove:
         assert result.exit_code == 0, _combined(result)
 
         cmds = [c["cmd"] for c in fake_run["calls"]]
-        assert any(c[0] == "glab" and "transfer" in c for c in cmds)
+        # PUT /projects/<id>/transfer
+        assert any(
+            c[0] == "glab" and "PUT" in c and "/transfer" in " ".join(c)
+            for c in cmds
+        )
         # Локальный remote обновлён.
         assert any(
             c[:3] == ["git", "remote", "set-url"] for c in cmds

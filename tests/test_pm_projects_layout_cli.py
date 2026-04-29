@@ -163,6 +163,10 @@ def _add_project(
         "--slug", slug,
         "--type", type_slug,
         "--status", status_slug,
+        # layout tests сами проверяют migrate-to-storage flow — не даём
+        # `add` создавать `_storage/<slug>/` авто-mode'ом.
+        "--no-setup-layout",
+        "--no-canonical",
     ]
     if local_path:
         args.extend(["--local-path", str(local_path)])

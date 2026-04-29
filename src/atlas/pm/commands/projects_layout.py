@@ -339,6 +339,14 @@ def sync_cmd(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Только показать что будет сделано.",
     ),
+    force: bool = typer.Option(
+        False, "--force",
+        help=(
+            "(W45-32d) Если current local_path или expected_logical — реальная "
+            "директория (не junction), переместить её в `_old_git_backups/` и "
+            "создать junction поверх. БЕЗ --force такие случаи отвергаются."
+        ),
+    ),
 ) -> None:
     """Пересоздать junction в правильной логической папке."""
     url = _db_url()
@@ -373,26 +381,41 @@ def sync_cmd(
             plan_lines.append(f"junction уже корректен: {expected_logical}")
         else:
             # 1. Текущий junction (если есть и не там где нужно) — снять.
+            real_dirs_to_backup: list[Path] = []
             if current is not None and current != expected_logical:
                 if _is_junction(current):
                     plan_lines.append(f"remove_junction: {current}")
                     action_kind = "recreate"
                 elif current.exists():
-                    console.print(
-                        f"[red]current local_path '{current}' — реальная "
-                        f"директория, не junction. Отказываюсь удалять.[/red]"
+                    if not force:
+                        console.print(
+                            f"[red]current local_path '{current}' — реальная "
+                            f"директория, не junction. Отказываюсь удалять. "
+                            f"Используй --force для переноса в _old_git_backups/.[/red]"
+                        )
+                        raise typer.Exit(code=1)
+                    plan_lines.append(
+                        f"backup real-dir: {current} → _old_git_backups/"
                     )
-                    raise typer.Exit(code=1)
+                    real_dirs_to_backup.append(current)
+                    action_kind = "recreate"
             # 2. На expected уже что-то есть?
             if _is_junction(expected_logical):
                 plan_lines.append(f"remove_junction: {expected_logical}")
                 action_kind = "recreate"
             elif expected_logical.exists():
-                console.print(
-                    f"[red]На expected_logical '{expected_logical}' лежит "
-                    f"реальная директория. Не трогаю.[/red]"
+                if not force:
+                    console.print(
+                        f"[red]На expected_logical '{expected_logical}' лежит "
+                        f"реальная директория. Не трогаю. "
+                        f"Используй --force для переноса в _old_git_backups/.[/red]"
+                    )
+                    raise typer.Exit(code=1)
+                plan_lines.append(
+                    f"backup real-dir: {expected_logical} → _old_git_backups/"
                 )
-                raise typer.Exit(code=1)
+                real_dirs_to_backup.append(expected_logical)
+                action_kind = "recreate"
             # 3. Создать новый junction.
             plan_lines.append(
                 f"create_junction: {expected_logical} → {storage}"
@@ -416,6 +439,31 @@ def sync_cmd(
             return
 
         # ---- Apply ----
+        # W45-32d: backup реальных директорий в _old_git_backups/.
+        if real_dirs_to_backup:
+            from datetime import datetime as _dt
+
+            backups_root = root / "_old_git_backups"
+            backups_root.mkdir(parents=True, exist_ok=True)
+            date_tag = _dt.now().strftime("%Y-%m-%d")
+            for real_dir in real_dirs_to_backup:
+                bk = backups_root / f"{real_dir.name}-real-{date_tag}"
+                suffix = 1
+                while bk.exists():
+                    suffix += 1
+                    bk = backups_root / f"{real_dir.name}-real-{date_tag}-{suffix}"
+                try:
+                    layout_mod._perform_storage_move(
+                        real_dir, bk, copy_first=False
+                    )
+                except Exception as exc:
+                    console.print(
+                        f"[red]Не удалось перенести {real_dir} → {bk}: {exc}[/red]"
+                    )
+                    raise typer.Exit(code=1)
+                console.print(
+                    f"  [yellow]backup → {bk}[/yellow]"
+                )
         # Snять старый junction.
         if current is not None and current != expected_logical and _is_junction(current):
             try:
@@ -629,6 +677,13 @@ def migrate_all_cmd(
         None, "--tag",
         help="Фильтр по тегу (AND-семантика).",
     ),
+    exclude: Optional[list[str]] = typer.Option(
+        None, "--exclude",
+        help=(
+            "Slug'и проектов, которые НЕ мигрировать (W45-32f). Можно несколько. "
+            "По умолчанию `atlas` всегда исключён (W45-32h: self-migration safeguard)."
+        ),
+    ),
     copy_first: bool = typer.Option(
         False, "--copy-first", help="Использовать copy+rmdir вместо robocopy /MOVE.",
     ),
@@ -639,10 +694,18 @@ def migrate_all_cmd(
         False, "--confirm",
         help="Подтвердить bulk-миграцию. Без флага → принудительный dry-run.",
     ),
+    allow_self: bool = typer.Option(
+        False, "--allow-self",
+        help=(
+            "(W45-32h) Разрешить миграцию самого atlas — по умолчанию запрещена, "
+            "т.к. .venv/Scripts/atlas.exe залочен и migration ломает state."
+        ),
+    ),
 ) -> None:
     """Bulk-init: migrate всех подходящих проектов.
 
     Без `--confirm` всегда работает как dry-run (safety).
+    Atlas-проект сам себя по умолчанию НЕ мигрирует (W45-32h).
     """
     url = _db_url()
     engine = make_engine(url)
@@ -690,12 +753,28 @@ def migrate_all_cmd(
             allowed_ids = {p.id for p in matching}
             projects = [p for p in projects if p.id in allowed_ids]
 
+        # W45-32f: --exclude фильтр + W45-32h: self-migration safeguard.
+        excluded_set: set[str] = set(exclude or [])
+        if not allow_self:
+            excluded_set.add("atlas")
+        if excluded_set:
+            projects = [p for p in projects if p.slug not in excluded_set]
+
         if not projects:
             console.print("[yellow]Подходящих проектов нет.[/yellow]")
+            if excluded_set:
+                console.print(
+                    f"  [dim](исключены: {', '.join(sorted(excluded_set))})[/dim]"
+                )
             return
 
         summary = {"migrated": 0, "skipped": 0, "failed": 0, "planned": 0}
         rows: list[dict[str, Any]] = []
+        if excluded_set:
+            console.print(
+                f"[dim]Excluded {len(excluded_set)}: "
+                f"{', '.join(sorted(excluded_set))}[/dim]"
+            )
 
         # progressbar в typer = typer.progressbar (typer пробрасывает click).
         with typer.progressbar(projects, label="migrate-all") as bar:

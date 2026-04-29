@@ -94,12 +94,26 @@ class LocalGitOps:
         return out.strip()
 
     def add_remote(self, path: PathLike, name: str, url: str) -> None:
-        """``git remote add <name> <url>``."""
+        """``git remote add <name> <url>`` — idempotent.
+
+        Если remote уже существует, обновляем URL через
+        ``git remote set-url`` (W45-32b: addiction safety).
+        """
         rc, _, err = run(["git", "remote", "add", name, url], cwd=path)
-        if rc != 0:
-            raise RuntimeError(
-                f"git remote add {name} {url} failed (rc={rc}): {err}"
+        if rc == 0:
+            return
+        if "already exists" in (err or ""):
+            rc2, _, err2 = run(
+                ["git", "remote", "set-url", name, url], cwd=path
             )
+            if rc2 != 0:
+                raise RuntimeError(
+                    f"git remote set-url {name} {url} failed (rc={rc2}): {err2}"
+                )
+            return
+        raise RuntimeError(
+            f"git remote add {name} {url} failed (rc={rc}): {err}"
+        )
 
     def set_default_branch(self, path: PathLike, name: str) -> None:
         """Установить default branch.
@@ -226,27 +240,72 @@ class GitLabBackend:
         *,
         private: bool = True,
     ) -> str:
-        """``glab repo create <group_path>/<repo_name> [-p|-public]``.
+        """Создать репозиторий в group_path через ``glab api POST projects``.
 
-        Возвращает URL созданного репо. Если glab вернул ненулевой код —
-        бросаем ``RuntimeError`` со stderr.
+        W45-32a: ранее использовали ``glab repo create <group>/<repo>``, но
+        glab/GitLab отвергал full-path namespace для subgroup'ов
+        (``400 {namespace: }``). Корректный путь — POST /projects с
+        ``namespace_id`` (целочисленным id группы).
+
+        Алгоритм:
+        1. ``glab api groups/<encoded_path>`` → получить namespace id.
+        2. ``glab api -X POST projects -F namespace_id=<id> -F name=<repo>
+           -F visibility=<private/public> -F default_branch=main``.
+
+        Возвращает ``http_url_to_repo``.
         """
-        full_path = f"{group_path}/{repo_name}"
-        cmd: list[str] = ["glab", "repo", "create", full_path]
-        if private:
-            cmd.append("--private")
-        else:
-            cmd.append("--public")
+        # 1. Получить namespace_id для group_path.
+        encoded_group = group_path.replace("/", "%2F")
+        rc, out, err = run(["glab", "api", f"groups/{encoded_group}"])
+        if rc != 0:
+            raise RuntimeError(
+                f"glab api groups/{group_path} failed (rc={rc}): "
+                f"{err.strip() or out.strip()}"
+            )
+        try:
+            group_data = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"glab api groups/{group_path} вернул не-JSON: {out!r}"
+            ) from exc
+        namespace_id = group_data.get("id")
+        if not namespace_id:
+            raise RuntimeError(
+                f"glab api groups/{group_path}: в ответе нет id: {group_data!r}"
+            )
 
+        # 2. Создать project через POST.
+        visibility = "private" if private else "public"
+        cmd: list[str] = [
+            "glab", "api", "--method", "POST", "projects",
+            "--field", f"name={repo_name}",
+            "--field", f"namespace_id={namespace_id}",
+            "--field", f"visibility={visibility}",
+            "--field", "default_branch=main",
+        ]
         rc, out, err = run(cmd)
         if rc != 0:
             raise RuntimeError(
-                f"glab repo create {full_path} failed (rc={rc}): {err.strip() or out.strip()}"
+                f"glab api POST projects {group_path}/{repo_name} "
+                f"failed (rc={rc}): {err.strip() or out.strip()}"
             )
-
-        # glab печатает URL на stdout (точный формат может варьироваться);
-        # ищем первую подстроку, начинающуюся на http(s).
-        url = _extract_url(out) or _extract_url(err) or full_path
+        try:
+            proj_data = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"glab api POST projects вернул не-JSON: {out!r}"
+            ) from exc
+        url = proj_data.get("http_url_to_repo") or proj_data.get(
+            "web_url"
+        )
+        if not url:
+            raise RuntimeError(
+                f"glab api POST projects: в ответе нет URL: {proj_data!r}"
+            )
+        # GitLab возвращает http_url_to_repo с .git, web_url без — используем
+        # http_url_to_repo как канон.
+        if not url.endswith(".git"):
+            url = url + ".git"
         return url.strip()
 
     def transfer_to_group(
@@ -254,31 +313,82 @@ class GitLabBackend:
         repo_full_path: str,
         new_group_path: str,
     ) -> str:
-        """``glab repo transfer <repo_full_path> --group <new_group_path>``.
+        """Перенести репо в другую группу через ``glab api PUT /transfer``.
 
-        Возвращает новый URL после переноса (или собранный
-        ``new_group_path/<repo_name>``, если glab не печатает URL).
+        W45-32j: ``glab repo transfer ... --group ...`` не имеет флага
+        ``--group`` — gh CLI не принимает его. Использовать API напрямую:
+        ``PUT /projects/<id>/transfer`` с ``namespace=<group_id>``.
+
+        Алгоритм:
+        1. Получить project_id для repo_full_path.
+        2. Получить namespace_id для new_group_path.
+        3. PUT /projects/<id>/transfer.
         """
         repo_name = repo_full_path.rsplit("/", 1)[-1]
-        cmd = [
-            "glab",
-            "repo",
-            "transfer",
-            repo_full_path,
-            "--group",
-            new_group_path,
-        ]
-        rc, out, err = run(cmd)
+
+        # 1. project_id.
+        encoded_repo = repo_full_path.replace("/", "%2F")
+        rc, out, err = run(["glab", "api", f"projects/{encoded_repo}"])
         if rc != 0:
             raise RuntimeError(
-                f"glab repo transfer {repo_full_path} → {new_group_path} "
-                f"failed (rc={rc}): {err.strip() or out.strip()}"
+                f"glab api projects/{repo_full_path} failed (rc={rc}): "
+                f"{err.strip() or out.strip()}"
+            )
+        try:
+            proj_data = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"glab api projects/{repo_full_path} вернул не-JSON: {out!r}"
+            ) from exc
+        project_id = proj_data.get("id")
+        if not project_id:
+            raise RuntimeError(
+                f"glab api projects/{repo_full_path}: в ответе нет id: "
+                f"{proj_data!r}"
             )
 
-        url = _extract_url(out) or _extract_url(err)
+        # 2. namespace_id.
+        encoded_group = new_group_path.replace("/", "%2F")
+        rc, out, err = run(["glab", "api", f"groups/{encoded_group}"])
+        if rc != 0:
+            raise RuntimeError(
+                f"glab api groups/{new_group_path} failed (rc={rc}): "
+                f"{err.strip() or out.strip()}"
+            )
+        try:
+            group_data = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"glab api groups/{new_group_path} вернул не-JSON: {out!r}"
+            ) from exc
+        namespace_id = group_data.get("id")
+        if not namespace_id:
+            raise RuntimeError(
+                f"glab api groups/{new_group_path}: в ответе нет id: "
+                f"{group_data!r}"
+            )
+
+        # 3. PUT /projects/<id>/transfer.
+        rc, out, err = run([
+            "glab", "api", "--method", "PUT",
+            f"projects/{project_id}/transfer",
+            "--field", f"namespace={namespace_id}",
+        ])
+        if rc != 0:
+            raise RuntimeError(
+                f"glab api PUT projects/{project_id}/transfer "
+                f"failed (rc={rc}): {err.strip() or out.strip()}"
+            )
+        try:
+            transferred = json.loads(out)
+        except json.JSONDecodeError:
+            transferred = {}
+        url = transferred.get("http_url_to_repo")
         if url:
+            if not url.endswith(".git"):
+                url = url + ".git"
             return url.strip()
-        return f"{new_group_path}/{repo_name}"
+        return f"https://gitlab.com/{new_group_path}/{repo_name}.git"
 
     def get_remote_status(self, repo_full_path: str) -> dict[str, Any]:
         """``glab repo view <repo_full_path> -F json`` → распарсенный dict.

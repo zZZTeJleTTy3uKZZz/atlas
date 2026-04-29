@@ -19,6 +19,19 @@ from typer.testing import CliRunner
 # --------------------------------------------------------------------------- #
 
 
+@pytest.fixture(autouse=True)
+def isolated_projects_root(tmp_path, monkeypatch):
+    """Defensive isolation: ATLAS_PROJECTS_ROOT → tmp_path. Если когда-нибудь
+    тест пройдёт `add` без `--no-setup-layout`, junction'ы пойдут в tmp,
+    а не в реальный fs пользователя."""
+    root = tmp_path / "PROJECT"
+    root.mkdir()
+    for sub in ("Clients", "Products", "Tests", "_Inbox", "_Archive", "_storage"):
+        (root / sub).mkdir(exist_ok=True)
+    monkeypatch.setenv("ATLAS_PROJECTS_ROOT", str(root))
+    return root
+
+
 @pytest.fixture()
 def fresh_engine(tmp_path, monkeypatch):
     from atlas.pm.db import make_engine
@@ -78,7 +91,12 @@ def _add_tag(runner, tags_app, *args):
 
 
 def _add_project(runner, projects_app, *args):
-    return runner.invoke(projects_app, ["add", *args])
+    """Tags-тесты не нуждаются в storage/junction/canonical файлах —
+    выключаем их, чтобы тесты не пытались писать в реальный fs."""
+    return runner.invoke(
+        projects_app,
+        ["add", "--no-setup-layout", "--no-canonical", *args],
+    )
 
 
 def _make_tag_set(runner, tags_app):

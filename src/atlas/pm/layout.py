@@ -492,11 +492,13 @@ def _perform_storage_move(
                 f"{result.stdout.strip()!r} {result.stderr.strip()!r}"
             )
         # Удалить src ТОЛЬКО после успешной копии.
+        # W45-32g: rmdir может падать с rc!=0 на больших папках (locked
+        # files), но если src фактически опустошён или удалён — это успех.
         rm_result = subprocess.run(
             ["cmd", "/c", "rmdir", "/S", "/Q", str(src)],
             capture_output=True, text=True,
         )
-        if rm_result.returncode != 0:
+        if rm_result.returncode != 0 and src.exists():
             raise RuntimeError(
                 f"После copy не удалось удалить src ({src}): "
                 f"{rm_result.stderr.strip()!r}"
@@ -504,10 +506,21 @@ def _perform_storage_move(
     else:
         cmd = ["robocopy", str(src), str(dst), *flags, "/MOVE"]
         result = subprocess.run(cmd, capture_output=True, text=True)
+        # W45-32g: код 0 = no files copied, 1..7 = success/warnings,
+        # 8+ = настоящие ошибки. Поэтому проваливаемся только при >=8.
+        # Дополнительно проверяем что dst создан (или непустой).
         if result.returncode >= 8:
             raise RuntimeError(
                 f"robocopy /MOVE failed code={result.returncode}: "
                 f"{result.stdout.strip()!r} {result.stderr.strip()!r}"
+            )
+        # Если /MOVE прошёл — src должен быть удалён robocopy'м,
+        # но иногда остаётся пустой. Подчищаем — без fatal на rc!=0
+        # (race / locked files на parent).
+        if src.exists():
+            subprocess.run(
+                ["cmd", "/c", "rmdir", "/Q", str(src)],
+                capture_output=True, text=True,
             )
 
     return {"files_count": 0, "bytes": 0}

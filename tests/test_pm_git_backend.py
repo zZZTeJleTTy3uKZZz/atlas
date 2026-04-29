@@ -236,15 +236,18 @@ class TestLocalGitOps:
 
 
 class TestGitLabBackend:
-    def test_create_remote_invokes_glab_repo_create(self, fake_runner):
+    def test_create_remote_invokes_glab_api_post_projects(self, fake_runner):
+        """W45-32a: create_remote использует `glab api groups/...` +
+        `glab api -X POST projects` (не `glab repo create` с full path)."""
         from atlas.pm.git_backend import GitLabBackend
 
-        # `glab repo create cifropro1/clients/cifro -p` (private) и
-        # парсит url в выводе.
+        # 1) glab api groups/cifropro1%2Fclients → JSON с id.
+        # 2) glab api -X POST projects → JSON с http_url_to_repo.
         fake_runner["set"](
+            (0, '{"id": 12345, "full_path": "cifropro1/clients"}', ""),
             (
                 0,
-                "https://gitlab.com/cifropro1/clients/cifro\n",
+                '{"id": 67890, "http_url_to_repo": "https://gitlab.com/cifropro1/clients/cifro.git"}',
                 "",
             ),
         )
@@ -253,53 +256,76 @@ class TestGitLabBackend:
         url = backend.create_remote("cifropro1/clients", "cifro", private=True)
 
         assert "cifropro1/clients/cifro" in url
+        assert url.endswith(".git")
         cmds = [c["cmd"] for c in fake_runner["calls"]]
-        # должен звать glab
-        assert any(c[0] == "glab" for c in cmds)
-        # должен быть subcommand 'repo create'
-        assert any("repo" in c and "create" in c for c in cmds)
+        # должен быть glab api groups/...
+        assert any(
+            c[0] == "glab" and c[1] == "api" and c[2].startswith("groups/")
+            for c in cmds
+        )
+        # и POST projects
+        assert any(
+            c[0] == "glab" and "POST" in c and "projects" in c for c in cmds
+        )
 
     def test_create_remote_passes_private_flag(self, fake_runner):
         from atlas.pm.git_backend import GitLabBackend
 
         fake_runner["set"](
-            (0, "https://gitlab.com/cifropro1/clients/cifro\n", ""),
+            (0, '{"id": 1}', ""),
+            (
+                0,
+                '{"http_url_to_repo": "https://gitlab.com/cifropro1/clients/cifro.git"}',
+                "",
+            ),
         )
         backend = GitLabBackend()
         backend.create_remote("cifropro1/clients", "cifro", private=True)
 
-        # Проверим что есть -p или --private в одной из команд.
         flat = [" ".join(c["cmd"]) for c in fake_runner["calls"]]
-        assert any("private" in s.lower() or " -p" in s for s in flat)
+        assert any("visibility=private" in s for s in flat)
 
     def test_create_remote_passes_public_flag(self, fake_runner):
         from atlas.pm.git_backend import GitLabBackend
 
         fake_runner["set"](
-            (0, "https://gitlab.com/cifropro1/clients/cifro\n", ""),
+            (0, '{"id": 1}', ""),
+            (
+                0,
+                '{"http_url_to_repo": "https://gitlab.com/cifropro1/clients/cifro.git"}',
+                "",
+            ),
         )
         backend = GitLabBackend()
         backend.create_remote("cifropro1/clients", "cifro", private=False)
 
         flat = [" ".join(c["cmd"]) for c in fake_runner["calls"]]
-        assert any("public" in s.lower() for s in flat)
+        assert any("visibility=public" in s for s in flat)
 
     def test_create_remote_raises_runtime_on_glab_failure(self, fake_runner):
         from atlas.pm.git_backend import GitLabBackend
 
+        # Первый вызов (groups) валится — это RuntimeError.
         fake_runner["set"]((1, "", "auth failed"))
 
         backend = GitLabBackend()
         with pytest.raises(RuntimeError, match="glab"):
             backend.create_remote("cifropro1/clients", "cifro")
 
-    def test_transfer_to_group_invokes_glab_repo_transfer(self, fake_runner):
+    def test_transfer_to_group_uses_api_put(self, fake_runner):
+        """W45-32j: transfer_to_group использует `glab api PUT
+        /projects/<id>/transfer`, не `glab repo transfer --group`."""
         from atlas.pm.git_backend import GitLabBackend
 
+        # 1) glab api projects/<encoded> → JSON с id проекта.
+        # 2) glab api groups/<encoded> → JSON с namespace id.
+        # 3) glab api -X PUT projects/<id>/transfer → JSON с new URL.
         fake_runner["set"](
+            (0, '{"id": 100, "path_with_namespace": "cifropro1/clients/cifro"}', ""),
+            (0, '{"id": 200, "full_path": "cifropro1/archive/clients"}', ""),
             (
                 0,
-                "https://gitlab.com/cifropro1/archive/clients/cifro\n",
+                '{"http_url_to_repo": "https://gitlab.com/cifropro1/archive/clients/cifro.git"}',
                 "",
             ),
         )
@@ -308,11 +334,13 @@ class TestGitLabBackend:
             "cifropro1/clients/cifro", "cifropro1/archive/clients"
         )
 
-        # Возвращает URL после transfer.
         assert "archive/clients/cifro" in new_url
         cmds = [c["cmd"] for c in fake_runner["calls"]]
-        assert any(c[0] == "glab" for c in cmds)
-        assert any("transfer" in c for c in cmds)
+        # PUT /projects/100/transfer
+        assert any(
+            c[0] == "glab" and "PUT" in c and "/transfer" in " ".join(c)
+            for c in cmds
+        )
 
     def test_get_remote_status_returns_dict(self, fake_runner):
         from atlas.pm.git_backend import GitLabBackend

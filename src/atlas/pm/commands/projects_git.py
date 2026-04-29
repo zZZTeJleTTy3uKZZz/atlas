@@ -137,6 +137,99 @@ def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
 # --------------------------------------------------------------------------- #
 
 
+def perform_git_init(
+    session: Session,
+    project: Project,
+    *,
+    group: Optional[str] = None,
+    private: bool = True,
+    commit_message: str = DEFAULT_COMMIT_MESSAGE,
+    log_action_fn=None,
+) -> dict[str, Any]:
+    """Полная git-init для проекта: local init + GitLab create + push + БД.
+
+    Извлечено из ``init_cmd`` для повторного использования из
+    ``atlas projects add --init-git``. Caller'у возвращается dict с
+    ``{url, group_path, branch}``. Вся error-handling — через
+    ``RuntimeError`` (caller сам конвертит в typer.Exit или своё).
+
+    Все W45-32a/b/j/k фиксы тут унифицированы:
+      - ``GitLabBackend.create_remote`` — через ``glab api POST projects``.
+      - ``LocalGitOps.add_remote`` — idempotent (set-url если remote есть).
+      - ``project.git_remote_url`` И legacy ``git_repo_url`` обновляются
+        синхронно (W45-32k).
+
+    NOTE: caller должен вызвать ``session.commit()`` после возврата.
+    """
+    if not project.local_path:
+        raise RuntimeError(
+            f"Project '{project.slug}': local_path не задан"
+        )
+    local = Path(project.local_path)
+    if not local.exists():
+        raise RuntimeError(
+            f"Project local_path не существует: {local}"
+        )
+    if project.git_remote_url:
+        raise RuntimeError(
+            f"У '{project.slug}' уже есть git_remote_url: "
+            f"{project.git_remote_url}. Используй `link` или `push`."
+        )
+
+    if group is None:
+        pt = session.get(ProjectType, project.type_id)
+        ps = session.get(ProjectStatus, project.status_id)
+        if pt is None or ps is None:
+            raise RuntimeError("Broken data: type_id или status_id не найден")
+        owner_slugs = _project_owner_tags(session, project.id)
+        group_path = derive_group_path(
+            pt.slug, ps.slug, project.archived_group,
+            owner_tags=owner_slugs,
+        )
+    else:
+        group_path = group
+
+    local_ops = LocalGitOps()
+    if not (local / ".git").exists():
+        local_ops.init(local)
+    # ВАЖНО: set_default_branch ДО первого commit, иначе HEAD будет на
+    # `master` и ни одна refspec на `main` не пройдёт push (W45-32n).
+    local_ops.set_default_branch(local, "main")
+    # commit может упасть если staged пуст — это OK для каллера, который
+    # уже создал хотя бы один файл (canonical README).
+    local_ops.add_all_commit(local, commit_message)
+
+    backend = GitLabBackend()
+    url = backend.create_remote(group_path, project.slug, private=private)
+
+    # add_remote теперь idempotent (W45-32b).
+    local_ops.add_remote(local, "origin", url)
+    local_ops.push(local, branch="main")
+
+    now = msk_now()
+    project.git_remote_url = url
+    project.git_repo_url = url  # W45-32k: sync legacy field too
+    project.git_default_branch = "main"
+    project.git_provider = "gitlab"
+    project.git_initialized_at = now
+    project.git_last_pushed_at = now
+    project.last_touched_at = now
+
+    if log_action_fn is not None:
+        log_action_fn(
+            session,
+            action="project_git_initialized",
+            entity_id=project.id,
+            details={
+                "url": url,
+                "group": group_path,
+                "private": private,
+            },
+        )
+
+    return {"url": url, "group_path": group_path, "branch": "main"}
+
+
 @git_app.command("init")
 def init_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix проекта"),
@@ -159,100 +252,23 @@ def init_cmd(
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         project = _resolve_project_or_die(session, ref)
-
-        if not project.local_path:
-            console.print(
-                f"[red]Project '{project.slug}': local_path не задан. "
-                f"Установи через `atlas projects update --local-path ...`.[/red]"
-            )
-            raise typer.Exit(code=1)
-
-        local = Path(project.local_path)
-        if not local.exists():
-            console.print(
-                f"[red]Project local_path not found: {local}.[/red]"
-            )
-            raise typer.Exit(code=1)
-
-        if project.git_remote_url:
-            console.print(
-                f"[red]У проекта '{project.slug}' уже есть git_remote_url: "
-                f"{project.git_remote_url}. Используй `link` или `push`, "
-                f"не `init`.[/red]"
-            )
-            raise typer.Exit(code=1)
-
-        # ----- group_path -----
-        if group is None:
-            pt = session.get(ProjectType, project.type_id)
-            ps = session.get(ProjectStatus, project.status_id)
-            if pt is None or ps is None:
-                console.print("[red]Broken data: type_id или status_id не найден.[/red]")
-                raise typer.Exit(code=1)
-            owner_slugs = _project_owner_tags(session, project.id)
-            try:
-                group_path = derive_group_path(
-                    pt.slug, ps.slug, project.archived_group,
-                    owner_tags=owner_slugs,
-                )
-            except ValueError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
-        else:
-            group_path = group
-
-        # ----- local git ops -----
-        local_ops = LocalGitOps()
         try:
-            if not (local / ".git").exists():
-                local_ops.init(local)
-            local_ops.add_all_commit(local, commit_message)
-            local_ops.set_default_branch(local, "main")
+            result = perform_git_init(
+                session, project,
+                group=group,
+                private=private,
+                commit_message=commit_message,
+                log_action_fn=_log_action,
+            )
         except RuntimeError as exc:
-            console.print(f"[red]Local git init failed: {exc}[/red]")
+            console.print(f"[red]{exc}[/red]")
             raise typer.Exit(code=1)
-
-        # ----- create remote -----
-        backend = GitLabBackend()
-        try:
-            url = backend.create_remote(group_path, project.slug, private=private)
-        except RuntimeError as exc:
-            console.print(f"[red]GitLab create_remote failed: {exc}[/red]")
-            raise typer.Exit(code=1)
-
-        # ----- add remote + push -----
-        try:
-            local_ops.add_remote(local, "origin", url)
-            local_ops.push(local, branch="main")
-        except RuntimeError as exc:
-            console.print(f"[red]Push failed: {exc}[/red]")
-            raise typer.Exit(code=1)
-
-        # ----- update DB -----
-        now = msk_now()
-        project.git_remote_url = url
-        project.git_default_branch = "main"
-        project.git_provider = "gitlab"
-        project.git_initialized_at = now
-        project.git_last_pushed_at = now
-        project.last_touched_at = now
-
-        _log_action(
-            session,
-            action="project_git_initialized",
-            entity_id=project.id,
-            details={
-                "url": url,
-                "group": group_path,
-                "private": private,
-            },
-        )
         session.commit()
 
     console.print(f"[green]✓ Git initialized for '{project.slug}'[/green]")
-    console.print(f"  URL:     {url}")
-    console.print(f"  Branch:  main")
-    console.print(f"  Group:   {group_path}")
+    console.print(f"  URL:     {result['url']}")
+    console.print(f"  Branch:  {result['branch']}")
+    console.print(f"  Group:   {result['group_path']}")
 
 
 # --------------------------------------------------------------------------- #

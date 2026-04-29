@@ -50,6 +50,12 @@ from atlas.pm.models import (
     ProjectType,
     Tag,
 )
+from atlas.pm.junctions import is_junction, remove_junction
+from atlas.pm.layout import (
+    _perform_storage_move,
+    get_logical_path,
+    get_storage_path,
+)
 from atlas.pm.paths import (
     archive_path,
     expected_project_path,
@@ -216,6 +222,234 @@ def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
     return resolved
 
 
+CANONICAL_README_TEMPLATE = """\
+# {name}
+
+> {one_line}
+
+## Статус
+
+- **Type**: `{type_slug}`
+- **Status**: `{status_slug}`
+- **Priority**: {priority}
+- **Slug**: `{slug}`
+- **Prefix**: `{prefix}`
+- **Tags**: {tags_str}
+- Создан: {created_date}
+
+## Atlas
+
+Карточка проекта в Atlas-БД (NP-005):
+
+```sh
+atlas projects get {slug}
+```
+
+Физический layout:
+
+- Storage: `_storage/{slug}/`
+- Junction: `{logical_rel}` → `_storage/{slug}`
+
+## TODO (placeholder)
+
+- [ ] Заполнить README реальным контентом проекта.
+- [ ] Подключить GitLab-репозиторий (если ещё нет): `atlas projects git init {slug}`.
+"""
+
+CANONICAL_AGENTS_TEMPLATE = """\
+# AGENTS.md — {name}
+
+> Контекст для AI-ассистентов (Claude Code, ChatGPT, Cursor и т.п.), работающих
+> над этим проектом.
+
+## Что это
+
+{one_line}
+
+## Atlas
+
+Проект зарегистрирован в Atlas-БД (NP-005). Карточка:
+
+```sh
+atlas projects get {slug}
+```
+
+Любые изменения метаданных (приоритет, статус, теги) — через atlas CLI:
+
+- `atlas projects update {slug} --priority P0` — поменять приоритет
+- `atlas add-tags {slug} -t domain:<slug>` — добавить тег
+- `atlas projects move {slug} --to-type <type>` — конвертировать тип
+
+## Тип / Статус (на момент создания)
+
+- type=`{type_slug}`, status=`{status_slug}`, priority=`{priority}`
+
+## Правила работы
+
+- Все исходные тексты, документы, код проекта — в этом репо.
+- Чувствительные данные (`.env`, токены, ключи) — игнорируются `.gitignore`.
+- AI-ассистенту разрешено: читать, генерировать, редактировать в этом репо.
+
+## Канонические команды
+
+- `atlas projects get {slug}` — карточка проекта
+- `atlas pm-tasks list --project {slug}` — задачи проекта (когда W7
+  волна будет реализована)
+"""
+
+CANONICAL_GITIGNORE_TEMPLATE = """\
+# === atlas universal gitignore ===
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sensitive
+.env
+.env.local
+*.key
+*.pem
+secrets/
+private/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / JS
+node_modules/
+.next/
+dist/
+build/
+
+# Temporary / large
+*.log
+*.tmp
+nul
+NUL
+*.zip
+*.rar
+*.7z
+
+# Media (selectively unignore via !path/*.ext if needed for fixtures)
+*.mp4
+*.mov
+*.avi
+*.mkv
+"""
+
+
+def _create_canonical_files(
+    local_path: Path,
+    *,
+    project: Project,
+    type_slug: str,
+    status_slug: str,
+    tag_slugs: list[str],
+    logical_rel: str,
+) -> list[str]:
+    """Создать README.md / AGENTS.md / .gitignore если их нет.
+
+    Возвращает список созданных файлов (для логирования).
+    """
+    created: list[str] = []
+    common = {
+        "name": project.name,
+        "slug": project.slug,
+        "prefix": project.prefix or "",
+        "priority": project.priority,
+        "type_slug": type_slug,
+        "status_slug": status_slug,
+        "one_line": project.one_line_summary or "(заполнить one-line)",
+        "tags_str": ", ".join(f"`{t}`" for t in tag_slugs) if tag_slugs else "—",
+        "created_date": datetime.now().strftime("%Y-%m-%d"),
+        "logical_rel": logical_rel,
+    }
+    targets = [
+        ("README.md", CANONICAL_README_TEMPLATE),
+        ("AGENTS.md", CANONICAL_AGENTS_TEMPLATE),
+        (".gitignore", CANONICAL_GITIGNORE_TEMPLATE),
+    ]
+    for filename, template in targets:
+        path = local_path / filename
+        if path.exists():
+            continue
+        path.write_text(template.format(**common), encoding="utf-8")
+        created.append(filename)
+    return created
+
+
+def _setup_storage_and_junction(
+    slug: str,
+    type_slug: str,
+    *,
+    archived: bool = False,
+    archived_group: Optional[str] = None,
+) -> tuple[Path, Path, bool]:
+    """Создать `_storage/<slug>/` и junction в logical, если нужно.
+
+    Возвращает ``(logical_path, storage_path, junction_created)``.
+
+    NOTE: Если logical уже существует и НЕ junction — оставляем как есть
+    (логика migrate-to-storage обработает позднее, через `atlas projects
+    layout init`).
+    """
+    from atlas.pm.layout import (
+        get_logical_path,
+        get_storage_path,
+    )
+
+    root = get_projects_root()
+    storage = get_storage_path(slug, root=root)
+    storage.mkdir(parents=True, exist_ok=True)
+
+    fake_proj = type(
+        "P",
+        (),
+        {
+            "slug": slug,
+            "type_slug": type_slug,
+            "archived": archived,
+            "archived_group": archived_group,
+        },
+    )()
+    logical = get_logical_path(fake_proj, root=root)
+
+    junction_created = False
+    if logical.resolve() != storage.resolve():
+        if not logical.exists():
+            from atlas.pm.junctions import create_junction
+
+            logical.parent.mkdir(parents=True, exist_ok=True)
+            create_junction(logical, storage)
+            junction_created = True
+        elif is_junction(logical):
+            current = None
+            try:
+                from atlas.pm.junctions import junction_target
+
+                current = junction_target(logical)
+            except Exception:
+                pass
+            if current is None or current.resolve() != storage.resolve():
+                remove_junction(logical)
+                from atlas.pm.junctions import create_junction
+
+                create_junction(logical, storage)
+                junction_created = True
+
+    return logical, storage, junction_created
+
+
 def _generate_unique_prefix(
     session: Session,
     base: str,
@@ -319,13 +553,50 @@ def add_cmd(
     one_line: Optional[str] = typer.Option(None, "--one-line", help="Краткое описание (1 строка)"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="ISO-дата YYYY-MM-DD"),
     git_repo_url: Optional[str] = typer.Option(None, "--git-repo-url"),
-    local_path: Optional[str] = typer.Option(None, "--local-path"),
+    local_path: Optional[str] = typer.Option(
+        None, "--local-path",
+        help=(
+            "Путь к проекту. Если относительный — резолвится через "
+            "ATLAS_PROJECTS_ROOT. Если не задан — auto-derive по type+slug."
+        ),
+    ),
     tags: Optional[list[str]] = typer.Option(
         None, "--tag", "-t",
         help="Тег: 'slug', 'category:slug' или UUID. Можно несколько раз.",
     ),
+    setup_layout: bool = typer.Option(
+        True, "--setup-layout/--no-setup-layout",
+        help="Создать `_storage/<slug>/` + junction в logical (Products/Tests/...).",
+    ),
+    canonical: bool = typer.Option(
+        True, "--canonical/--no-canonical",
+        help="Создать README.md / AGENTS.md / .gitignore по канону (если их ещё нет).",
+    ),
+    init_git: bool = typer.Option(
+        False, "--init-git/--no-init-git",
+        help="После create — git init + GitLab repo + push (одна команда).",
+    ),
+    private: bool = typer.Option(
+        True, "--private/--public",
+        help="(только при --init-git) видимость GitLab репо.",
+    ),
+    group: Optional[str] = typer.Option(
+        None, "--group",
+        help="(только при --init-git) GitLab group path. Если опущен — derive по type/owner.",
+    ),
+    commit_message: Optional[str] = typer.Option(
+        None, "--commit-message",
+        help="(только при --init-git) сообщение initial коммита.",
+    ),
 ) -> None:
-    """Создать новый проект в портфеле."""
+    """Создать новый проект в портфеле.
+
+    Канонический порядок (defaults):
+      1. add в БД (всегда).
+      2. --setup-layout → `_storage/<slug>/` + junction в Products/Tests/...
+      3. --canonical    → README.md / AGENTS.md / .gitignore (если нет).
+      4. --init-git     → git init + GitLab create + push (опционально).
+    """
     _validate_priority(priority)
 
     deadline_dt: Optional[datetime] = None
@@ -411,6 +682,31 @@ def add_cmd(
                 raise typer.Exit(code=1)
             prefix_auto = True
 
+        # ----- resolve local_path (W45-32m: relative→absolute, auto-derive) -----
+        from atlas.pm.layout import get_logical_path
+        root = get_projects_root()
+        if local_path:
+            lp = Path(local_path)
+            if not lp.is_absolute():
+                lp = (root / lp).resolve()
+            resolved_local_path = str(lp)
+        else:
+            fake_proj = type(
+                "P",
+                (),
+                {
+                    "slug": final_slug,
+                    "type_slug": type_slug,
+                    "archived": False,
+                    "archived_group": None,
+                },
+            )()
+            try:
+                logical = get_logical_path(fake_proj, root=root)
+                resolved_local_path = str(logical)
+            except Exception:
+                resolved_local_path = None
+
         # ----- create -----
         project = Project(
             slug=final_slug,
@@ -423,7 +719,7 @@ def add_cmd(
             one_line_summary=one_line or "",
             estimated_deadline=deadline_dt,
             git_repo_url=git_repo_url,
-            local_path=local_path,
+            local_path=resolved_local_path,
         )
         session.add(project)
         session.flush()  # получить project.id
@@ -465,6 +761,85 @@ def add_cmd(
         console.print(f"  Prefix:   {final_prefix}")
         console.print(f"  Priority: {priority}")
         console.print(f"  Status:   {status_slug}")
+        if resolved_local_path:
+            console.print(f"  Path:     {resolved_local_path}")
+
+        # ----- setup_layout: _storage + junction -----
+        if setup_layout:
+            try:
+                _, storage_path, junction_created = _setup_storage_and_junction(
+                    final_slug, type_slug,
+                )
+                console.print(f"  Storage:  {storage_path}")
+                if junction_created:
+                    console.print(
+                        f"  Junction: {resolved_local_path} → {storage_path}"
+                    )
+            except Exception as exc:
+                console.print(
+                    f"  [yellow]⚠ setup_layout failed: {exc}[/yellow]"
+                )
+
+        # ----- canonical files -----
+        if canonical and resolved_local_path:
+            try:
+                local_p = Path(resolved_local_path)
+                local_p.mkdir(parents=True, exist_ok=True)
+                logical_rel = (
+                    str(local_p.relative_to(root))
+                    if str(local_p).startswith(str(root))
+                    else str(local_p)
+                )
+                created_files = _create_canonical_files(
+                    local_p,
+                    project=project,
+                    type_slug=type_slug,
+                    status_slug=status_slug,
+                    tag_slugs=tag_slugs_for_log,
+                    logical_rel=logical_rel,
+                )
+                if created_files:
+                    console.print(
+                        f"  Files:    {', '.join(created_files)}"
+                    )
+            except Exception as exc:
+                console.print(
+                    f"  [yellow]⚠ canonical files failed: {exc}[/yellow]"
+                )
+
+        # ----- init_git -----
+        if init_git:
+            from atlas.pm.commands.projects_git import (
+                DEFAULT_COMMIT_MESSAGE,
+                perform_git_init,
+            )
+
+            msg = commit_message or DEFAULT_COMMIT_MESSAGE
+            try:
+                # Перезагрузим project т.к. session был commit'ed.
+                project_for_git = session.execute(
+                    select(Project).where(Project.id == project.id)
+                ).scalar_one()
+                result = perform_git_init(
+                    session, project_for_git,
+                    group=group,
+                    private=private,
+                    commit_message=msg,
+                    log_action_fn=_log_action,
+                )
+                session.commit()
+                console.print(
+                    f"  [green]✓ Git initialized[/green]"
+                )
+                console.print(f"    URL:    {result['url']}")
+                console.print(f"    Branch: {result['branch']}")
+                console.print(f"    Group:  {result['group_path']}")
+            except RuntimeError as exc:
+                console.print(f"  [red]✗ Git init failed: {exc}[/red]")
+                console.print(
+                    f"  [dim]Проект создан в БД и канонизирован, но без git. "
+                    f"Можно повторить позже: `atlas projects git init {final_slug}`.[/dim]"
+                )
 
 
 # --------------------------------------------------------------------------- #
@@ -696,7 +1071,14 @@ def update_cmd(
     description: Optional[str] = typer.Option(None, "--description"),
     one_line: Optional[str] = typer.Option(None, "--one-line"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="YYYY-MM-DD"),
-    git_repo_url: Optional[str] = typer.Option(None, "--git-repo-url"),
+    git_repo_url: Optional[str] = typer.Option(
+        None, "--git-repo-url",
+        help="Legacy alias для --git-remote-url (W45-32k: синхронизирует оба поля).",
+    ),
+    git_remote_url: Optional[str] = typer.Option(
+        None, "--git-remote-url",
+        help="URL git remote (новое поле git_remote_url). Синхронизирует и legacy git_repo_url.",
+    ),
     local_path: Optional[str] = typer.Option(None, "--local-path"),
     prefix: Optional[str] = typer.Option(None, "--prefix"),
     slug: Optional[str] = typer.Option(
@@ -754,8 +1136,21 @@ def update_cmd(
         _maybe_update("description", description)
         _maybe_update("one_line_summary", one_line)
         _maybe_update("estimated_deadline", deadline_dt)
-        _maybe_update("git_repo_url", git_repo_url)
-        _maybe_update("local_path", local_path)
+
+        # W45-32c+k: --git-remote-url и legacy --git-repo-url
+        # синхронизируются. Любой из них обновляет ОБА поля БД.
+        unified_git_url = git_remote_url or git_repo_url
+        if unified_git_url is not None:
+            _maybe_update("git_remote_url", unified_git_url)
+            _maybe_update("git_repo_url", unified_git_url)
+
+        # W45-32m: --local-path принимает относительный → resolve через
+        # ATLAS_PROJECTS_ROOT (или ~/Documents/PROJECT).
+        if local_path is not None:
+            lp = Path(local_path)
+            if not lp.is_absolute():
+                lp = (get_projects_root() / lp).resolve()
+            _maybe_update("local_path", str(lp))
 
         if status_slug is not None:
             ps = session.execute(
@@ -812,15 +1207,139 @@ def update_cmd(
 # --------------------------------------------------------------------------- #
 
 
+OLD_BACKUPS_DIR_NAME = "_old_git_backups"
+
+
+def _gitlab_full_path_from_remote_url(remote_url: str) -> Optional[str]:
+    """Извлечь `namespace/project` из git_remote_url GitLab-репозитория.
+
+    `https://gitlab.com/<full_path>.git` → `<full_path>`.
+    Возвращает None, если URL не похож на GitLab.
+    """
+    if not remote_url:
+        return None
+    m = re.match(r"^https?://[^/]+/(?P<full>.+?)(?:\.git)?$", remote_url.strip())
+    if not m:
+        return None
+    return m.group("full")
+
+
+def _hard_delete_physical(
+    *,
+    slug: str,
+    logical: Path,
+    storage: Path,
+    root: Path,
+) -> dict[str, Any]:
+    """Удалить junction и переместить `_storage/<slug>/` в `_old_git_backups/`.
+
+    Возвращает отчёт: ``{"junction_removed": bool, "storage_backup": Optional[Path]}``.
+
+    SAFETY:
+      - junction удаляется только если это действительно junction (через
+        ``remove_junction``, который сам проверяет).
+      - storage НЕ удаляется немедленно — переносится в `_old_git_backups/<slug>-deleted-YYYY-MM-DD/`.
+        Очистку этой папки пользователь делает вручную (или периодически).
+    """
+    report: dict[str, Any] = {
+        "junction_removed": False,
+        "storage_backup": None,
+    }
+
+    if logical.exists():
+        try:
+            if is_junction(logical):
+                remove_junction(logical)
+                report["junction_removed"] = True
+            else:
+                console.print(
+                    f"  [yellow]⚠ {logical} существует, но это не junction "
+                    f"(реальная папка). Пропуск — снимите вручную.[/yellow]"
+                )
+        except Exception as exc:  # pragma: no cover — defensive
+            console.print(f"  [yellow]⚠ junction snimka failed: {exc}[/yellow]")
+
+    if storage.exists():
+        backups_root = root / OLD_BACKUPS_DIR_NAME
+        backups_root.mkdir(parents=True, exist_ok=True)
+        date_tag = datetime.now().strftime("%Y-%m-%d")
+        backup = backups_root / f"{slug}-deleted-{date_tag}"
+        suffix = 1
+        while backup.exists():
+            suffix += 1
+            backup = backups_root / f"{slug}-deleted-{date_tag}-{suffix}"
+        try:
+            _perform_storage_move(storage, backup, copy_first=False)
+            report["storage_backup"] = backup
+        except Exception as exc:
+            console.print(
+                f"  [red]✗ Не удалось перенести {storage} → {backup}: {exc}[/red]"
+            )
+            console.print(
+                f"  [dim]Storage оставлен на месте. Уберите вручную "
+                f"если нужно.[/dim]"
+            )
+
+    return report
+
+
+def _hard_delete_gitlab(full_path: str) -> bool:
+    """Удалить GitLab-репозиторий через `glab repo delete`.
+
+    Возвращает True если удалось (или GitLab вернул 202 Accepted).
+    """
+    try:
+        result = subprocess.run(
+            ["glab", "repo", "delete", full_path, "--yes"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        console.print(f"  [red]✗ glab call failed: {exc}[/red]")
+        return False
+    if result.returncode != 0:
+        console.print(
+            f"  [red]✗ glab repo delete вернул {result.returncode}: "
+            f"{result.stderr.strip()!r}[/red]"
+        )
+        return False
+    out = (result.stdout or "").strip()
+    if out:
+        console.print(f"  [dim]glab: {out}[/dim]")
+    return True
+
+
 @projects_app.command("delete")
 def delete_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     hard: bool = typer.Option(
         False, "--hard",
-        help="Физически удалить (ломает FK у tasks). По умолчанию — soft archive.",
+        help=(
+            "Удалить полностью: запись из БД + junction + перенос "
+            "_storage/<slug>/ в _old_git_backups/. По умолчанию — soft archive."
+        ),
+    ),
+    keep_files: bool = typer.Option(
+        False, "--keep-files",
+        help=(
+            "(только с --hard) Удалить только запись из БД, оставить "
+            "_storage/<slug>/ и junction нетронутыми. Legacy-поведение."
+        ),
+    ),
+    with_gitlab: bool = typer.Option(
+        False, "--with-gitlab",
+        help=(
+            "(только с --hard) Дополнительно удалить GitLab-репозиторий "
+            "через `glab repo delete`. Требует второго подтверждения."
+        ),
     ),
 ) -> None:
-    """Удалить проект (soft по умолчанию: archived_at, статус не меняется)."""
+    """Удалить проект (soft по умолчанию: archived_at, статус не меняется).
+
+    Режимы --hard:
+      • без флагов            — БД + junction + физика → _old_git_backups/.
+      • --hard --keep-files   — только БД (legacy, junction и физика остаются).
+      • --hard --with-gitlab  — БД + физика + GitLab repo (с подтверждением).
+    """
     url = _db_url()
     engine = make_engine(url)
 
@@ -846,17 +1365,106 @@ def delete_cmd(
                 console.print("[yellow]Отменено.[/yellow]")
                 raise typer.Exit(code=1)
 
+            # Snapshot нужных полей до session.delete: после удаления
+            # detached object потеряет доступ к атрибутам.
+            pt = session.get(ProjectType, project.type_id)
+            type_slug = pt.slug if pt is not None else None
+            archived_flag = project.archived_at is not None
+            archived_group = getattr(project, "archived_group", None)
+            git_remote_url = getattr(project, "git_remote_url", None) or getattr(
+                project, "git_repo_url", None
+            )
+
+            root = get_projects_root()
+            storage = get_storage_path(slug_for_msg, root=root)
+            try:
+                logical = get_logical_path(
+                    type(
+                        "P",
+                        (),
+                        {
+                            "slug": slug_for_msg,
+                            "type_slug": type_slug,
+                            "archived": archived_flag,
+                            "archived_group": archived_group,
+                        },
+                    )(),
+                    root=root,
+                )
+            except Exception:
+                logical = None
+
             _log_action(
                 session,
                 action="project_hard_deleted",
                 entity_id=project_id,
-                details={"slug": slug_for_msg},
+                details={
+                    "slug": slug_for_msg,
+                    "keep_files": keep_files,
+                    "with_gitlab": with_gitlab,
+                },
             )
             session.delete(project)
             session.commit()
             console.print(
-                f"[red]✗ Project '{slug_for_msg}' физически удалён.[/red]"
+                f"[red]✗ Project '{slug_for_msg}' удалён из БД.[/red]"
             )
+
+            if not keep_files:
+                if logical is not None:
+                    report = _hard_delete_physical(
+                        slug=slug_for_msg,
+                        logical=logical,
+                        storage=storage,
+                        root=root,
+                    )
+                    if report["junction_removed"]:
+                        console.print(f"  [green]✓ junction snят: {logical}[/green]")
+                    if report["storage_backup"]:
+                        console.print(
+                            f"  [green]✓ storage перенесён: "
+                            f"{report['storage_backup']}[/green]"
+                        )
+                    if (
+                        not report["junction_removed"]
+                        and report["storage_backup"] is None
+                    ):
+                        console.print(
+                            "  [dim](ни junction, ни _storage/ не найдены — "
+                            "ничего физически не было)[/dim]"
+                        )
+                else:
+                    console.print(
+                        "  [yellow]⚠ logical_path не вычислился — "
+                        "физика не тронута[/yellow]"
+                    )
+            else:
+                console.print(
+                    "  [dim](--keep-files: junction и _storage/ оставлены)[/dim]"
+                )
+
+            if with_gitlab:
+                full_path = _gitlab_full_path_from_remote_url(git_remote_url or "")
+                if not full_path:
+                    console.print(
+                        "  [yellow]⚠ git_remote_url отсутствует — "
+                        "GitLab repo не удаляется[/yellow]"
+                    )
+                else:
+                    confirmed_gl = typer.confirm(
+                        f"Удалить GitLab-репозиторий '{full_path}'? "
+                        "Это destructive (~7 дней grace period)."
+                    )
+                    if confirmed_gl:
+                        if _hard_delete_gitlab(full_path):
+                            console.print(
+                                f"  [green]✓ GitLab repo '{full_path}' "
+                                f"queued for deletion[/green]"
+                            )
+                    else:
+                        console.print(
+                            "  [yellow]GitLab repo оставлен (отменено)[/yellow]"
+                        )
             return
 
         if project.archived_at is not None:
@@ -1075,21 +1683,62 @@ def archive_cmd(
 
         if not keep_path and project.local_path:
             src = Path(project.local_path)
-            dst = archive_path(root, group, project.slug)
-            try:
-                moved = _move_folder(src, dst)
-            except FileExistsError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
-            if moved:
+
+            # W45-32e: junction-aware archive. Если src — junction (на
+            # `_storage/<slug>/` или другой target), не двигаем физику
+            # (storage остаётся на месте), а пересоздаём junction в
+            # `_Archive/<group>/<slug>/`. Это безопаснее `shutil.move` для
+            # symlink/junction на Windows.
+            if src.exists() and is_junction(src):
+                from atlas.pm.junctions import create_junction, junction_target as _jt
+
+                target = None
+                try:
+                    target = _jt(src)
+                except Exception:
+                    pass
+                dst = archive_path(root, group, project.slug)
+                if dst.exists():
+                    console.print(
+                        f"[red]Target уже существует: {dst}.[/red]"
+                    )
+                    raise typer.Exit(code=1)
+                try:
+                    remove_junction(src)
+                except Exception as exc:
+                    console.print(
+                        f"[red]Не удалось снять junction {src}: {exc}[/red]"
+                    )
+                    raise typer.Exit(code=1)
+                if target is not None:
+                    try:
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        create_junction(dst, target)
+                    except Exception as exc:
+                        console.print(
+                            f"[red]Не удалось создать junction "
+                            f"{dst} → {target}: {exc}[/red]"
+                        )
+                        raise typer.Exit(code=1)
                 moved_from = str(src)
                 moved_to = str(dst)
                 project.local_path = str(dst)
             else:
-                warning = (
-                    f"Source path '{src}' не существует — продолжаю с БД update."
-                )
-                console.print(f"[yellow]⚠ {warning}[/yellow]")
+                dst = archive_path(root, group, project.slug)
+                try:
+                    moved = _move_folder(src, dst)
+                except FileExistsError as exc:
+                    console.print(f"[red]{exc}[/red]")
+                    raise typer.Exit(code=1)
+                if moved:
+                    moved_from = str(src)
+                    moved_to = str(dst)
+                    project.local_path = str(dst)
+                else:
+                    warning = (
+                        f"Source path '{src}' не существует — продолжаю с БД update."
+                    )
+                    console.print(f"[yellow]⚠ {warning}[/yellow]")
 
         # БД-обновления.
         now = msk_now()

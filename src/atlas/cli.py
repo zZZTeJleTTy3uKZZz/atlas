@@ -35,6 +35,8 @@ from .pm.commands.statuses import app as pm_statuses_app
 from .pm.commands.action_log import app as pm_action_log_app
 from .pm.commands.tags import app as pm_tags_app
 from .pm.commands.backup import backup_app as pm_backup_app
+from .pm.commands.ideas import ideas_app as pm_ideas_app
+from .pm.commands.inbox import inbox_app as pm_inbox_app
 
 app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.")
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
@@ -51,6 +53,8 @@ app.add_typer(pm_statuses_app, name="statuses")  # PM-Project Statuses (NP-005)
 app.add_typer(pm_action_log_app, name="action-log")  # PM-Action Log (NP-005)
 app.add_typer(pm_tags_app, name="tags")  # PM-Tags (NP-005)
 app.add_typer(pm_backup_app, name="backup")  # PM-Backup engine (NP-005)
+app.add_typer(pm_ideas_app, name="ideas")  # PM-Ideas (W45-38, entity_kind=idea)
+app.add_typer(pm_inbox_app, name="inbox")  # PM-Inbox (W45-38, entity_kind=inbox)
 
 console = Console()
 

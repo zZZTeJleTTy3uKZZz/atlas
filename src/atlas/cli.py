@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 import typer
+from clikit import build_root_app
 from rich.console import Console
 from rich.table import Table
 
@@ -38,7 +39,11 @@ from .pm.commands.backup import backup_app as pm_backup_app
 from .pm.commands.ideas import ideas_app as pm_ideas_app
 from .pm.commands.inbox import inbox_app as pm_inbox_app
 
-app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.")
+app = build_root_app(
+    "atlas",
+    version="0.1.0",
+    help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.",
+)
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
 notion_projects_app = typer.Typer(no_args_is_help=True, help="Проекты/клиенты (Notion).")
 files_app = typer.Typer(no_args_is_help=True, help="Файлы клиентов (Notion).")

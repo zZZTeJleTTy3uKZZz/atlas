@@ -251,6 +251,7 @@ class Task(Base):
     story_points: Mapped[Optional[int]] = mapped_column(Integer)
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     notion_page_id: Mapped[Optional[str]] = mapped_column(String(100))
+    backend_id: Mapped[Optional[str]] = mapped_column(String(36))
     git_branch: Mapped[Optional[str]] = mapped_column(String(200))
     git_pr_url: Mapped[Optional[str]] = mapped_column(String(500))
     superpowers_spec_path: Mapped[Optional[str]] = mapped_column(String(500))
@@ -486,4 +487,46 @@ class TaskMember(Base):
         CheckConstraint(
             "role IN ('responsible','executor','watcher')", name="ck_task_members_role"
         ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# F3b: sync-инфра — outbox + курсор pull                                       #
+# --------------------------------------------------------------------------- #
+
+
+class Outbox(Base):
+    """Очередь исходящих операций (локальное изменение → событие на хаб)."""
+
+    __tablename__ = "outbox"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    op: Mapped[str] = mapped_column(String(20), nullable=False)
+    entity_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+
+    __table_args__ = (
+        CheckConstraint("op IN ('create','update','delete')", name="ck_outbox_op"),
+        CheckConstraint(
+            "status IN ('pending','sent','failed')", name="ck_outbox_status"
+        ),
+        Index("idx_outbox_status", "status"),
+    )
+
+
+class SyncCursor(Base):
+    """Курсор pull-канала (ISO occurred_at последнего применённого события)."""
+
+    __tablename__ = "sync_cursors"
+
+    channel: Mapped[str] = mapped_column(String(50), primary_key=True)
+    cursor: Mapped[Optional[str]] = mapped_column(String(40))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=msk_now, onupdate=msk_now, nullable=False
     )

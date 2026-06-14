@@ -27,6 +27,7 @@ def test_upgrade_head_then_downgrade_base(tmp_path):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"sync_policies", "counterparties"} <= names
     assert {"epics", "checklist_items", "task_members"} <= names
+    assert {"outbox", "sync_cursors"} <= names
     n = conn.execute("SELECT COUNT(*) FROM sync_policies").fetchone()[0]
     assert n == 4
     conn.close()

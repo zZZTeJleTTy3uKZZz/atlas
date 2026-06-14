@@ -44,6 +44,7 @@ from atlas.pm.slugs import (
     resolve_task_ref,
     slugify_text,
 )
+from atlas.pm.sync import outbox as _outbox
 
 pm_tasks_app = typer.Typer(
     no_args_is_help=True,
@@ -313,6 +314,15 @@ def add_cmd(
                 "assignee": assignee,
             },
         )
+        # F3c: поставить в outbox для синка наружу (если политика проекта разрешает)
+        try:
+            _portal_id = "atlas-local"
+            _outbox.enqueue(
+                session, "create", "task", task, project=proj, portal_id=_portal_id,
+            )
+        except Exception:
+            # синк — best-effort; падение enqueue не должно срывать создание задачи
+            pass
         session.commit()
 
         if slug_auto:

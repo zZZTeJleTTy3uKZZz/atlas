@@ -239,6 +239,7 @@ class Task(Base):
         String(36), ForeignKey("projects.id"), nullable=False
     )
     sprint_id: Mapped[Optional[str]] = mapped_column(String(36))  # FK добавим в Sprint 1
+    epic_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("epics.id"))
     assignee_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("participants.id")
     )
@@ -416,5 +417,73 @@ class Counterparty(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('person','company')", name="ck_counterparties_kind"
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# F3b: иерархия Epic → Task → ChecklistItem + TaskMember                       #
+# --------------------------------------------------------------------------- #
+
+
+class Epic(Base):
+    """Эпик = спринт (крупная веха, опц. даты). Уровень, синкаемый наружу."""
+
+    __tablename__ = "epics"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    slug: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    goal: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
+    starts_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    backend_id: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+    )
+
+    __table_args__ = (Index("idx_epics_project", "project_id"),)
+
+
+class ChecklistItem(Base):
+    """Чек-лист задачи (шаги ИИ-агента). По умолчанию локален."""
+
+    __tablename__ = "checklist_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    is_done: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    backend_id: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+
+    __table_args__ = (Index("idx_checklist_task", "task_id"),)
+
+
+class TaskMember(Base):
+    """Участник задачи с ролью (расширение одиночного assignee_id)."""
+
+    __tablename__ = "task_members"
+
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    participant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("participants.id"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(String(20), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('responsible','executor','watcher')", name="ck_task_members_role"
         ),
     )

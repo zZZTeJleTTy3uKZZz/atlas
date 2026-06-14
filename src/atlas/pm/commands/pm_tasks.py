@@ -665,6 +665,13 @@ def update_cmd(
             entity_id=task.id,
             details=diffs,
         )
+        # F3e: enqueue update в outbox (best-effort)
+        try:
+            _proj = session.get(Project, task.project_id)
+            if _proj is not None:
+                _outbox.enqueue(session, "update", "task", task, project=_proj, portal_id="atlas-local")
+        except Exception:
+            pass
         session.commit()
 
         console.print(
@@ -748,6 +755,13 @@ def delete_cmd(
                 "at": task.archived_at.isoformat(),
             },
         )
+        # F3e: enqueue delete в outbox (best-effort)
+        try:
+            _proj = session.get(Project, task.project_id)
+            if _proj is not None:
+                _outbox.enqueue(session, "delete", "task", task, project=_proj, portal_id="atlas-local")
+        except Exception:
+            pass
         session.commit()
         console.print(
             f"[green]✓ Task #{number_for_msg} archived[/green]"

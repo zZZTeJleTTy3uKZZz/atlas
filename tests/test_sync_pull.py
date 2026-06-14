@@ -72,3 +72,12 @@ async def test_pull_passes_since_from_cursor(session):
     await pull.pull_once(session, client, channel="atlas", timeout=2.0)
     assert client.calls[0]["since"] == "2026-06-14T09:00:00"
     assert client.calls[0]["timeout"] == 2.0
+
+
+def test_sync_pull_and_watch_in_cli_help():
+    from typer.testing import CliRunner
+    from atlas.cli import app
+    result = CliRunner().invoke(app, ["sync", "--help"])
+    assert result.exit_code == 0
+    assert "pull" in result.stdout
+    assert "watch" in result.stdout

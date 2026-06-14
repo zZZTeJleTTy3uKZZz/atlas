@@ -273,17 +273,24 @@ def test_007_check_constraint_rejects_invalid_kind(tmp_db):
 
 
 def test_007_roundtrip_upgrade_downgrade_upgrade(tmp_db):
-    """Roundtrip миграции 007: up→down -1→up — clean."""
+    """Roundtrip миграции 007: up→down→up — clean.
+
+    Используем абсолютные ревизии 007 (ca84c1d9b54e) и её предшественника
+    (237c08c450f6) вместо относительных head/-1 — чтобы тест проверял именно
+    007 и оставался устойчивым к новым миграциям поверх head (напр. F3b).
+    """
+    rev_007 = "ca84c1d9b54e"
+    rev_before_007 = "237c08c450f6"
     cfg = _cfg(tmp_db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, rev_007)
     cols_after_up = _columns(tmp_db, "projects")
     assert "entity_kind" in cols_after_up
 
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, rev_before_007)
     cols_after_down = _columns(tmp_db, "projects")
     assert "entity_kind" not in cols_after_down
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, rev_007)
     cols_after_up2 = _columns(tmp_db, "projects")
     assert "entity_kind" in cols_after_up2
 

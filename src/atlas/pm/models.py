@@ -57,6 +57,9 @@ class ProjectType(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     color: Mapped[Optional[str]] = mapped_column(String(20))
     is_archived: Mapped[bool] = mapped_column(Integer, default=0, nullable=False)
+    default_sync_policy: Mapped[Optional[str]] = mapped_column(
+        String(50), ForeignKey("sync_policies.slug")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, nullable=False
     )
@@ -126,6 +129,18 @@ class Project(Base):
     entity_kind: Mapped[str] = mapped_column(
         String(20), default="project", server_default="project", nullable=False
     )
+    # ----------------------------------------------------------------------
+    # --- F3b: контрагенты + политика синка (миграция f3b-1) ---------------
+    owner_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("counterparties.id")
+    )
+    customer_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("counterparties.id")
+    )
+    sync_policy: Mapped[Optional[str]] = mapped_column(
+        String(50), ForeignKey("sync_policies.slug")
+    )
+    backend_id: Mapped[Optional[str]] = mapped_column(String(36))
     # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, nullable=False
@@ -352,4 +367,54 @@ class ProjectTag(Base):
 
     __table_args__ = (
         Index("idx_project_tags_tag", "tag_id"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# F3b: справочники синка + контрагенты                                        #
+# --------------------------------------------------------------------------- #
+
+
+class SyncPolicy(Base):
+    """Политика-потолок синка: до какого уровня иерархии выгружать наружу.
+
+    v1 — три булевых уровня (bool как Integer 0/1). Сиды: local(0,0,0),
+    epics(1,0,0), media(1,1,0), full(1,1,1).
+    """
+
+    __tablename__ = "sync_policies"
+
+    slug: Mapped[str] = mapped_column(String(50), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sync_epic: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sync_task: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sync_checklist: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=msk_now, nullable=False
+    )
+
+
+class Counterparty(Base):
+    """Контрагент — владелец/заказчик проекта (бизнес-связь, НЕ адрес синка).
+
+    От owner вытекает git-namespace; пространство синка определяет команда
+    проекта (участники), не контрагент. Зеркало core-Counterparty.
+    """
+
+    __tablename__ = "counterparties"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    git_namespace: Mapped[Optional[str]] = mapped_column(String(200))
+    backend_id: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=msk_now, nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('person','company')", name="ck_counterparties_kind"
+        ),
     )

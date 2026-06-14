@@ -38,6 +38,7 @@ from .pm.commands.tags import app as pm_tags_app
 from .pm.commands.backup import backup_app as pm_backup_app
 from .pm.commands.ideas import ideas_app as pm_ideas_app
 from .pm.commands.inbox import inbox_app as pm_inbox_app
+from .pm.commands.sync import sync_app as pm_sync_app
 
 app = build_root_app(
     "atlas",
@@ -60,6 +61,7 @@ app.add_typer(pm_tags_app, name="tags")  # PM-Tags (NP-005)
 app.add_typer(pm_backup_app, name="backup")  # PM-Backup engine (NP-005)
 app.add_typer(pm_ideas_app, name="ideas")  # PM-Ideas (W45-38, entity_kind=idea)
 app.add_typer(pm_inbox_app, name="inbox")  # PM-Inbox (W45-38, entity_kind=inbox)
+app.add_typer(pm_sync_app, name="sync")  # F3c: синхронизация с хабом
 
 console = Console()
 

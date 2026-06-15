@@ -68,13 +68,13 @@ def install(*, run=None) -> dict:
     vbs = root / "scripts" / "sync_watch_headless.vbs"
     vbs.parent.mkdir(parents=True, exist_ok=True)
     vbs.write_text(
-        "' sync_watch_headless.vbs — АВТОГЕН daemon.install, не редактировать.\n"
-        "' Запускает atlas sync watch через git-bash без окна (Run стиль 0 = SW_HIDE).\n"
+        "' sync_watch_headless.vbs - AUTOGEN by daemon.install, do not edit.\n"
+        "' Runs 'atlas sync watch' via git-bash with no window (Run style 0 = SW_HIDE).\n"
         "Option Explicit\n"
         "Dim sh\n"
         'Set sh = CreateObject("WScript.Shell")\n'
         f'sh.Run "{bash} -l -c ""cd \'{root_unix}\' && uv run atlas --text sync watch""", 0, False\n',
-        encoding="cp1251",
+        encoding="ascii",
     )
 
     ps = f"""

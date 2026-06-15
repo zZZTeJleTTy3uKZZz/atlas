@@ -21,6 +21,9 @@ class AtlasConfig(AppConfig):
     base_url: str = "http://localhost:8000"
     api_key: str = ""
     portal_id: str = "atlas-local"
+    # видимость входящего синка (профиль): all — все задачи (admin);
+    # personal — только задачи, где я в составе участников ("мои задачи").
+    scope: str = "all"
 
 
 def load_config() -> AtlasConfig:

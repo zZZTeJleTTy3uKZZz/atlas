@@ -33,10 +33,11 @@ class BackendClient:
         return await self._http.post(EVENTS_PATH, json=events, headers=self._auth())
 
     async def poll_events(
-        self, since: str | None = None, *, timeout: float = 25.0
+        self, since: str | None = None, *, timeout: float = 25.0, scope: str = "all"
     ) -> Any:
-        """Long-poll событий позже курсора ``since`` (ISO occurred_at)."""
-        params: dict[str, Any] = {"timeout": timeout}
+        """Long-poll событий позже курсора ``since``. ``scope='personal'`` —
+        только задачи, где я в участниках (профиль «мои задачи»); ``all`` — все."""
+        params: dict[str, Any] = {"timeout": timeout, "scope": scope}
         if since is not None:
             params["since"] = since
         return await self._http.get(POLL_PATH, params=params, headers=self._auth())

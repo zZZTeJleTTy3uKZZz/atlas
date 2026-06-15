@@ -21,7 +21,7 @@ class _Flaky:
     def __init__(self):
         self.n = 0
 
-    async def poll_events(self, since=None, *, timeout=25.0):
+    async def poll_events(self, since=None, *, timeout=25.0, scope="all"):
         self.n += 1
         if self.n == 1:
             raise RuntimeError("network down")

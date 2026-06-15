@@ -32,7 +32,7 @@ Project → Epic (веха/спринт) → Task (для ИИ-агента) →
 | Эпики | `atlas epic add|list|get --project <ref>` |
 | Чек-листы | `atlas checklist add|list|check --task <ref>` |
 | Участники | `atlas member add|list|rm --task <ref> --participant <slug> --role <responsible\|executor\|watcher>` |
-| Сводки | `atlas today | overdue | agenda` |
+| Справочники | `atlas participant|type|status|tag|idea|inbox|action-log|backup` |
 
 ## Синхронизация с хабом
 

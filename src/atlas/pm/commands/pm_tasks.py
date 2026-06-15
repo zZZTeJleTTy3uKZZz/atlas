@@ -44,6 +44,7 @@ from atlas.pm.slugs import (
     resolve_task_ref,
     slugify_text,
 )
+from atlas.pm.sync import outbox as _outbox
 
 pm_tasks_app = typer.Typer(
     no_args_is_help=True,
@@ -313,6 +314,15 @@ def add_cmd(
                 "assignee": assignee,
             },
         )
+        # F3c: поставить в outbox для синка наружу (если политика проекта разрешает)
+        try:
+            _portal_id = "atlas-local"
+            _outbox.enqueue(
+                session, "create", "task", task, project=proj, portal_id=_portal_id,
+            )
+        except Exception:
+            # синк — best-effort; падение enqueue не должно срывать создание задачи
+            pass
         session.commit()
 
         if slug_auto:
@@ -655,6 +665,13 @@ def update_cmd(
             entity_id=task.id,
             details=diffs,
         )
+        # F3e: enqueue update в outbox (best-effort)
+        try:
+            _proj = session.get(Project, task.project_id)
+            if _proj is not None:
+                _outbox.enqueue(session, "update", "task", task, project=_proj, portal_id="atlas-local")
+        except Exception:
+            pass
         session.commit()
 
         console.print(
@@ -738,6 +755,13 @@ def delete_cmd(
                 "at": task.archived_at.isoformat(),
             },
         )
+        # F3e: enqueue delete в outbox (best-effort)
+        try:
+            _proj = session.get(Project, task.project_id)
+            if _proj is not None:
+                _outbox.enqueue(session, "delete", "task", task, project=_proj, portal_id="atlas-local")
+        except Exception:
+            pass
         session.commit()
         console.print(
             f"[green]✓ Task #{number_for_msg} archived[/green]"

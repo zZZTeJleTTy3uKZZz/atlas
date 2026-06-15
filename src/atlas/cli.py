@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 import typer
+from clikit import build_root_app
 from rich.console import Console
 from rich.table import Table
 
@@ -37,8 +38,16 @@ from .pm.commands.tags import app as pm_tags_app
 from .pm.commands.backup import backup_app as pm_backup_app
 from .pm.commands.ideas import ideas_app as pm_ideas_app
 from .pm.commands.inbox import inbox_app as pm_inbox_app
+from .pm.commands.sync import sync_app as pm_sync_app
+from .pm.commands.epic import epic_app as pm_epic_app
+from .pm.commands.checklist import checklist_app as pm_checklist_app
+from .pm.commands.member import member_app as pm_member_app
 
-app = typer.Typer(no_args_is_help=True, help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.")
+app = build_root_app(
+    "atlas",
+    version="0.1.0",
+    help="Notion: задачи, проекты, файлы. + PM-слой projects/pm-tasks.",
+)
 tasks_app = typer.Typer(no_args_is_help=True, help="Задачи (БД _Задачи Notion).")
 notion_projects_app = typer.Typer(no_args_is_help=True, help="Проекты/клиенты (Notion).")
 files_app = typer.Typer(no_args_is_help=True, help="Файлы клиентов (Notion).")
@@ -55,6 +64,10 @@ app.add_typer(pm_tags_app, name="tags")  # PM-Tags (NP-005)
 app.add_typer(pm_backup_app, name="backup")  # PM-Backup engine (NP-005)
 app.add_typer(pm_ideas_app, name="ideas")  # PM-Ideas (W45-38, entity_kind=idea)
 app.add_typer(pm_inbox_app, name="inbox")  # PM-Inbox (W45-38, entity_kind=inbox)
+app.add_typer(pm_sync_app, name="sync")  # F3c: синхронизация с хабом
+app.add_typer(pm_epic_app, name="epic")  # F3e: эпики
+app.add_typer(pm_checklist_app, name="checklist")  # F3e: чек-листы
+app.add_typer(pm_member_app, name="member")  # F3e: участники задач
 
 console = Console()
 

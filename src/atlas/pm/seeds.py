@@ -118,6 +118,29 @@ PARTICIPANTS_SEED: list[dict[str, str]] = [
 ]
 
 
+SYNC_POLICIES_SEED = [
+    {"slug": "local", "name": "Локально (ничего наружу)", "sync_epic": 0, "sync_task": 0, "sync_checklist": 0},
+    {"slug": "epics", "name": "Только эпики (вехи)", "sync_epic": 1, "sync_task": 0, "sync_checklist": 0},
+    {"slug": "media", "name": "Эпики + задачи", "sync_epic": 1, "sync_task": 1, "sync_checklist": 0},
+    {"slug": "full", "name": "Полностью", "sync_epic": 1, "sync_task": 1, "sync_checklist": 1},
+]
+
+COUNTERPARTIES_SEED = [
+    {"slug": "cifro-pro", "kind": "company", "name": "Cifro.pro", "git_namespace": "cifropro1"},
+    {"slug": "dmitry", "kind": "person", "name": "Дмитрий Семёнов"},
+]
+
+DEFAULT_SYNC_POLICY_BY_TYPE = {
+    "client-project": "full",
+    "business-product": "epics",
+    "personal-utility": "epics",
+    "personal-project": "epics",
+    "shared-infrastructure": "epics",
+    "test": "local",
+    "inbox": "local",
+}
+
+
 # --------------------------------------------------------------------------- #
 # Upsert helpers                                                              #
 # --------------------------------------------------------------------------- #
@@ -182,16 +205,45 @@ def seed_base_tags(session: Session) -> dict[str, int]:
     return {"created": created, "skipped": skipped}
 
 
+def seed_sync_policies(session: Session) -> list:
+    from atlas.pm.models import SyncPolicy
+    return [_upsert(session, SyncPolicy, "slug", sp) for sp in SYNC_POLICIES_SEED]
+
+
+def seed_counterparties(session: Session) -> list:
+    from atlas.pm.models import Counterparty
+    return [_upsert(session, Counterparty, "slug", cp) for cp in COUNTERPARTIES_SEED]
+
+
+def seed_type_default_policies(session: Session) -> int:
+    from atlas.pm.models import ProjectType
+    n = 0
+    for slug, policy in DEFAULT_SYNC_POLICY_BY_TYPE.items():
+        pt = session.execute(
+            select(ProjectType).where(ProjectType.slug == slug)
+        ).scalar_one_or_none()
+        if pt is not None:
+            pt.default_sync_policy = policy
+            n += 1
+    return n
+
+
 def seed_all(session: Session) -> dict[str, int | dict[str, int]]:
     """Запустить все seeds. Возвращает counts."""
     types = seed_project_types(session)
     statuses = seed_project_statuses(session)
     participants = seed_participants(session)
     tags = seed_base_tags(session)
+    policies = seed_sync_policies(session)
+    counterparties = seed_counterparties(session)
+    type_defaults = seed_type_default_policies(session)
     session.commit()
     return {
         "project_types": len(types),
         "project_statuses": len(statuses),
         "participants": len(participants),
         "tags": tags,
+        "sync_policies": len(policies),
+        "counterparties": len(counterparties),
+        "type_defaults": type_defaults,
     }

@@ -16,25 +16,25 @@
 
 ---
 
-## Проекты — `atlas projects`
+## Проекты — `atlas project`
 
-- `atlas projects list` — список проектов портфеля.
-- `atlas projects show <slug>` — карточка проекта.
-- `atlas projects create --slug <s> --name "<name>" --type <type-slug> [...]` — создать.
+- `atlas project list` — список проектов портфеля.
+- `atlas project show <slug>` — карточка проекта.
+- `atlas project create --slug <s> --name "<name>" --type <type-slug> [...]` — создать.
 
 Типы (`type`): `client-project`, `business-product`, `personal-utility`, `personal-project`, `shared-infrastructure`, `test`.
 
 > Принадлежность и пространство синка: `owner`/`customer` (контрагенты) задают «чей проект», а **порталы синка определяются командой проекта** (участниками). `sync_policy` задаёт глубину выгрузки наружу.
 
-## Задачи — `atlas pm-tasks`
+## Задачи — `atlas task`
 
-- `atlas pm-tasks add --project <ref> --title "<t>" --cpp "<ЦКП>" [--priority P2] [--status backlog] [--slug <s>] [--due-date YYYY-MM-DD] [--assignee <participant-slug>] [--quality-tier T1|T2|T3]`
+- `atlas task add --project <ref> --title "<t>" --cpp "<ЦКП>" [--priority P2] [--status backlog] [--slug <s>] [--due-date YYYY-MM-DD] [--assignee <participant-slug>] [--quality-tier T1|T2|T3]`
   - **`--cpp` (Ценный Конечный Продукт) обязателен.** При policy=full операция кладётся в outbox.
-- `atlas pm-tasks list [--project <ref>] [--status <s>] [--assignee <slug>] [--archived]`
-- `atlas pm-tasks get <ref>` — `ref` = number | slug | UUID | префикс UUID.
-- `atlas pm-tasks update <ref> [--title|--cpp|--status|--priority|--due-date|--assignee|--quality-tier|...]` — slug/number/project неизменяемы.
+- `atlas task list [--project <ref>] [--status <s>] [--assignee <slug>] [--archived]`
+- `atlas task get <ref>` — `ref` = number | slug | UUID | префикс UUID.
+- `atlas task update <ref> [--title|--cpp|--status|--priority|--due-date|--assignee|--quality-tier|...]` — slug/number/project неизменяемы.
   - Статусы: `backlog|todo|in_progress|review|done|blocked|cancelled`. `in_progress`→ставит `started_at`; `done`→`completed_at`.
-- `atlas pm-tasks delete <ref> [--hard]` — soft-archive (по умолчанию) или физическое удаление. Кладёт `delete` в outbox.
+- `atlas task delete <ref> [--hard]` — soft-archive (по умолчанию) или физическое удаление. Кладёт `delete` в outbox.
 
 ## Эпики — `atlas epic`
 
@@ -70,20 +70,13 @@ JSON add: `{"id": "...", "slug": "...", "title": "...", "status": "active"}`.
 
 ## Справочники и прочее
 
-- `atlas participants` — участники (люди/ИИ-агенты/контрактники).
-- `atlas types` / `atlas statuses` / `atlas tags` — справочники проектов.
-- `atlas ideas` / `atlas inbox` — идеи (стадия 0) и входящие на разбор.
+- `atlas participant` — участники портфеля (люди/ИИ-агенты/контрактники).
+- `atlas type` / `atlas status` / `atlas tag` — справочники проектов (типы/статусы/теги).
+- `atlas idea` / `atlas inbox` — идеи (стадия 0) и входящие на разбор для ИИ.
 - `atlas action-log tail [--project <ref>]` — аудит (append-only).
-- `atlas backup` — бэкап-движок.
+- `atlas backup` — бэкап портфеля.
 
-## Сводки (быстрый обзор)
-
-- `atlas today` — активные задачи на сегодня.
-- `atlas overdue` — просроченные.
-- `atlas agenda` — overdue + today + no-date.
-- `atlas no-date` — активные без дедлайна.
-
-(Команды `atlas tasks`, `atlas notion-projects`, `atlas files` — прямой доступ к Notion-базам, legacy-слой до полного перехода на хаб.)
+> Все команды-сущности — в единственном числе. Notion-legacy команды (`tasks`/`today`/`overdue`/`agenda` и т.п.) убраны — синк идёт через ядро-хаб.
 
 ---
 
@@ -92,7 +85,7 @@ JSON add: `{"id": "...", "slug": "...", "title": "...", "status": "active"}`.
 **Завести веху и наполнить её работой:**
 ```
 atlas epic add --project acme --title "Спринт 5: онбординг"
-atlas pm-tasks add --project acme --title "API регистрации" --cpp "Рабочий эндпоинт /register с тестами"
+atlas task add --project acme --title "API регистрации" --cpp "Рабочий эндпоинт /register с тестами"
 atlas checklist add --task ACM-12 --text "Схема запроса/ответа"
 atlas checklist add --task ACM-12 --text "Тесты + реализация"
 atlas member add --task ACM-12 --participant claude-code --role executor
@@ -107,7 +100,7 @@ atlas sync watch           # держать постоянный приём (lon
 
 **Прочитать состояние программно (JSON):**
 ```
-atlas pm-tasks list --project acme           # → JSON-массив задач
+atlas task list --project acme           # → JSON-массив задач
 atlas epic list --project acme               # → JSON-массив эпиков
-atlas pm-tasks get ACM-12                     # → JSON карточки
+atlas task get ACM-12                     # → JSON карточки
 ```

@@ -18,6 +18,22 @@ _BASH_CANDIDATES = (
 )
 
 
+def _resolve_profile(profile: str | None) -> str | None:
+    """Активный профиль: явный аргумент или env ``ATLAS_PROFILE`` (его ставит
+    корневой callback при ``atlas --profile <p> ...``)."""
+    return profile or os.environ.get("ATLAS_PROFILE") or None
+
+
+def _task_name(profile: str | None) -> str:
+    """Имя задачи планировщика. С профилем — суффикс, чтобы профили (dmitry
+    «мои задачи» / admin «все») имели независимые демоны и не затирали друг друга."""
+    return f"{TASK_NAME}-{profile}" if profile else TASK_NAME
+
+
+def _vbs_name(profile: str | None) -> str:
+    return f"sync_watch_headless-{profile}.vbs" if profile else "sync_watch_headless.vbs"
+
+
 def _bash_exe() -> str | None:
     for p in _BASH_CANDIDATES:
         if Path(p).exists():
@@ -54,18 +70,26 @@ def _to_unix(bash: str, win_path: Path) -> str:
     return str(win_path).replace("\\", "/")
 
 
-def install(*, run=None) -> dict:
-    """Зарегистрировать и запустить демон (идемпотентно)."""
+def install(*, profile: str | None = None, run=None) -> dict:
+    """Зарегистрировать и запустить демон (идемпотентно).
+
+    ``profile`` (или env ``ATLAS_PROFILE``) пробрасывается в фоновую команду как
+    ``atlas --profile <p> sync watch`` — так демон крутит long-poll в нужном
+    профиле (``dmitry`` → scope=personal, ``admin`` → scope=all). У каждого
+    профиля своя задача планировщика (имя с суффиксом)."""
     if os.name != "nt":
         return {"ok": False, "error": "демон поддерживается только на Windows"}
     run = run or _run_ps
     bash = _bash_exe()
     if bash is None:
         return {"ok": False, "error": "git-bash не найден (установи Git for Windows)"}
+    profile = _resolve_profile(profile)
+    task = _task_name(profile)
     root = _atlas_root()
     root_unix = _to_unix(bash, root)
+    profile_flag = f"--profile {profile} " if profile else ""
 
-    vbs = root / "scripts" / "sync_watch_headless.vbs"
+    vbs = root / "scripts" / _vbs_name(profile)
     vbs.parent.mkdir(parents=True, exist_ok=True)
     vbs.write_text(
         "' sync_watch_headless.vbs - AUTOGEN by daemon.install, do not edit.\n"
@@ -73,7 +97,7 @@ def install(*, run=None) -> dict:
         "Option Explicit\n"
         "Dim sh\n"
         'Set sh = CreateObject("WScript.Shell")\n'
-        f'sh.Run "{bash} -l -c ""cd \'{root_unix}\' && uv run atlas --text sync watch""", 0, False\n',
+        f'sh.Run "{bash} -l -c ""cd \'{root_unix}\' && uv run atlas {profile_flag}--text sync watch""", 0, False\n',
         encoding="ascii",
     )
 
@@ -85,43 +109,46 @@ $Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
     -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries `
     -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Days 3650)
-Get-ScheduledTask -TaskName "{TASK_NAME}" -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
-Register-ScheduledTask -TaskName "{TASK_NAME}" -Description "atlas: фоновый long-poll синк с хабом" -Action $Action -Trigger $Trigger -Settings $Settings | Out-Null
-Start-ScheduledTask -TaskName "{TASK_NAME}"
+Get-ScheduledTask -TaskName "{task}" -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
+Register-ScheduledTask -TaskName "{task}" -Description "atlas: фоновый long-poll синк с хабом" -Action $Action -Trigger $Trigger -Settings $Settings | Out-Null
+Start-ScheduledTask -TaskName "{task}"
 Write-Output "installed"
 """.strip()
     res = run(ps)
     return {
         "ok": res.returncode == 0,
-        "task": TASK_NAME,
+        "task": task,
+        "profile": profile,
         "stdout": res.stdout.strip(),
         "stderr": res.stderr.strip(),
     }
 
 
-def uninstall(*, run=None) -> dict:
+def uninstall(*, profile: str | None = None, run=None) -> dict:
     if os.name != "nt":
         return {"ok": False, "error": "только Windows"}
     run = run or _run_ps
+    task = _task_name(_resolve_profile(profile))
     ps = (
-        f'Get-ScheduledTask -TaskName "{TASK_NAME}" -ErrorAction SilentlyContinue '
+        f'Get-ScheduledTask -TaskName "{task}" -ErrorAction SilentlyContinue '
         f'| Unregister-ScheduledTask -Confirm:$false; Write-Output "removed"'
     )
     res = run(ps)
-    return {"ok": res.returncode == 0, "task": TASK_NAME, "stdout": res.stdout.strip()}
+    return {"ok": res.returncode == 0, "task": task, "stdout": res.stdout.strip()}
 
 
-def status(*, run=None) -> dict:
+def status(*, profile: str | None = None, run=None) -> dict:
     if os.name != "nt":
         return {"ok": False, "error": "только Windows"}
     run = run or _run_ps
+    task = _task_name(_resolve_profile(profile))
     ps = (
-        f'$t = Get-ScheduledTask -TaskName "{TASK_NAME}" -ErrorAction SilentlyContinue; '
+        f'$t = Get-ScheduledTask -TaskName "{task}" -ErrorAction SilentlyContinue; '
         f'if ($t) {{ Write-Output $t.State }} else {{ Write-Output "NOT_INSTALLED" }}'
     )
     res = run(ps)
     state = (res.stdout or "").strip()
-    return {"ok": res.returncode == 0, "task": TASK_NAME,
+    return {"ok": res.returncode == 0, "task": task,
             "installed": state != "NOT_INSTALLED", "state": state}
 
 

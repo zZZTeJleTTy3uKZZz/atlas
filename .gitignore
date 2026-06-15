@@ -89,3 +89,6 @@ logs/
 !playwright.config.json
 !requirements*.txt
 !tsconfig*.json
+
+# autogen демоном (машинно-специфичные пути) — не в git
+scripts/sync_watch_headless*.vbs

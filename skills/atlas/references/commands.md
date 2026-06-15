@@ -62,9 +62,11 @@ JSON add: `{"id": "...", "slug": "...", "title": "...", "status": "active"}`.
 
 - `atlas sync push` — выгрузить pending-операции из локального outbox на backend-хаб (`POST /api/v1/events`). Хаб фанаутит в Б24/Notion. JSON: `{"sent": N}`.
 - `atlas sync pull [--timeout 25]` — один цикл входящего синка (long-poll `/events/poll`), применить события локально по `backend_id`. JSON: `{"applied": N, "cursor": "..."}`.
-- `atlas sync watch [--timeout 25]` — бесконечный входящий синк (постоянный long-poll). Ctrl+C для остановки.
+- `atlas sync watch [--timeout 25]` — устойчивый входящий синк (long-poll; ошибки сети не валят цикл — retry с backoff). Ctrl+C для остановки.
+- `atlas sync up` — **подключиться к хабу**: установить и запустить фоновый демон (long-poll в фоне, автостарт при входе пользователя + авто-рестарт при падении). Рекомендуемый способ постоянного синка.
+- `atlas sync daemon install|uninstall|status` — управление фоновым демоном (Windows Scheduled Task `atlas-sync-watch`; лог в `cache_dir/sync-watch.log`).
 
-Конфиг синка (`AtlasConfig`, слои global/project/local + env `ATLAS_*`): `base_url` (адрес хаба), `api_key` (`X-API-Key`, из `${ATLAS_API_KEY}` или keyring), `portal_id` (=`atlas-local`).
+Конфиг синка (`AtlasConfig`, слои global/project/local + env `ATLAS_*`): `base_url` (адрес хаба), `api_key` (`X-API-Key`, из `${ATLAS_API_KEY}` / config.toml / keyring), `portal_id` (например `atlas-dmitry`). **Без `api_key`/`base_url` команды `sync*` не работают, но весь локальный PM (projects/pm-tasks/epic/checklist/...) полностью функционирует автономно.**
 
 ## Справочники и прочее
 

@@ -17,9 +17,10 @@ def test_version_command_json_default():
 def test_help_lists_existing_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "pm-tasks" in result.stdout
-    assert "projects" in result.stdout
-    assert "ideas" in result.stdout
+    assert "task" in result.stdout
+    assert "project" in result.stdout
+    assert "idea" in result.stdout
+    assert "sync" in result.stdout
 
 
 def test_text_flag_switches_human_output():

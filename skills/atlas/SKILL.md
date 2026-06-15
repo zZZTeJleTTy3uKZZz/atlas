@@ -27,8 +27,8 @@ Project → Epic (веха/спринт) → Task (для ИИ-агента) →
 
 | Действие | Команда |
 |---|---|
-| Проекты | `atlas projects list|show|create` |
-| Задачи | `atlas pm-tasks add|list|get|update|delete` (ЦКП `--cpp` обязателен при add) |
+| Проекты | `atlas project list|show|create` |
+| Задачи | `atlas task add|list|get|update|delete` (ЦКП `--cpp` обязателен при add) |
 | Эпики | `atlas epic add|list|get --project <ref>` |
 | Чек-листы | `atlas checklist add|list|check --task <ref>` |
 | Участники | `atlas member add|list|rm --task <ref> --participant <slug> --role <responsible\|executor\|watcher>` |
@@ -44,7 +44,7 @@ Project → Epic (веха/спринт) → Task (для ИИ-агента) →
 
 ## Когда что использовать
 
-- Завести веху → `atlas epic add`. Разбить на задачи → `atlas pm-tasks add --project ... --cpp ...`. Шаги задачи → `atlas checklist add`. Посадить агента/человека → `atlas member add`.
+- Завести веху → `atlas epic add`. Разбить на задачи → `atlas task add --project ... --cpp ...`. Шаги задачи → `atlas checklist add`. Посадить агента/человека → `atlas member add`.
 - После локальных правок выгрузить в команду → `atlas sync push`. Получить изменения извне → `atlas sync pull`.
 
 Полный справочник всех команд, опций и примеров JSON-вывода — `references/commands.md`.

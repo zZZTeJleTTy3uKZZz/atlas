@@ -33,7 +33,7 @@ def _prep(tmp_path):
 def test_update_enqueues(tmp_path):
     url = _prep(tmp_path)
     try:
-        res = runner.invoke(app, ["pm-tasks", "update", "ACM-1", "--status", "in_progress"])
+        res = runner.invoke(app, ["task", "update", "ACM-1", "--status", "in_progress"])
         assert res.exit_code == 0, res.stdout
         with make_session(make_engine(url)) as s:
             obs = s.query(Outbox).filter(Outbox.op == "update", Outbox.entity_kind == "task").all()
@@ -45,7 +45,7 @@ def test_update_enqueues(tmp_path):
 def test_delete_enqueues(tmp_path):
     url = _prep(tmp_path)
     try:
-        res = runner.invoke(app, ["pm-tasks", "delete", "ACM-1"])
+        res = runner.invoke(app, ["task", "delete", "ACM-1"])
         assert res.exit_code == 0, res.stdout
         with make_session(make_engine(url)) as s:
             obs = s.query(Outbox).filter(Outbox.op == "delete", Outbox.entity_kind == "task").all()

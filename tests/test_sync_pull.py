@@ -14,8 +14,8 @@ class _FakeClient:
         self._response = response
         self.calls = []
 
-    async def poll_events(self, since=None, *, timeout=25.0):
-        self.calls.append({"since": since, "timeout": timeout})
+    async def poll_events(self, since=None, *, timeout=25.0, scope="all"):
+        self.calls.append({"since": since, "timeout": timeout, "scope": scope})
         return self._response
 
     async def aclose(self):

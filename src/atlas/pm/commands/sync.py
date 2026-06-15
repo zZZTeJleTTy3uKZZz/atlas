@@ -46,7 +46,7 @@ async def pull_cmd(
     engine = make_engine(_db_url())
     try:
         with make_session(engine) as session:
-            result = await pull_mod.pull_once(session, client, timeout=timeout)
+            result = await pull_mod.pull_once(session, client, timeout=timeout, scope=cfg.scope)
     finally:
         await client.aclose()
     emit_data(result, text_renderer=lambda r: print(f"applied: {r['applied']}"))
@@ -78,7 +78,7 @@ async def watch_cmd(
             pass
 
     try:
-        await pull_mod.watch_loop(engine, client, timeout=timeout, on_result=_log)
+        await pull_mod.watch_loop(engine, client, timeout=timeout, scope=cfg.scope, on_result=_log)
     except (KeyboardInterrupt, asyncio.CancelledError):
         emit_data({"stopped": True}, text_renderer=lambda r: print("watch остановлен"))
     finally:

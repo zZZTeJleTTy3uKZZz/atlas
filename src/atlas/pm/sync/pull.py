@@ -7,15 +7,18 @@ from atlas.pm.sync import apply, cursor
 
 
 async def pull_once(
-    session: Session, client, *, channel: str = "atlas", timeout: float = 25.0
+    session: Session, client, *, channel: str = "atlas", timeout: float = 25.0,
+    scope: str = "all",
 ) -> dict:
     """Один цикл: long-poll событий позже курсора → применить → продвинуть курсор.
 
-    ``client`` — объект с async ``poll_events(since, *, timeout)`` (BackendClient),
-    возвращающим ``{events: [...], cursor: str|None}``. → {applied, cursor}.
+    ``client`` — объект с async ``poll_events(since, *, timeout, scope)``
+    (BackendClient), возвращающим ``{events: [...], cursor: str|None}``.
+    ``scope`` — профиль видимости: ``all`` (все) | ``personal`` (мои задачи).
+    → {applied, cursor}.
     """
     since = cursor.get_cursor(session, channel)
-    resp = await client.poll_events(since, timeout=timeout)
+    resp = await client.poll_events(since, timeout=timeout, scope=scope)
     events = resp.get("events") or []
     applied = 0
     for ev in events:
@@ -30,7 +33,7 @@ async def pull_once(
 
 async def watch_loop(
     engine, client, *, channel: str = "atlas", timeout: float = 25.0,
-    on_result=None, max_backoff: float = 60.0, _sleep=None,
+    scope: str = "all", on_result=None, max_backoff: float = 60.0, _sleep=None,
 ) -> None:
     """Бесконечный устойчивый цикл pull: сетевые/HTTP-ошибки НЕ валят цикл —
     логируются через on_result и ретраятся с экспоненциальным backoff
@@ -45,7 +48,8 @@ async def watch_loop(
     while True:
         try:
             with make_session(engine) as session:
-                result = await pull_once(session, client, channel=channel, timeout=timeout)
+                result = await pull_once(session, client, channel=channel,
+                                         timeout=timeout, scope=scope)
             backoff = 1.0
             if on_result is not None:
                 on_result(result)

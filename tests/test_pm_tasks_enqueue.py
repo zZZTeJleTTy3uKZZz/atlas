@@ -32,7 +32,7 @@ def test_task_add_enqueues_outbox(tmp_path):
     url = _prep_db(tmp_path)
     try:
         res = runner.invoke(app, [
-            "pm-tasks", "add", "--project", "acme", "--title", "Сделать X", "--cpp", "ЦКП",
+            "task", "add", "--project", "acme", "--title", "Сделать X", "--cpp", "ЦКП",
         ])
         assert res.exit_code == 0, res.stdout
         engine = make_engine(url)

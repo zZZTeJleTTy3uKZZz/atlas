@@ -12,7 +12,6 @@ CRUD по тегам PM-БД (NP-005).
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any, Optional
 
@@ -22,7 +21,7 @@ from rich.table import Table
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import ActionLog, Participant, Project, ProjectTag, Tag
 from atlas.pm.tags import (
     VALID_CATEGORIES,
@@ -52,7 +51,7 @@ DEFAULT_ACTOR_SLUG = "dmitry"
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _actor_id(session: Session) -> Optional[str]:

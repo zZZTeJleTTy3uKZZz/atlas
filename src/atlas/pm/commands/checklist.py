@@ -1,13 +1,11 @@
 """CLI `atlas checklist ...` — чек-листы задач (шаги). На clikit."""
 from __future__ import annotations
 
-import os
-
 import typer
 from clikit import command, emit_data
 from sqlalchemy import func, select
 
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import ChecklistItem, Project, Task
 from atlas.pm.slugs import resolve_task_ref
 from atlas.pm.sync import outbox as _outbox
@@ -17,7 +15,7 @@ _PORTAL = "atlas-local"
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _enqueue(session, op, obj, project):

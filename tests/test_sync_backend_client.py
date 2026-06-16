@@ -34,3 +34,35 @@ async def test_poll_events_without_since_omits_param(httpx_mock):
     url = str(httpx_mock.get_request().url)
     assert "since=" not in url
     await client.aclose()
+
+
+async def test_register_profile_posts_admin_key_and_body(httpx_mock):
+    httpx_mock.add_response(
+        method="POST", url="http://hub/api/v1/admin/profiles",
+        json={"member_slug": "dmitry", "portal_slug": "atlas-admin", "api_key": "k2"},
+    )
+    client = BackendClient("http://hub", "adminsecret")
+    result = await client.register_profile("dmitry", "atlas-admin", "Админ", "all")
+    assert result["api_key"] == "k2" and result["portal_slug"] == "atlas-admin"
+    req = httpx_mock.get_request()
+    assert req.headers["X-API-Key"] == "adminsecret"
+    import json
+    body = json.loads(req.content)
+    # тело строго по контракту ядра ProfileIn — member_slug + portal_slug раздельны
+    assert body == {"member_slug": "dmitry", "portal_slug": "atlas-admin",
+                    "name": "Админ", "scope": "all"}
+    await client.aclose()
+
+
+async def test_register_profile_includes_global_role_when_set(httpx_mock):
+    httpx_mock.add_response(
+        method="POST", url="http://hub/api/v1/admin/profiles",
+        json={"member_slug": "p", "portal_slug": "p", "api_key": "k"},
+    )
+    client = BackendClient("http://hub", "s")
+    await client.register_profile("p", "p", "Имя", "personal", global_role="executor")
+    import json
+    body = json.loads(httpx_mock.get_request().content)
+    assert body["global_role"] == "executor"
+    assert body["scope"] == "personal"
+    await client.aclose()

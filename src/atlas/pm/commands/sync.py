@@ -1,13 +1,11 @@
 """CLI-команды `atlas sync ...` — синхронизация с backend-хабом (F3c)."""
 from __future__ import annotations
 
-import os
-
 import typer
 from clikit import async_command, command, emit_data
 
 from atlas.appconfig import load_config
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.sync import daemon as daemon_mod
 from atlas.pm.sync import pull as pull_mod
 from atlas.pm.sync import push as push_mod
@@ -17,7 +15,7 @@ sync_app = typer.Typer(no_args_is_help=True, help="Синхронизация At
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 @sync_app.command("push")

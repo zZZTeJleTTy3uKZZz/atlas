@@ -23,7 +23,6 @@ Sub-typer `git_app`, регистрируется в `projects.py`:
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -35,7 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.pm._time import msk_now
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.git_backend import GitLabBackend, LocalGitOps
 from atlas.pm.git_paths import derive_group_path
 from atlas.pm.models import (
@@ -72,7 +71,7 @@ URL_RE = re.compile(r"^(https?|git|ssh)://|^git@", re.IGNORECASE)
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _actor_id(session: Session) -> Optional[str]:

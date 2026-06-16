@@ -43,7 +43,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.pm._time import msk_now
-from atlas.pm.db import make_engine, make_session, DEFAULT_DB_PATH
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.junctions import JunctionError, SafetyError
 from atlas.pm import layout as layout_mod
 from atlas.pm.layout import (
@@ -90,7 +90,7 @@ DEFAULT_ACTOR_SLUG = "dmitry"
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _actor_id(session: Session) -> Optional[str]:

@@ -1,13 +1,11 @@
 """CLI `atlas member ...` — участники задачи (TaskMember: responsible/executor/watcher)."""
 from __future__ import annotations
 
-import os
-
 import typer
 from clikit import command, emit_data
 from sqlalchemy import select
 
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import Participant, TaskMember
 from atlas.pm.slugs import resolve_task_ref
 
@@ -16,7 +14,7 @@ _ROLES = {"responsible", "executor", "watcher"}
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _participant(session, slug):

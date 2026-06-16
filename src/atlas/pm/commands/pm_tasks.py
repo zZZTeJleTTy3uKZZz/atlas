@@ -15,7 +15,6 @@ CRUD по задачам PM-БД (NP-005).
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime
 from typing import Any, Optional
@@ -27,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.pm._time import msk_now
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
     ActionLog,
     Participant,
@@ -75,7 +74,7 @@ _PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _actor_id(session: Session) -> Optional[str]:

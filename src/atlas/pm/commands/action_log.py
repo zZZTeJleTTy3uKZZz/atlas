@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -15,7 +14,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm.db import DEFAULT_DB_PATH, make_engine, make_session
+from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import ActionLog, Participant, Task
 from atlas.pm.slugs import AmbiguousRefError, resolve_project_ref
 
@@ -38,7 +37,7 @@ def _callback() -> None:
 
 
 def _db_url() -> str:
-    return os.environ.get("ATLAS_DB_URL") or f"sqlite:///{DEFAULT_DB_PATH}"
+    return resolve_db_url()
 
 
 def _resolve_actor_id(session: Session, slug: str) -> Optional[str]:

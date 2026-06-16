@@ -98,6 +98,11 @@ projects_app.add_typer(_git_app, name="git")
 # --------------------------------------------------------------------------- #
 
 VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
+# Роли участия члена в проекте (F4f). lead → видит ВСЕ задачи проекта;
+# member → только свои задачи. Литералы совпадают с core_project_member.role
+# (ядро), чтобы синк role_in_project → core ложился без преобразования.
+VALID_PROJECT_MEMBER_ROLES = {"lead", "member"}
+DEFAULT_PROJECT_MEMBER_ROLE = "member"
 SLUG_RE = re.compile(r"^[a-z0-9-]{2,50}$")
 PREFIX_RE = re.compile(r"^[a-z0-9]{1,5}$")
 DEFAULT_ACTOR_SLUG = "dmitry"
@@ -1567,6 +1572,156 @@ def remove_tags_cmd(
         console.print(
             f"[green]✓ Project '{project.slug}': detached {removed} "
             f"tag(s) ({', '.join(slugs)})[/green]"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# member-add / member-list / member-remove (F4f: роли в проекте)              #
+# --------------------------------------------------------------------------- #
+
+
+def _validate_project_member_role(role: str) -> None:
+    """Роль участия в проекте — строго из VALID_PROJECT_MEMBER_ROLES (ноль хардкода
+    зашитых имён: множество — единый источник правды, совпадает с ядром)."""
+    if role not in VALID_PROJECT_MEMBER_ROLES:
+        console.print(
+            f"[red]Невалидная роль '{role}': допустимы "
+            f"{sorted(VALID_PROJECT_MEMBER_ROLES)}.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
+def _resolve_member_or_die(session: Session, ref: str) -> Participant:
+    """Резолв участника (slug / UUID / short-prefix) с выводом ошибки и Exit(1).
+    Переиспользует _resolve_participant_ref из participants.py."""
+    from atlas.pm.commands.participants import _resolve_participant_ref
+
+    try:
+        participant = _resolve_participant_ref(session, ref)
+    except AmbiguousRefError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+    if participant is None:
+        console.print(f"[red]Participant '{ref}' не найден.[/red]")
+        raise typer.Exit(code=1)
+    return participant
+
+
+@projects_app.command("member-add")
+def member_add_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+    member: str = typer.Option(
+        ..., "--member", "-m", "--participant",
+        help="slug | UUID участника.",
+    ),
+    role: str = typer.Option(
+        DEFAULT_PROJECT_MEMBER_ROLE, "--role",
+        help="Роль в проекте: lead | member (default: member).",
+    ),
+) -> None:
+    """Добавить участника в проект с ролью (lead/member).
+
+    Идемпотентно: PK project_participants = (project_id, participant_id), роль не
+    в ключе → повторный member-add того же участника ОБНОВЛЯЕТ его role_in_project
+    (одна роль на участника в проекте), без дубля."""
+    _validate_project_member_role(role)
+    url = _db_url()
+    engine = make_engine(url)
+
+    with make_session(engine) as session:
+        project = _resolve_project_or_die(session, ref)
+        participant = _resolve_member_or_die(session, member)
+
+        link = session.get(ProjectParticipant, (project.id, participant.id))
+        if link is None:
+            link = ProjectParticipant(
+                project_id=project.id,
+                participant_id=participant.id,
+                role_in_project=role,
+            )
+            session.add(link)
+        else:
+            link.role_in_project = role
+
+        _log_action(
+            session,
+            action="project_member_added",
+            entity_id=project.id,
+            details={"participant": participant.slug, "role": role},
+        )
+        session.commit()
+
+        console.print(
+            f"[green]✓ Project '{project.slug}': участник "
+            f"'{participant.slug}' с ролью '{role}'.[/green]"
+        )
+
+
+@projects_app.command("member-list")
+def member_list_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+) -> None:
+    """Показать участников проекта с их ролями."""
+    url = _db_url()
+    engine = make_engine(url)
+
+    with make_session(engine) as session:
+        project = _resolve_project_or_die(session, ref)
+        link_rows = session.execute(
+            select(ProjectParticipant, Participant)
+            .join(Participant, ProjectParticipant.participant_id == Participant.id)
+            .where(ProjectParticipant.project_id == project.id)
+        ).all()
+
+    if not link_rows:
+        console.print(f"[dim]Project '{project.slug}': участников нет.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Slug", style="cyan")
+    table.add_column("Name")
+    table.add_column("Role", style="magenta")
+    for link, participant in link_rows:
+        table.add_row(participant.slug, participant.name, link.role_in_project)
+    console.print(table)
+
+
+@projects_app.command("member-remove")
+def member_remove_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+    member: str = typer.Option(
+        ..., "--member", "-m", "--participant",
+        help="slug | UUID участника.",
+    ),
+) -> None:
+    """Снять участника с проекта (graceful — нет связи → warning, не ошибка)."""
+    url = _db_url()
+    engine = make_engine(url)
+
+    with make_session(engine) as session:
+        project = _resolve_project_or_die(session, ref)
+        participant = _resolve_member_or_die(session, member)
+
+        link = session.get(ProjectParticipant, (project.id, participant.id))
+        if link is None:
+            console.print(
+                f"[yellow]Участник '{participant.slug}' не состоит в проекте "
+                f"'{project.slug}' — нечего снимать.[/yellow]"
+            )
+            return
+
+        session.delete(link)
+        _log_action(
+            session,
+            action="project_member_removed",
+            entity_id=project.id,
+            details={"participant": participant.slug},
+        )
+        session.commit()
+
+        console.print(
+            f"[green]✓ Project '{project.slug}': участник "
+            f"'{participant.slug}' снят.[/green]"
         )
 
 

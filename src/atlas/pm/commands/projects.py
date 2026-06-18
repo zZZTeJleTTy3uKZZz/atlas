@@ -64,6 +64,7 @@ from atlas.pm.paths import (
     group_path,
     type_slug_to_group,
 )
+from atlas.appconfig import load_config, owner_member_slug
 from atlas.pm.seeds import seed_all
 from atlas.pm.sync.backend_client import BackendClient
 from atlas.pm.slugs import (
@@ -928,6 +929,116 @@ def add_cmd(
                     asyncio.run(client.aclose())
                 except Exception:  # noqa: BLE001
                     pass
+
+
+# --------------------------------------------------------------------------- #
+# make-personal / link / unlink — правка модели через API ядра (без docker exec) #
+# --------------------------------------------------------------------------- #
+
+
+def _backend_ident(project) -> str:
+    """Идентификатор проекта для ядро-API: backend_id (core-id) если связан,
+    иначе slug. Ядро резолвит по slug|id|atlas_slug."""
+    return project.backend_id or project.slug
+
+
+@projects_app.command("make-personal")
+def make_personal_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+) -> None:
+    """Перевести проект в ЛИЧНЫЙ (visibility=personal, владелец+lead=ты) — ядро+Atlas.
+
+    Локально: sync_policy=full + lead-участник. В ядре: PATCH visibility/owner/lead.
+    """
+    cfg = load_config()
+    owner = owner_member_slug(cfg.portal_id)
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        project = _resolve_project_or_die(session, ref)
+        from atlas.pm.models import SyncPolicy
+        if session.get(SyncPolicy, "full") is not None:
+            project.sync_policy = "full"
+        lead_p = session.execute(
+            select(Participant).where(Participant.slug == owner)
+        ).scalar_one_or_none()
+        if lead_p is not None and session.get(
+            ProjectParticipant, (project.id, lead_p.id)
+        ) is None:
+            session.add(ProjectParticipant(
+                project_id=project.id, participant_id=lead_p.id, role_in_project="lead",
+            ))
+        ident = _backend_ident(project)
+        session.commit()
+    if not cfg.api_key:
+        console.print("[yellow]⚠ Atlas обновлён; api_key не задан — ядро не тронуто.[/yellow]")
+        return
+    client = BackendClient(cfg.base_url, cfg.api_key)
+    try:
+        asyncio.run(client.patch_project(
+            ident, visibility="personal",
+            owner_slug=("me" if owner == "dmitry" else owner), lead_slug=owner,
+        ))
+        console.print(f"[green]✓ '{ref}' переведён в личный (ядро+Atlas).[/green]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[yellow]⚠ Atlas обновлён; ядро PATCH не удалось: {exc}.[/yellow]")
+    finally:
+        try:
+            asyncio.run(client.aclose())
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@projects_app.command("link")
+def link_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+    portal: str = typer.Option(..., "--portal", help="slug портала: notion-pragmat | b24-exs | atlas-dmitry"),
+    external: str = typer.Option(..., "--external", help="id сущности в портале"),
+) -> None:
+    """Привязать проект к сущности портала в ядре (entity_link) — без docker exec."""
+    cfg = load_config()
+    if not cfg.api_key:
+        console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
+        raise typer.Exit(code=1)
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        ident = _backend_ident(_resolve_project_or_die(session, ref))
+    client = BackendClient(cfg.base_url, cfg.api_key)
+    try:
+        asyncio.run(client.link_project(ident, portal_slug=portal, external_id=external))
+        console.print(f"[green]✓ '{ref}' ↔ {portal} ({external}).[/green]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]✗ link не удался: {exc}[/red]")
+    finally:
+        try:
+            asyncio.run(client.aclose())
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@projects_app.command("unlink")
+def unlink_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID проекта"),
+    portal: str = typer.Option(..., "--portal", help="slug портала для отвязки"),
+) -> None:
+    """Снять связь проекта с порталом в ядре (entity_link)."""
+    cfg = load_config()
+    if not cfg.api_key:
+        console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
+        raise typer.Exit(code=1)
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        ident = _backend_ident(_resolve_project_or_die(session, ref))
+    client = BackendClient(cfg.base_url, cfg.api_key)
+    try:
+        asyncio.run(client.unlink_project(ident, portal_slug=portal))
+        console.print(f"[green]✓ '{ref}' отвязан от {portal}.[/green]")
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]✗ unlink не удался: {exc}[/red]")
+    finally:
+        try:
+            asyncio.run(client.aclose())
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # --------------------------------------------------------------------------- #

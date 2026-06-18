@@ -640,3 +640,71 @@ def _all_projects(engine):
 
     with make_session(engine) as session:
         return list(session.execute(select(Project)).scalars().all())
+
+
+class TestMakePersonalLinkUnlink:
+    def test_make_personal(self, runner, app, seeded_engine, monkeypatch):
+        """make-personal: Atlas sync_policy=full + lead-участник, ядро PATCH personal."""
+        import atlas.pm.commands.projects as projmod
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Participant, Project, ProjectParticipant
+
+        calls = {}
+
+        class _FC:
+            def __init__(self, *a, **k):
+                pass
+
+            async def patch_project(self, ident, **f):
+                calls["patch"] = (ident, f)
+                return {}
+
+            async def aclose(self):
+                pass
+
+        monkeypatch.setattr(projmod, "BackendClient", _FC)
+        monkeypatch.setenv("ATLAS_API_KEY", "k")
+
+        _add_project(runner, app, "--name", "ПП", "--slug", "pp", "--no-sync")
+        result = runner.invoke(app, ["make-personal", "pp"])
+        assert result.exit_code == 0, _combined(result)
+        ident, f = calls["patch"]
+        assert f["visibility"] == "personal"
+        assert f["lead_slug"] == "dmitry"
+        with make_session(seeded_engine) as s:
+            proj = s.execute(select(Project).where(Project.slug == "pp")).scalar_one()
+            assert proj.sync_policy == "full"
+            dm = s.execute(select(Participant).where(Participant.slug == "dmitry")).scalar_one()
+            assert s.get(ProjectParticipant, (proj.id, dm.id)) is not None
+
+    def test_link_and_unlink(self, runner, app, seeded_engine, monkeypatch):
+        """link/unlink зовут соответствующие методы ядра с portal_slug."""
+        import atlas.pm.commands.projects as projmod
+
+        calls = []
+
+        class _FC:
+            def __init__(self, *a, **k):
+                pass
+
+            async def link_project(self, ident, *, portal_slug, external_id):
+                calls.append(("link", portal_slug, external_id))
+                return {}
+
+            async def unlink_project(self, ident, *, portal_slug):
+                calls.append(("unlink", portal_slug))
+                return {}
+
+            async def aclose(self):
+                pass
+
+        monkeypatch.setattr(projmod, "BackendClient", _FC)
+        monkeypatch.setenv("ATLAS_API_KEY", "k")
+
+        _add_project(runner, app, "--name", "LL", "--slug", "ll", "--no-sync")
+        r1 = runner.invoke(app, ["link", "ll", "--portal", "notion-pragmat", "--external", "np-1"])
+        assert r1.exit_code == 0, _combined(r1)
+        r2 = runner.invoke(app, ["unlink", "ll", "--portal", "b24-exs"])
+        assert r2.exit_code == 0, _combined(r2)
+        assert ("link", "notion-pragmat", "np-1") in calls
+        assert ("unlink", "b24-exs") in calls

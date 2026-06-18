@@ -86,6 +86,27 @@ class BackendClient:
             "notion_page_id": data.get("notion_page_id"),
         }
 
+    async def patch_project(self, slug: str, **fields: Any) -> Any:
+        """Правка модели проекта в ядре без docker exec (PATCH /projects/{slug}).
+        Поля: name/visibility/status/owner_slug/lead_slug/sync_target_slugs/…"""
+        return await self._http.patch(
+            f"{PROJECTS_PATH}/{slug}", json=fields, headers=self._auth()
+        )
+
+    async def link_project(self, slug: str, *, portal_slug: str, external_id: str) -> Any:
+        """Привязать проект к сущности портала (entity_link) через API."""
+        return await self._http.post(
+            f"{PROJECTS_PATH}/{slug}/links",
+            json={"portal_slug": portal_slug, "external_id": external_id},
+            headers=self._auth(),
+        )
+
+    async def unlink_project(self, slug: str, *, portal_slug: str) -> Any:
+        """Снять связь проекта с порталом (entity_link) через API."""
+        return await self._http.delete(
+            f"{PROJECTS_PATH}/{slug}/links/{portal_slug}", headers=self._auth()
+        )
+
     async def aclose(self) -> None:
         """Закрыть нижележащий HTTP-клиент."""
         await self._http.aclose()

@@ -66,7 +66,7 @@ from atlas.pm.paths import (
 )
 from atlas.appconfig import load_config, owner_member_slug
 from atlas.pm.seeds import seed_all
-from atlas.pm.sync.backend_client import BackendClient
+from atlas.pm.sync.hub_service import HubService
 from atlas.pm.slugs import (
     AmbiguousRefError,
     SlugGenerationError,
@@ -901,9 +901,9 @@ def add_cmd(
                 else ["b24-exs", "notion-pragmat"]
             )
             core_owner = "me" if mode.owner_slug == "dmitry" else mode.owner_slug
-            client = BackendClient(cfg.base_url, cfg.api_key)
+            hub = HubService(cfg.base_url, cfg.api_key)
             try:
-                res = asyncio.run(client.provision_project(
+                res = asyncio.run(hub.provision_project(
                     slug=final_slug, name=name, kind="direction",
                     owner_slug=core_owner, lead_slug=mode.lead_slug,
                     visibility=mode.visibility, notion_kind=notion_kind,
@@ -924,11 +924,6 @@ def add_cmd(
                 console.print(
                     f"  [yellow]⚠ Локально создан; раскладка в ядро не удалась: {exc}.[/yellow]"
                 )
-            finally:
-                try:
-                    asyncio.run(client.aclose())
-                except Exception:  # noqa: BLE001
-                    pass
 
 
 # --------------------------------------------------------------------------- #
@@ -972,20 +967,15 @@ def make_personal_cmd(
     if not cfg.api_key:
         console.print("[yellow]⚠ Atlas обновлён; api_key не задан — ядро не тронуто.[/yellow]")
         return
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, cfg.api_key)
     try:
-        asyncio.run(client.patch_project(
+        asyncio.run(hub.patch_project(
             ident, visibility="personal",
             owner_slug=("me" if owner == "dmitry" else owner), lead_slug=owner,
         ))
         console.print(f"[green]✓ '{ref}' переведён в личный (ядро+Atlas).[/green]")
     except Exception as exc:  # noqa: BLE001
         console.print(f"[yellow]⚠ Atlas обновлён; ядро PATCH не удалось: {exc}.[/yellow]")
-    finally:
-        try:
-            asyncio.run(client.aclose())
-        except Exception:  # noqa: BLE001
-            pass
 
 
 @projects_app.command("link")
@@ -1002,17 +992,12 @@ def link_cmd(
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         ident = _backend_ident(_resolve_project_or_die(session, ref))
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, cfg.api_key)
     try:
-        asyncio.run(client.link_project(ident, portal_slug=portal, external_id=external))
+        asyncio.run(hub.link_project(ident, portal_slug=portal, external_id=external))
         console.print(f"[green]✓ '{ref}' ↔ {portal} ({external}).[/green]")
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]✗ link не удался: {exc}[/red]")
-    finally:
-        try:
-            asyncio.run(client.aclose())
-        except Exception:  # noqa: BLE001
-            pass
 
 
 @projects_app.command("import-b24")
@@ -1031,20 +1016,15 @@ def import_b24_cmd(
         console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
         raise typer.Exit(code=1)
     owner = owner_member_slug(cfg.portal_id)
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, cfg.api_key)
     try:
-        res = asyncio.run(client.import_from_b24(
+        res = asyncio.run(hub.import_from_b24(
             group_id=group_id, notion_kind=notion_kind, lead_slug=owner,
             sync_target_slugs=["b24-exs", "notion-pragmat", "atlas-dmitry"],
         ))
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]✗ import из Б24 не удался: {exc}[/red]")
         raise typer.Exit(code=1)
-    finally:
-        try:
-            asyncio.run(client.aclose())
-        except Exception:  # noqa: BLE001
-            pass
 
     name = res.get("name") or f"Б24 группа {group_id}"
     engine = make_engine(_db_url())
@@ -1106,17 +1086,12 @@ def unlink_cmd(
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         ident = _backend_ident(_resolve_project_or_die(session, ref))
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, cfg.api_key)
     try:
-        asyncio.run(client.unlink_project(ident, portal_slug=portal))
+        asyncio.run(hub.unlink_project(ident, portal_slug=portal))
         console.print(f"[green]✓ '{ref}' отвязан от {portal}.[/green]")
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]✗ unlink не удался: {exc}[/red]")
-    finally:
-        try:
-            asyncio.run(client.aclose())
-        except Exception:  # noqa: BLE001
-            pass
 
 
 # --------------------------------------------------------------------------- #

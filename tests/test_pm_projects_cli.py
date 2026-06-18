@@ -189,7 +189,7 @@ class TestAdd:
             async def aclose(self):
                 pass
 
-        monkeypatch.setattr(projmod, "BackendClient", _FakeClient)
+        monkeypatch.setattr(projmod, "HubService", _FakeClient)
         monkeypatch.setenv("ATLAS_API_KEY", "test-key")
 
         result = runner.invoke(
@@ -222,7 +222,7 @@ class TestAdd:
             async def aclose(self):
                 pass
 
-        monkeypatch.setattr(projmod, "BackendClient", _Boom)
+        monkeypatch.setattr(projmod, "HubService", _Boom)
         monkeypatch.setenv("ATLAS_API_KEY", "test-key")
 
         result = _add_project(runner, app, "--name", "Без синка", "--no-sync")
@@ -662,7 +662,7 @@ class TestMakePersonalLinkUnlink:
             async def aclose(self):
                 pass
 
-        monkeypatch.setattr(projmod, "BackendClient", _FC)
+        monkeypatch.setattr(projmod, "HubService", _FC)
         monkeypatch.setenv("ATLAS_API_KEY", "k")
 
         _add_project(runner, app, "--name", "ПП", "--slug", "pp", "--no-sync")
@@ -698,7 +698,7 @@ class TestMakePersonalLinkUnlink:
             async def aclose(self):
                 pass
 
-        monkeypatch.setattr(projmod, "BackendClient", _FC)
+        monkeypatch.setattr(projmod, "HubService", _FC)
         monkeypatch.setenv("ATLAS_API_KEY", "k")
 
         _add_project(runner, app, "--name", "LL", "--slug", "ll", "--no-sync")
@@ -726,7 +726,7 @@ class TestMakePersonalLinkUnlink:
             async def aclose(self):
                 pass
 
-        monkeypatch.setattr(projmod, "BackendClient", _FC)
+        monkeypatch.setattr(projmod, "HubService", _FC)
         monkeypatch.setenv("ATLAS_API_KEY", "k")
 
         result = runner.invoke(app, ["import-b24", "99"])

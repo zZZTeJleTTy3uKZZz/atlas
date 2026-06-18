@@ -47,15 +47,25 @@ _PAYLOAD = {
 }
 
 
-def to_event(op: str, entity_kind: str, obj: Any, *, portal_id: str) -> dict:
-    """Построить EventIn-dict из ORM-сущности."""
+def to_event(
+    op: str, entity_kind: str, obj: Any, *, portal_id: str, project: Any = None
+) -> dict:
+    """Построить EventIn-dict из ORM-сущности.
+
+    ``project`` (если передан) добавляет в payload ``project_slug`` для task/epic —
+    ядру нужен slug проекта-контейнера, чтобы привязать сущность (иначе
+    ``_apply_to_core`` уходит в ``skipped_no_project``). enqueue знает проект.
+    """
     build = _PAYLOAD[entity_kind]
     backend_id = getattr(obj, "backend_id", None)
+    payload = build(obj)
+    if project is not None and entity_kind in ("task", "epic"):
+        payload["project_slug"] = project.slug
     return {
         "entity_kind": entity_kind,
         "op": op,
         "entity_id": backend_id or obj.id,
-        "payload_json": build(obj),
+        "payload_json": payload,
         "source_portal_id": portal_id,
     }
 

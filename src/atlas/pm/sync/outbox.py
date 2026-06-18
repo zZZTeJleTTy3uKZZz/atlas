@@ -24,7 +24,7 @@ def enqueue(
     """
     if not policy.should_sync(session, entity_kind, project):
         return None
-    event = mapper.to_event(op, entity_kind, obj, portal_id=portal_id)
+    event = mapper.to_event(op, entity_kind, obj, portal_id=portal_id, project=project)
     ob = Outbox(
         op=op,
         entity_kind=entity_kind,

@@ -29,3 +29,17 @@ class AtlasConfig(AppConfig):
 def load_config() -> AtlasConfig:
     """Загрузить конфиг бренда ``atlas`` (слои + env)."""
     return AtlasConfig.load("atlas")
+
+
+# Соответствие портала-стора → дефолтный member-slug владельца нового проекта.
+# Единая точка (без хардкода имён в командах): atlas-dmitry/atlas-admin — Дмитрий.
+_PORTAL_OWNER = {"atlas-dmitry": "dmitry", "atlas-admin": "dmitry"}
+
+
+def owner_member_slug(portal_id: str) -> str:
+    """Дефолтный владелец/руководитель нового проекта, исходя из портала-стора.
+
+    Используется ``project add``: без ``--owner`` владельцем становится тот, чей
+    это стор. Неизвестный портал → ``dmitry`` (единственный человек-владелец MVP).
+    """
+    return _PORTAL_OWNER.get(portal_id, "dmitry")

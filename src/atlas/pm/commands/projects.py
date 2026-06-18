@@ -1015,6 +1015,84 @@ def link_cmd(
             pass
 
 
+@projects_app.command("import-b24")
+def import_b24_cmd(
+    group_id: int = typer.Argument(..., help="ID группы (проекта) в Б24"),
+    notion_kind: str = typer.Option(
+        "клиентский", "--notion-kind", help="личный | клиентский | компанейский",
+    ),
+) -> None:
+    """Втянуть существующую группу Б24 в ядро+Notion+Atlas (автономность Б24→всё).
+
+    Ядро создаёт core_project + связь↔Б24 + Notion-страницу; локально заводит
+    Atlas-проект с backend_id (идемпотентно по backend_id)."""
+    cfg = load_config()
+    if not cfg.api_key:
+        console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
+        raise typer.Exit(code=1)
+    owner = owner_member_slug(cfg.portal_id)
+    client = BackendClient(cfg.base_url, cfg.api_key)
+    try:
+        res = asyncio.run(client.import_from_b24(
+            group_id=group_id, notion_kind=notion_kind, lead_slug=owner,
+            sync_target_slugs=["b24-exs", "notion-pragmat", "atlas-dmitry"],
+        ))
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]✗ import из Б24 не удался: {exc}[/red]")
+        raise typer.Exit(code=1)
+    finally:
+        try:
+            asyncio.run(client.aclose())
+        except Exception:  # noqa: BLE001
+            pass
+
+    name = res.get("name") or f"Б24 группа {group_id}"
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        from atlas.pm.models import SyncPolicy
+        existing = session.execute(
+            select(Project).where(Project.backend_id == res["backend_id"])
+        ).scalar_one_or_none()
+        if existing is not None:
+            console.print(f"[yellow]Уже в Atlas: '{existing.slug}'.[/yellow]")
+            return
+        pt = session.execute(
+            select(ProjectType).where(ProjectType.slug == "client-project")
+        ).scalar_one()
+        ps = session.execute(
+            select(ProjectStatus).where(ProjectStatus.slug == "active")
+        ).scalar_one()
+        base = slugify_text(name) or f"b24-{group_id}"
+        fslug = generate_unique_slug(base, _slug_exists_fn(session))
+        fprefix = _generate_unique_prefix(
+            session, generate_prefix_from_slug(fslug) or "imp"
+        )
+        proj = Project(
+            slug=fslug, prefix=fprefix, name=name, type_id=pt.id, status_id=ps.id,
+            priority="P2", one_line_summary=f"Импортирован из Б24 (группа #{group_id})",
+            backend_id=res["backend_id"], notion_project_id=res.get("notion_page_id"),
+        )
+        if session.get(SyncPolicy, "media") is not None:
+            proj.sync_policy = "media"
+        session.add(proj)
+        session.flush()
+        lead_p = session.execute(
+            select(Participant).where(Participant.slug == owner)
+        ).scalar_one_or_none()
+        if lead_p is not None:
+            session.add(ProjectParticipant(
+                project_id=proj.id, participant_id=lead_p.id, role_in_project="lead",
+            ))
+        _log_action(session, action="project_imported_b24", entity_id=proj.id,
+                    details={"group_id": group_id, "backend_id": res["backend_id"]})
+        result_slug = proj.slug
+        session.commit()
+    console.print(
+        f"[green]✓ Б24-группа #{group_id} импортирована → Atlas '{result_slug}' "
+        f"(backend={res['backend_id']}).[/green]"
+    )
+
+
 @projects_app.command("unlink")
 def unlink_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),

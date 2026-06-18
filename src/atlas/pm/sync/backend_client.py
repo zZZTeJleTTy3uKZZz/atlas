@@ -86,6 +86,28 @@ class BackendClient:
             "notion_page_id": data.get("notion_page_id"),
         }
 
+    async def import_from_b24(
+        self, *, group_id: int, notion_kind: str = "клиентский",
+        lead_slug: str | None = "dmitry", sync_target_slugs: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Втянуть группу Б24 в ядро+Notion (POST /projects/import-from-b24).
+        Возвращает {'backend_id','notion_page_id','name','slug'}."""
+        body: dict[str, Any] = {"group_id": group_id, "notion_kind": notion_kind}
+        if lead_slug is not None:
+            body["lead_slug"] = lead_slug
+        if sync_target_slugs is not None:
+            body["sync_target_slugs"] = sync_target_slugs
+        resp = await self._http.post(
+            f"{PROJECTS_PATH}/import-from-b24", json=body, headers=self._auth()
+        )
+        data = resp[0] if isinstance(resp, list) else resp
+        return {
+            "backend_id": data.get("backend_id") or data.get("id"),
+            "notion_page_id": data.get("notion_page_id"),
+            "name": data.get("name"),
+            "slug": data.get("slug"),
+        }
+
     async def patch_project(self, slug: str, **fields: Any) -> Any:
         """Правка модели проекта в ядре без docker exec (PATCH /projects/{slug}).
         Поля: name/visibility/status/owner_slug/lead_slug/sync_target_slugs/…"""

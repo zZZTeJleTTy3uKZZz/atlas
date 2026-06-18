@@ -708,3 +708,34 @@ class TestMakePersonalLinkUnlink:
         assert r2.exit_code == 0, _combined(r2)
         assert ("link", "notion-pragmat", "np-1") in calls
         assert ("unlink", "b24-exs") in calls
+
+    def test_import_b24(self, runner, app, seeded_engine, monkeypatch):
+        """import-b24: зовёт ядро + создаёт локальный Atlas-проект с backend_id."""
+        import atlas.pm.commands.projects as projmod
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Participant, Project, ProjectParticipant
+
+        class _FC:
+            def __init__(self, *a, **k):
+                pass
+
+            async def import_from_b24(self, **kw):
+                return {"backend_id": "core-1", "notion_page_id": "np-1",
+                        "name": "Каша.ру", "slug": "b24-group-99"}
+
+            async def aclose(self):
+                pass
+
+        monkeypatch.setattr(projmod, "BackendClient", _FC)
+        monkeypatch.setenv("ATLAS_API_KEY", "k")
+
+        result = runner.invoke(app, ["import-b24", "99"])
+        assert result.exit_code == 0, _combined(result)
+        with make_session(seeded_engine) as s:
+            proj = s.execute(
+                select(Project).where(Project.backend_id == "core-1")
+            ).scalar_one()
+            assert proj.name == "Каша.ру"
+            assert proj.notion_project_id == "np-1"
+            dm = s.execute(select(Participant).where(Participant.slug == "dmitry")).scalar_one()
+            assert s.get(ProjectParticipant, (proj.id, dm.id)) is not None

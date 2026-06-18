@@ -59,6 +59,22 @@ class _FakeHttp2:
 
 
 @pytest.mark.asyncio
+async def test_import_from_b24_posts_and_returns():
+    http = _FakeHttp()  # отдаёт [{"id":"core-1","notion_page_id":"np-1"}]
+    c = BackendClient("http://t", "K", http=http)
+    res = await c.import_from_b24(group_id=99, notion_kind="клиентский",
+                                  lead_slug="dmitry", sync_target_slugs=["b24-exs"])
+    path, body, _ = http.calls[0]
+    assert path == "/api/v1/projects/import-from-b24"
+    assert body["group_id"] == 99
+    assert body["notion_kind"] == "клиентский"
+    assert body["lead_slug"] == "dmitry"
+    assert body["sync_target_slugs"] == ["b24-exs"]
+    assert res["backend_id"] == "core-1"
+    assert res["notion_page_id"] == "np-1"
+
+
+@pytest.mark.asyncio
 async def test_patch_link_unlink_project():
     http = _FakeHttp2()
     c = BackendClient("http://t", "K", http=http)

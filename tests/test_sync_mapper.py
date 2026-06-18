@@ -42,6 +42,32 @@ def test_epic_event_includes_project_slug():
     assert ev["payload_json"]["project_slug"] == "acme"
 
 
+def test_task_event_includes_project_backend_id():
+    """payload задачи несёт project_backend_id (= core-id проекта-контейнера).
+    Ядро резолвит контейнер по нему — надёжно при разнобое имён Atlas↔ядро
+    (Atlas-slug 'mediyka' ≠ ядро-slug 'b24-group-44'); project_slug — fallback."""
+    task = SimpleNamespace(
+        id="loc-1", backend_id=None, slug="acme-t1", title="T", status="todo",
+        priority="P2", cpp_description="ц", due_date=None,
+    )
+    project = SimpleNamespace(slug="mediyka", backend_id="core-44")
+    ev = mapper.to_event("create", "task", task, portal_id="atlas-dmitry", project=project)
+    assert ev["payload_json"]["project_backend_id"] == "core-44"
+    assert ev["payload_json"]["project_slug"] == "mediyka"
+
+
+def test_task_event_project_backend_id_none_when_unlinked():
+    """Проект ещё не связан с ядром (backend_id=None) → ключ присутствует как None
+    (стабильный контракт); ядро тогда падает в fallback по project_slug."""
+    task = SimpleNamespace(
+        id="loc-1", backend_id=None, slug="acme-t1", title="T", status="todo",
+        priority="P2", cpp_description="ц", due_date=None,
+    )
+    project = SimpleNamespace(slug="mediyka", backend_id=None)
+    ev = mapper.to_event("create", "task", task, portal_id="atlas-dmitry", project=project)
+    assert ev["payload_json"]["project_backend_id"] is None
+
+
 # --------------------------------------------------------------------------- #
 # PART A: причастные доезжают в payload (assignees = [{slug, role}])           #
 # --------------------------------------------------------------------------- #

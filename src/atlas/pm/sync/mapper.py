@@ -137,6 +137,9 @@ def to_event(
     payload = build(obj)
     if project is not None and entity_kind in ("task", "epic"):
         payload["project_slug"] = project.slug
+        # core-id проекта-контейнера: ядро резолвит контейнер по нему (надёжно при
+        # разнобое имён Atlas↔ядро), project_slug — fallback. None пока не связан.
+        payload["project_backend_id"] = getattr(project, "backend_id", None)
     if entity_kind == "task":
         payload["assignees"] = list(assignees or [])
     return {

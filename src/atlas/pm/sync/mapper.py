@@ -18,46 +18,59 @@ def _iso(v: Any) -> Any:
     return v.isoformat() if hasattr(v, "isoformat") else v
 
 
-def assignee_slugs(session: Any, task: Any) -> list[str]:
-    """Собрать participant-slug'и ответственных/исполнителей задачи.
+def assignees(session: Any, task: Any) -> list[dict]:
+    """Собрать причастных задачи как ``[{"slug": ..., "role": ...}]``.
 
-    Источники (объединяются, порядок стабилен, дубли убираются):
+    Источники (объединяются, порядок стабилен, дубли по slug убираются —
+    первое вхождение побеждает):
       1. ``Task.assignee_id`` — denormalized «главный исполнитель» (его пишет
-         ``task add --assignee``); он первым, чтобы responsible шёл в начале.
+         ``task add --assignee``); роль всегда ``responsible``, идёт первым,
+         поэтому при коллизии slug responsible приоритетнее executor.
       2. ``TaskMember`` с ролью responsible|executor (его пишет ``member add``);
-         watcher не входит.
+         роль берётся из строки. watcher НЕ входит — наблюдатель не исполнитель.
 
-    Ноль хардкода имён: всё резолвится через ``Participant.slug``. Возвращает
-    [] если у задачи нет ни assignee_id, ни исполняющих TaskMember.
+    Ноль хардкода имён: всё резолвится через ``Participant.slug``. role ∈
+    {"responsible","executor"}. Возвращает [] если причастных нет — стабильный
+    контракт (ключ ``assignees`` всегда присутствует на task-событиях).
     """
     from sqlalchemy import select
 
     from atlas.pm.models import Participant, TaskMember
 
-    ordered: list[str] = []
+    ordered: list[dict] = []
     seen: set[str] = set()
 
-    def _add(slug: str | None) -> None:
+    def _add(slug: str | None, role: str) -> None:
         if slug and slug not in seen:
             seen.add(slug)
-            ordered.append(slug)
+            ordered.append({"slug": slug, "role": role})
 
     if getattr(task, "assignee_id", None):
         main = session.get(Participant, task.assignee_id)
-        _add(main.slug if main else None)
+        _add(main.slug if main else None, "responsible")
 
     rows = session.execute(
-        select(Participant.slug)
+        select(Participant.slug, TaskMember.role)
         .join(TaskMember, TaskMember.participant_id == Participant.id)
         .where(
             TaskMember.task_id == task.id,
             TaskMember.role.in_(_ASSIGNEE_ROLES),
         )
-    ).scalars().all()
-    for slug in rows:
-        _add(slug)
+    ).all()
+    for slug, role in rows:
+        _add(slug, role)
 
     return ordered
+
+
+def assignee_slugs(session: Any, task: Any) -> list[str]:
+    """LEGACY: плоский список slug'ов причастных (без ролей).
+
+    Сохранён для обратной совместимости. Внутри — те же источники, что и
+    :func:`assignees`; роль отбрасывается. Новый код должен использовать
+    :func:`assignees`, чтобы не терять responsible/executor.
+    """
+    return [a["slug"] for a in assignees(session, task)]
 
 
 def _project_payload(p: Any) -> dict:
@@ -101,7 +114,7 @@ def to_event(
     *,
     portal_id: str,
     project: Any = None,
-    assignee_slugs: list[str] | None = None,
+    assignees: list[dict] | None = None,
 ) -> dict:
     """Построить EventIn-dict из ORM-сущности.
 
@@ -109,12 +122,15 @@ def to_event(
     ядру нужен slug проекта-контейнера, чтобы привязать сущность (иначе
     ``_apply_to_core`` уходит в ``skipped_no_project``). enqueue знает проект.
 
-    ``assignee_slugs`` (только для task) — participant-slug'и ответственных/
-    исполнителей. Кладутся в payload под ключом ``assignee_slugs`` (НЕ
+    ``assignees`` (только для task) — список причастных как
+    ``[{"slug": str, "role": str}]``, role ∈ {"responsible","executor"}
+    (watcher НЕ включается). Кладётся в payload под ключом ``assignees`` (НЕ
     ``assignee_member_ids``: тот несёт уже зарезолвленные core-member-id с
     Б24-пути — смешивать со slug'ами нельзя, сломает FK ядра). Резолв
-    slug→core-member-id — на стороне оркестратора ядра (PART B). Ключ всегда
-    присутствует (пустой список при отсутствии исполнителей) — стабильный контракт.
+    slug→core-member-id и роли — на стороне оркестратора ядра. Ключ всегда
+    присутствует (пустой список при отсутствии причастных) — стабильный
+    контракт; присутствие ключа = «полный список причастных» (сигнал reconcile
+    для ядра). Плоский LEGACY-ключ ``assignee_slugs`` больше не кладётся.
     """
     build = _PAYLOAD[entity_kind]
     backend_id = getattr(obj, "backend_id", None)
@@ -122,7 +138,7 @@ def to_event(
     if project is not None and entity_kind in ("task", "epic"):
         payload["project_slug"] = project.slug
     if entity_kind == "task":
-        payload["assignee_slugs"] = list(assignee_slugs or [])
+        payload["assignees"] = list(assignees or [])
     return {
         "entity_kind": entity_kind,
         "op": op,

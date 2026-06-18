@@ -5,9 +5,11 @@ import typer
 from clikit import command, emit_data
 from sqlalchemy import select
 
+from atlas.pm.commands.pm_tasks import _sync_portal_id
 from atlas.pm.db import make_engine, make_session, resolve_db_url
-from atlas.pm.models import Participant, TaskMember
+from atlas.pm.models import Participant, Project, TaskMember
 from atlas.pm.slugs import resolve_task_ref
+from atlas.pm.sync import outbox as _outbox
 
 member_app = typer.Typer(no_args_is_help=True, help="Участники задачи (роли).")
 _ROLES = {"responsible", "executor", "watcher"}
@@ -21,6 +23,24 @@ def _participant(session, slug):
     return session.execute(
         select(Participant).where(Participant.slug == slug)
     ).scalar_one_or_none()
+
+
+def _enqueue_task_update(session, task) -> None:
+    """Best-effort: выгрузить новый состав задачи сразу (enqueue update task).
+
+    Смена участников = смена task-payload (ключ ``assignees``), поэтому ставим
+    op=update этой задачи в outbox — как делают pm_tasks add/update. Резолв
+    проекта и portal_id из конфига (ноль хардкода). try/except, чтобы сбой синка
+    не валил CLI: участник всё равно изменён."""
+    try:
+        proj = session.get(Project, task.project_id)
+        if proj is not None:
+            _outbox.enqueue(
+                session, "update", "task", task,
+                project=proj, portal_id=_sync_portal_id(),
+            )
+    except Exception:
+        pass
 
 
 @member_app.command("add")
@@ -42,6 +62,8 @@ def add_cmd(
         exists = session.get(TaskMember, (t.id, p.id, role))
         if exists is None:
             session.add(TaskMember(task_id=t.id, participant_id=p.id, role=role))
+            session.flush()
+            _enqueue_task_update(session, t)
             session.commit()
         emit_data(
             {"task_id": t.id, "participant": participant, "role": role},
@@ -87,5 +109,7 @@ def rm_cmd(
         tm = session.get(TaskMember, (t.id, p.id, role))
         if tm is not None:
             session.delete(tm)
+            session.flush()
+            _enqueue_task_update(session, t)
             session.commit()
         emit_data({"removed": tm is not None}, text_renderer=lambda d: print("✓ removed" if d["removed"] else "— нет такого"))

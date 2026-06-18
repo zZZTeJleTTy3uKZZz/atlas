@@ -43,7 +43,7 @@ def test_epic_event_includes_project_slug():
 
 
 # --------------------------------------------------------------------------- #
-# PART A: ответственный/исполнитель доезжает в payload (assignee_slugs)        #
+# PART A: причастные доезжают в payload (assignees = [{slug, role}])           #
 # --------------------------------------------------------------------------- #
 
 
@@ -56,25 +56,31 @@ def _make_task(**over):
     return SimpleNamespace(**base)
 
 
-def test_task_payload_includes_assignee_slugs_when_passed():
-    """mapper кладёт participant-slug'и ответственных/исполнителей в payload под
-    ключом assignee_slugs — отдельно от assignee_member_ids (тот несёт уже
-    зарезолвленные core-member-id с Б24-пути; смешивать нельзя — сломает FK ядра)."""
+def test_task_payload_includes_assignees_when_passed():
+    """mapper кладёт причастных как [{slug, role}] в payload под ключом
+    assignees — отдельно от assignee_member_ids (тот несёт уже зарезолвленные
+    core-member-id с Б24-пути; смешивать нельзя — сломает FK ядра). Роль
+    (responsible/executor) сохраняется."""
     task = _make_task()
     ev = mapper.to_event(
         "create", "task", task, portal_id="atlas-local",
-        assignee_slugs=["dmitry", "claude"],
+        assignees=[
+            {"slug": "dmitry", "role": "responsible"},
+            {"slug": "claude", "role": "executor"},
+        ],
     )
-    assert ev["payload_json"]["assignee_slugs"] == ["dmitry", "claude"]
+    assert ev["payload_json"]["assignees"] == [
+        {"slug": "dmitry", "role": "responsible"},
+        {"slug": "claude", "role": "executor"},
+    ]
 
 
-def test_task_payload_assignee_slugs_empty_by_default():
-    """Без участников ключ присутствует как пустой список (стабильный контракт:
-    ядро читает f.get(...) or [] — отсутствие и пустота эквивалентны, но явный
-    [] не даёт мапперу терять ключ между версиями)."""
+def test_task_payload_assignees_empty_by_default():
+    """Без причастных ключ присутствует как пустой список (стабильный контракт:
+    присутствие ключа = «полный список причастных» — сигнал reconcile для ядра)."""
     task = _make_task()
     ev = mapper.to_event("create", "task", task, portal_id="atlas-local")
-    assert ev["payload_json"]["assignee_slugs"] == []
+    assert ev["payload_json"]["assignees"] == []
 
 
 def test_assignee_member_ids_not_polluted_with_slugs():
@@ -82,15 +88,17 @@ def test_assignee_member_ids_not_polluted_with_slugs():
     core-member-id, только slug'и; резолв slug→member_id — забота оркестратора (PART B)."""
     task = _make_task()
     ev = mapper.to_event(
-        "create", "task", task, portal_id="atlas-local", assignee_slugs=["dmitry"],
+        "create", "task", task, portal_id="atlas-local",
+        assignees=[{"slug": "dmitry", "role": "responsible"}],
     )
     assert "assignee_member_ids" not in ev["payload_json"]
 
 
-def test_assignee_slugs_only_on_task_not_epic():
-    """assignee_slugs — поле задачи; в epic-payload его быть не должно."""
+def test_assignees_only_on_task_not_epic():
+    """assignees — поле задачи; в epic-payload его быть не должно."""
     epic = SimpleNamespace(id="loc", backend_id=None, slug="e", title="E", status="active")
     ev = mapper.to_event(
-        "create", "epic", epic, portal_id="atlas-local", assignee_slugs=["dmitry"],
+        "create", "epic", epic, portal_id="atlas-local",
+        assignees=[{"slug": "dmitry", "role": "responsible"}],
     )
-    assert "assignee_slugs" not in ev["payload_json"]
+    assert "assignees" not in ev["payload_json"]

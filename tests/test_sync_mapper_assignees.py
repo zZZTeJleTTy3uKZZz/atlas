@@ -96,3 +96,67 @@ def test_assignee_slugs_empty_when_no_assignee(session):
     p = _project(session)
     task = _task(session, p)
     assert mapper.assignee_slugs(session, task) == []
+
+
+# --------------------------------------------------------------------------- #
+# mapper.assignees — slug + role (НЕ плоский список): responsible vs executor #
+# --------------------------------------------------------------------------- #
+
+
+def test_assignees_from_denormalized_assignee_id_is_responsible(session):
+    """Task.assignee_id — «главный исполнитель», его роль responsible."""
+    p = _project(session)
+    dm = Participant(kind="human", slug="dmitry", name="Дмитрий")
+    session.add(dm); session.flush()
+    task = _task(session, p, assignee_id=dm.id)
+    assert mapper.assignees(session, task) == [{"slug": "dmitry", "role": "responsible"}]
+
+
+def test_assignees_keeps_responsible_and_executor_roles_distinct(session):
+    """member add responsible|executor → роли сохранены раздельно (не схлопнуты)."""
+    p = _project(session)
+    dm = Participant(kind="human", slug="dmitry", name="Дмитрий")
+    cl = Participant(kind="ai_agent", slug="claude", name="Claude")
+    session.add_all([dm, cl]); session.flush()
+    task = _task(session, p)
+    session.add_all([
+        TaskMember(task_id=task.id, participant_id=dm.id, role="responsible"),
+        TaskMember(task_id=task.id, participant_id=cl.id, role="executor"),
+    ])
+    session.flush()
+    assert {(a["slug"], a["role"]) for a in mapper.assignees(session, task)} == {
+        ("dmitry", "responsible"), ("claude", "executor"),
+    }
+
+
+def test_assignees_excludes_watcher(session):
+    """Наблюдатель (watcher) — не исполнитель, в assignees не входит."""
+    p = _project(session)
+    dm = Participant(kind="human", slug="dmitry", name="Дмитрий")
+    w = Participant(kind="human", slug="observer", name="Наблюдатель")
+    session.add_all([dm, w]); session.flush()
+    task = _task(session, p)
+    session.add_all([
+        TaskMember(task_id=task.id, participant_id=dm.id, role="responsible"),
+        TaskMember(task_id=task.id, participant_id=w.id, role="watcher"),
+    ])
+    session.flush()
+    assert mapper.assignees(session, task) == [{"slug": "dmitry", "role": "responsible"}]
+
+
+def test_assignees_dedups_slug_with_responsible_priority(session):
+    """dmitry в assignee_id (responsible) и в TaskMember(executor) — один раз,
+    с приоритетом responsible (источник assignee_id первый и побеждает)."""
+    p = _project(session)
+    dm = Participant(kind="human", slug="dmitry", name="Дмитрий")
+    session.add(dm); session.flush()
+    task = _task(session, p, assignee_id=dm.id)
+    session.add(TaskMember(task_id=task.id, participant_id=dm.id, role="executor"))
+    session.flush()
+    assert mapper.assignees(session, task) == [{"slug": "dmitry", "role": "responsible"}]
+
+
+def test_assignees_empty_when_no_assignee(session):
+    p = _project(session)
+    task = _task(session, p)
+    assert mapper.assignees(session, task) == []

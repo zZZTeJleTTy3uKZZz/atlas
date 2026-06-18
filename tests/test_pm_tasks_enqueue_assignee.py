@@ -1,8 +1,9 @@
-"""PART A: `task add --assignee <slug>` кладёт slug в outbox payload.
+"""PART A: `task add --assignee <slug>` кладёт причастного в outbox payload.
 
-Сквозной путь: CLI → Task.assignee_id → enqueue → mapper.assignee_slugs →
-payload_json["assignee_slugs"]. Без этого ядро получает task без участников,
-TaskMember=0, Notion «Ответственный» пуст.
+Сквозной путь: CLI → Task.assignee_id → enqueue → mapper.assignees →
+payload_json["assignees"] = [{slug, role}]. Без этого ядро получает task без
+причастных, TaskMember=0, Notion «Ответственный» пуст. Task.assignee_id →
+role=responsible.
 """
 import json
 import os
@@ -46,7 +47,7 @@ def test_task_add_with_assignee_enqueues_slug(tmp_path):
         with make_session(engine) as s:
             ob = s.query(Outbox).one()
             payload = json.loads(ob.payload_json)["payload_json"]
-            assert payload["assignee_slugs"] == ["dmitry"]
+            assert payload["assignees"] == [{"slug": "dmitry", "role": "responsible"}]
     finally:
         os.environ.pop("ATLAS_DB_URL", None)
 
@@ -63,6 +64,6 @@ def test_task_add_without_assignee_enqueues_empty(tmp_path):
         with make_session(engine) as s:
             ob = s.query(Outbox).one()
             payload = json.loads(ob.payload_json)["payload_json"]
-            assert payload["assignee_slugs"] == []
+            assert payload["assignees"] == []
     finally:
         os.environ.pop("ATLAS_DB_URL", None)

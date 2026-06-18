@@ -190,7 +190,7 @@ class TestProjectsMemberAdd:
                 select(func.count()).select_from(ProjectParticipant)
                 .where(ProjectParticipant.project_id == proj.id)
             ).scalar()
-            assert count == 1  # дубля нет
+            assert count == 2  # dmitry (авто-lead) + ivan; дубля ivan нет
             part = session.execute(
                 select(Participant).where(Participant.slug == "ivan")
             ).scalar_one()
@@ -357,7 +357,12 @@ class TestProjectsMemberRemove:
                 select(func.count()).select_from(ProjectParticipant)
                 .where(ProjectParticipant.project_id == proj.id)
             ).scalar()
-            assert count == 0
+            # ivan снят; остаётся только dmitry (авто-lead владельца)
+            assert count == 1
+            ivan = session.execute(
+                select(Participant).where(Participant.slug == "ivan")
+            ).scalar_one()
+            assert session.get(ProjectParticipant, (proj.id, ivan.id)) is None
 
     def test_member_remove_absent_graceful(
         self, runner, projects_app, participants_app, seeded_engine

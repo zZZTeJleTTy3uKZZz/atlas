@@ -543,7 +543,7 @@ def init_cmd(
 @projects_app.command("add")
 def add_cmd(
     name: str = typer.Option(..., "--name", help="Человекочитаемое название проекта"),
-    type_slug: str = typer.Option(..., "--type", help="Тип: client-project / business-product / ..."),
+    type_slug: Optional[str] = typer.Option(None, "--type", help="Тип проекта. Если не задан — personal-project (личный)."),
     slug: Optional[str] = typer.Option(
         None, "--slug",
         help="Уникальный slug ([a-z0-9-], 2-50). Если не задан — авто из --name.",
@@ -593,6 +593,18 @@ def add_cmd(
         None, "--commit-message",
         help="(только при --init-git) сообщение initial коммита.",
     ),
+    team: bool = typer.Option(
+        False, "--team",
+        help="Командный проект (владелец Цифро.ПРО). По умолчанию — личный (твой).",
+    ),
+    owner: Optional[str] = typer.Option(
+        None, "--owner",
+        help="Slug владельца (по умолчанию — ты). Чужой владелец → командный проект.",
+    ),
+    no_sync: bool = typer.Option(
+        False, "--no-sync",
+        help="Не раскладывать в ядро/Notion (создать только в Atlas).",
+    ),
 ) -> None:
     """Создать новый проект в портфеле.
 
@@ -603,6 +615,14 @@ def add_cmd(
       4. --init-git     → git init + GitLab create + push (опционально).
     """
     _validate_priority(priority)
+
+    # ----- режим проекта: личный по умолчанию (владелец+lead = ты), флаги переопределяют -----
+    from atlas.appconfig import load_config, owner_member_slug
+    from atlas.pm.commands._provision import resolve_project_mode
+    mode = resolve_project_mode(
+        type_flag=type_slug, team=team, owner=owner,
+        default_owner=owner_member_slug(load_config().portal_id),
+    )
 
     deadline_dt: Optional[datetime] = None
     if deadline:
@@ -619,11 +639,11 @@ def add_cmd(
 
     with make_session(engine) as session:
         pt = session.execute(
-            select(ProjectType).where(ProjectType.slug == type_slug)
+            select(ProjectType).where(ProjectType.slug == mode.type_slug)
         ).scalar_one_or_none()
         if pt is None:
             console.print(
-                f"[red]Тип '{type_slug}' не найден. См. `atlas projects types`.[/red]"
+                f"[red]Тип '{mode.type_slug}' не найден. См. `atlas projects types`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -701,7 +721,7 @@ def add_cmd(
                 (),
                 {
                     "slug": final_slug,
-                    "type_slug": type_slug,
+                    "type_slug": mode.type_slug,
                     "archived": False,
                     "archived_group": None,
                 },
@@ -736,13 +756,34 @@ def add_cmd(
             tag_slugs_for_log = [t.slug for t in resolved_tags]
             attach_tags(session, project.id, [t.id for t in resolved_tags])
 
+        # ----- авто-раскладка (этап 1): политика синка + lead-участник (владелец) -----
+        # owner-counterparty проставляется в ЯДРЕ на этапе 2 (provision); в Atlas
+        # «владелец» = lead-участник (он руководит проектом и видит все задачи).
+        # sync_policy — FK на sync_policies: ставим только если значение существует
+        # (в неполных тест-средах справочник может быть не засеян → не роняем add).
+        from atlas.pm.models import SyncPolicy
+        if session.get(SyncPolicy, mode.sync_policy) is not None:
+            project.sync_policy = mode.sync_policy
+        lead_p = session.execute(
+            select(Participant).where(Participant.slug == mode.lead_slug)
+        ).scalar_one_or_none()
+        if lead_p is not None and session.get(
+            ProjectParticipant, (project.id, lead_p.id)
+        ) is None:
+            session.add(ProjectParticipant(
+                project_id=project.id, participant_id=lead_p.id, role_in_project="lead",
+            ))
+
         details: dict[str, Any] = {
             "slug": final_slug,
             "prefix": final_prefix,
             "name": name,
-            "type": type_slug,
+            "type": mode.type_slug,
             "priority": priority,
             "status": status_slug,
+            "visibility": mode.visibility,
+            "owner": mode.owner_slug,
+            "lead": mode.lead_slug,
         }
         if tag_slugs_for_log:
             details["tags"] = tag_slugs_for_log
@@ -762,10 +803,11 @@ def add_cmd(
 
         console.print(f"[green]✓ Project '{final_slug}' created[/green]")
         console.print(f"  Name:     {name}")
-        console.print(f"  Type:     {type_slug}")
+        console.print(f"  Type:     {mode.type_slug}")
         console.print(f"  Prefix:   {final_prefix}")
         console.print(f"  Priority: {priority}")
         console.print(f"  Status:   {status_slug}")
+        console.print(f"  Владелец: {mode.owner_slug}  ·  lead: {mode.lead_slug}  ·  {mode.visibility}")
         if resolved_local_path:
             console.print(f"  Path:     {resolved_local_path}")
 
@@ -773,7 +815,7 @@ def add_cmd(
         if setup_layout:
             try:
                 _, storage_path, junction_created = _setup_storage_and_junction(
-                    final_slug, type_slug,
+                    final_slug, mode.type_slug,
                 )
                 console.print(f"  Storage:  {storage_path}")
                 if junction_created:
@@ -798,7 +840,7 @@ def add_cmd(
                 created_files = _create_canonical_files(
                     local_p,
                     project=project,
-                    type_slug=type_slug,
+                    type_slug=mode.type_slug,
                     status_slug=status_slug,
                     tag_slugs=tag_slugs_for_log,
                     logical_rel=logical_rel,

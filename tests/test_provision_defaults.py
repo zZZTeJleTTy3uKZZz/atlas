@@ -22,7 +22,6 @@ def test_default_is_personal_owned_by_me():
     assert m.visibility == "personal"
     assert m.owner_slug == "dmitry"
     assert m.lead_slug == "dmitry"
-    assert m.status_slug == "active"
 
 
 def test_team_flag_makes_company_project_but_keeps_me_lead():

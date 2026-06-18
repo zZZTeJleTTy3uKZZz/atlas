@@ -130,6 +130,45 @@ class TestAdd:
             assert proj.prefix == "cpp"
             assert proj.priority == "P2"  # default
 
+    def test_add_default_is_personal_with_me_as_lead(self, runner, app, seeded_engine):
+        """`add --name X` без --type/--owner/--team → личный проект:
+        type=personal-project, sync_policy=full, lead-участник dmitry."""
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Participant, Project, ProjectParticipant, ProjectType
+
+        result = _add_project(runner, app, "--name", "Личный тест", "--no-sync")
+        assert result.exit_code == 0, _combined(result)
+
+        with make_session(seeded_engine) as session:
+            proj = session.execute(
+                select(Project).where(Project.name == "Личный тест")
+            ).scalar_one()
+            assert session.get(ProjectType, proj.type_id).slug == "personal-project"
+            assert proj.sync_policy == "full"
+            dmitry = session.execute(
+                select(Participant).where(Participant.slug == "dmitry")
+            ).scalar_one()
+            link = session.get(ProjectParticipant, (proj.id, dmitry.id))
+            assert link is not None and link.role_in_project == "lead"
+
+    def test_add_team_flag_company_mode(self, runner, app, seeded_engine):
+        """`add --team` → командный режим: sync_policy=media (не full), lead всё равно dmitry."""
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Participant, Project, ProjectParticipant
+
+        result = _add_project(runner, app, "--name", "Командный тест", "--team", "--no-sync")
+        assert result.exit_code == 0, _combined(result)
+        with make_session(seeded_engine) as session:
+            proj = session.execute(
+                select(Project).where(Project.name == "Командный тест")
+            ).scalar_one()
+            assert proj.sync_policy == "media"
+            dmitry = session.execute(
+                select(Participant).where(Participant.slug == "dmitry")
+            ).scalar_one()
+            link = session.get(ProjectParticipant, (proj.id, dmitry.id))
+            assert link is not None and link.role_in_project == "lead"
+
     def test_add_explicit_slug_and_prefix(self, runner, app, seeded_engine):
         from atlas.pm.db import make_session
         from atlas.pm.models import Project
@@ -369,25 +408,10 @@ class TestGet:
         assert result.exit_code == 1
 
     def test_get_shows_participants(self, runner, app, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Participant, Project, ProjectParticipant
-
+        # add авто-добавляет владельца Дмитрия как lead-участника (этап 1 авто-раскладки),
+        # поэтому get сразу показывает его без ручного member-add.
         _add_project(runner, app, "--name", "Cifro", "--type", "client-project",
                      "--slug", "cifro")
-        with make_session(seeded_engine) as session:
-            proj = session.execute(
-                select(Project).where(Project.slug == "cifro")
-            ).scalar_one()
-            dmitry = session.execute(
-                select(Participant).where(Participant.slug == "dmitry")
-            ).scalar_one()
-            link = ProjectParticipant(
-                project_id=proj.id, participant_id=dmitry.id,
-                role_in_project="Lead", allocated_weekly_hours=10.0,
-            )
-            session.add(link)
-            session.commit()
-
         result = runner.invoke(app, ["get", "cifro"])
         assert result.exit_code == 0
         assert "дмитрий" in result.stdout.lower() or "dmitry" in result.stdout.lower()

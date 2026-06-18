@@ -273,31 +273,12 @@ class TestGet:
         assert result.exit_code == 1
 
     def test_get_shows_projects(self, runner, app, seeded_engine, projects_app):
-        """get показывает список проектов, в которых участвует participant."""
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Participant, Project, ProjectParticipant
-
-        # создадим проект
+        """get показывает проекты участника. add авто-добавляет владельца Дмитрия
+        как lead → он сразу участник созданного проекта (без ручного member-add)."""
         runner.invoke(
             projects_app,
             ["add", "--name", "Cifro", "--type", "client-project", "--slug", "cifro"],
         )
-        with make_session(seeded_engine) as session:
-            proj = session.execute(
-                select(Project).where(Project.slug == "cifro")
-            ).scalar_one()
-            dmitry = session.execute(
-                select(Participant).where(Participant.slug == "dmitry")
-            ).scalar_one()
-            link = ProjectParticipant(
-                project_id=proj.id,
-                participant_id=dmitry.id,
-                role_in_project="Lead",
-                allocated_weekly_hours=10.0,
-            )
-            session.add(link)
-            session.commit()
-
         result = runner.invoke(app, ["get", "dmitry"])
         assert result.exit_code == 0
         assert "cifro" in result.stdout.lower()

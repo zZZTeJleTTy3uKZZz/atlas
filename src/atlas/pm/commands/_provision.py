@@ -18,7 +18,6 @@ _COMPANY_OWNER = "cifro-pro"
 @dataclass(frozen=True)
 class ProjectMode:
     type_slug: str
-    status_slug: str
     sync_policy: str
     visibility: str
     owner_slug: str
@@ -41,7 +40,6 @@ def resolve_project_mode(
     is_personal = not team and (owner is None or owner == default_owner)
     return ProjectMode(
         type_slug=type_flag or (_PERSONAL_TYPE if is_personal else "client-project"),
-        status_slug="active",
         sync_policy="full" if is_personal else "media",
         visibility="personal" if is_personal else "team",
         owner_slug=owner_slug,

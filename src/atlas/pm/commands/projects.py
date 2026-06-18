@@ -22,6 +22,7 @@ Archive engine (см. NP-005 ARCHITECTURE.md §2.7, ADR-001):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -64,6 +65,7 @@ from atlas.pm.paths import (
     type_slug_to_group,
 )
 from atlas.pm.seeds import seed_all
+from atlas.pm.sync.backend_client import BackendClient
 from atlas.pm.slugs import (
     AmbiguousRefError,
     SlugGenerationError,
@@ -887,6 +889,45 @@ def add_cmd(
                     f"  [dim]Проект создан в БД и канонизирован, но без git. "
                     f"Можно повторить позже: `atlas projects git init {final_slug}`.[/dim]"
                 )
+
+        # ----- авто-раскладка в ядро+Notion (этап 2): если синк включён -----
+        # owner-counterparty: личный → 'me' (Дмитрий-person), иначе владелец-компания.
+        cfg = load_config()
+        if not no_sync and cfg.api_key:
+            notion_kind = "личный" if mode.visibility == "personal" else "клиентский"
+            targets = (
+                ["notion-pragmat", "atlas-dmitry"] if mode.visibility == "personal"
+                else ["b24-exs", "notion-pragmat"]
+            )
+            core_owner = "me" if mode.owner_slug == "dmitry" else mode.owner_slug
+            client = BackendClient(cfg.base_url, cfg.api_key)
+            try:
+                res = asyncio.run(client.provision_project(
+                    slug=final_slug, name=name, kind="direction",
+                    owner_slug=core_owner, lead_slug=mode.lead_slug,
+                    visibility=mode.visibility, notion_kind=notion_kind,
+                    sync_target_slugs=targets,
+                ))
+                with make_session(engine) as s2:
+                    p2 = s2.get(Project, project.id)
+                    if res.get("backend_id"):
+                        p2.backend_id = res["backend_id"]
+                    if res.get("notion_page_id"):
+                        p2.notion_project_id = res["notion_page_id"]
+                    s2.commit()
+                console.print(
+                    f"  [green]✓ Разложен в ядро+Notion[/green] "
+                    f"(backend={res.get('backend_id')})"
+                )
+            except Exception as exc:  # noqa: BLE001 — best-effort, не валим create
+                console.print(
+                    f"  [yellow]⚠ Локально создан; раскладка в ядро не удалась: {exc}.[/yellow]"
+                )
+            finally:
+                try:
+                    asyncio.run(client.aclose())
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 # --------------------------------------------------------------------------- #

@@ -169,6 +169,66 @@ class TestAdd:
             link = session.get(ProjectParticipant, (proj.id, dmitry.id))
             assert link is not None and link.role_in_project == "lead"
 
+    def test_add_calls_provision_when_synced(self, runner, app, seeded_engine, monkeypatch):
+        """add без --no-sync (при наличии api_key) зовёт ядро provision и
+        проставляет backend_id/notion_project_id из ответа."""
+        import atlas.pm.commands.projects as projmod
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Project
+
+        calls = {}
+
+        class _FakeClient:
+            def __init__(self, *a, **k):
+                pass
+
+            async def provision_project(self, **kw):
+                calls.update(kw)
+                return {"backend_id": "core-99", "notion_page_id": "np-99"}
+
+            async def aclose(self):
+                pass
+
+        monkeypatch.setattr(projmod, "BackendClient", _FakeClient)
+        monkeypatch.setenv("ATLAS_API_KEY", "test-key")
+
+        result = runner.invoke(
+            app, ["add", "--no-setup-layout", "--no-canonical", "--name", "Синк тест"]
+        )
+        assert result.exit_code == 0, _combined(result)
+        assert calls.get("lead_slug") == "dmitry"
+        assert calls.get("visibility") == "personal"
+        with make_session(seeded_engine) as session:
+            proj = session.execute(
+                select(Project).where(Project.name == "Синк тест")
+            ).scalar_one()
+            assert proj.backend_id == "core-99"
+            assert proj.notion_project_id == "np-99"
+
+    def test_add_no_sync_skips_provision(self, runner, app, seeded_engine, monkeypatch):
+        """--no-sync → ядро НЕ зовётся даже при наличии api_key."""
+        import atlas.pm.commands.projects as projmod
+
+        called = {"v": False}
+
+        class _Boom:
+            def __init__(self, *a, **k):
+                pass
+
+            async def provision_project(self, **kw):
+                called["v"] = True
+                return {}
+
+            async def aclose(self):
+                pass
+
+        monkeypatch.setattr(projmod, "BackendClient", _Boom)
+        monkeypatch.setenv("ATLAS_API_KEY", "test-key")
+
+        result = _add_project(runner, app, "--name", "Без синка", "--no-sync")
+        assert result.exit_code == 0, _combined(result)
+        assert called["v"] is False
+
     def test_add_explicit_slug_and_prefix(self, runner, app, seeded_engine):
         from atlas.pm.db import make_session
         from atlas.pm.models import Project

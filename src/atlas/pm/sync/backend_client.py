@@ -15,6 +15,7 @@ from clikit import HttpClient
 EVENTS_PATH = "/api/v1/events"
 POLL_PATH = "/api/v1/events/poll"
 ADMIN_PROFILES_PATH = "/api/v1/admin/profiles"
+PROJECTS_PATH = "/api/v1/projects"
 
 
 class BackendClient:
@@ -62,6 +63,28 @@ class BackendClient:
         if global_role is not None:
             body["global_role"] = global_role
         return await self._http.post(ADMIN_PROFILES_PATH, json=body, headers=self._auth())
+
+    async def provision_project(
+        self, *, slug: str, name: str, kind: str, owner_slug: str, lead_slug: str,
+        visibility: str, notion_kind: str, sync_target_slugs: list[str],
+    ) -> dict[str, Any]:
+        """Разложить проект в ядре: core_project + lead + Notion-страница + связи.
+
+        POST ``/api/v1/projects`` с provisioning-полями. Возвращает
+        ``{'backend_id', 'notion_page_id'}`` — Atlas проставляет их локально,
+        чтобы проект был связан со всеми тремя системами."""
+        body: dict[str, Any] = {
+            "slug": slug, "name": name, "kind": kind, "owner_slug": owner_slug,
+            "lead_slug": lead_slug, "visibility": visibility,
+            "provision_notion": True, "notion_kind": notion_kind,
+            "sync_target_slugs": sync_target_slugs, "atlas_slug": slug,
+        }
+        resp = await self._http.post(PROJECTS_PATH, json=body, headers=self._auth())
+        data = resp[0] if isinstance(resp, list) else resp
+        return {
+            "backend_id": data.get("id") or data.get("backend_id"),
+            "notion_page_id": data.get("notion_page_id"),
+        }
 
     async def aclose(self) -> None:
         """Закрыть нижележащий HTTP-клиент."""

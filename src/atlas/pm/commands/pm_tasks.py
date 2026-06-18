@@ -45,6 +45,15 @@ from atlas.pm.slugs import (
 )
 from atlas.pm.sync import outbox as _outbox
 
+
+def _sync_portal_id() -> str:
+    """Slug портала-стора этого Atlas для ``source_portal_id`` событий синка —
+    из активного конфига (``cfg.portal_id``), а НЕ хардкод. Ядро резолвит
+    slug→portal по этому значению; неправильный slug → событие зависает pending."""
+    from atlas.appconfig import load_config
+    return load_config().portal_id
+
+
 pm_tasks_app = typer.Typer(
     no_args_is_help=True,
     help="PM Tasks: задачи портфеля (PM-БД), CRUD.",
@@ -315,7 +324,7 @@ def add_cmd(
         )
         # F3c: поставить в outbox для синка наружу (если политика проекта разрешает)
         try:
-            _portal_id = "atlas-local"
+            _portal_id = _sync_portal_id()
             _outbox.enqueue(
                 session, "create", "task", task, project=proj, portal_id=_portal_id,
             )
@@ -668,7 +677,7 @@ def update_cmd(
         try:
             _proj = session.get(Project, task.project_id)
             if _proj is not None:
-                _outbox.enqueue(session, "update", "task", task, project=_proj, portal_id="atlas-local")
+                _outbox.enqueue(session, "update", "task", task, project=_proj, portal_id=_sync_portal_id())
         except Exception:
             pass
         session.commit()
@@ -758,7 +767,7 @@ def delete_cmd(
         try:
             _proj = session.get(Project, task.project_id)
             if _proj is not None:
-                _outbox.enqueue(session, "delete", "task", task, project=_proj, portal_id="atlas-local")
+                _outbox.enqueue(session, "delete", "task", task, project=_proj, portal_id=_sync_portal_id())
         except Exception:
             pass
         session.commit()

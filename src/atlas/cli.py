@@ -12,6 +12,7 @@ from .pm.commands.action_log import app as action_log_app
 from .pm.commands.backup import backup_app
 from .pm.commands.checklist import checklist_app
 from .pm.commands.epic import epic_app
+from .pm.commands.hypothesis import hypothesis_app
 from .pm.commands.ideas import ideas_app
 from .pm.commands.inbox import inbox_app
 from .pm.commands.member import member_app
@@ -34,6 +35,7 @@ app = build_root_app(
 app.add_typer(projects_app, name="project")          # проекты портфеля (CRUD, теги, архив)
 app.add_typer(pm_tasks_app, name="task")             # задачи (CRUD, ЦКП)
 app.add_typer(epic_app, name="epic")                 # эпики (вехи/спринты)
+app.add_typer(hypothesis_app, name="hypothesis")     # гипотезы (Atlas Hypothesis Ledger)
 app.add_typer(checklist_app, name="checklist")       # чек-листы задач
 app.add_typer(member_app, name="member")             # участники задачи (роли)
 app.add_typer(participants_app, name="participant")  # участники портфеля

@@ -288,6 +288,73 @@ class Task(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Hypotheses (Atlas Hypothesis Ledger)                                        #
+# --------------------------------------------------------------------------- #
+
+
+class Hypothesis(Base):
+    """Гипотеза — единица цикла «опыт → гипотеза → эксперимент → замер → решение».
+
+    Реестр гипотез + эффективность (success-rate ledger). Следует паттерну Task:
+    id/number/slug/FK/timestamps/CheckConstraint/Index. Привязка к проекту
+    обязательна; опц. связь с задачей (task_id, ondelete SET NULL).
+    """
+
+    __tablename__ = "hypotheses"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    number: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True)
+    slug: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True)
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=False
+    )
+    task_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    statement: Mapped[Optional[str]] = mapped_column(Text)
+    metric: Mapped[Optional[str]] = mapped_column(String(200))
+    baseline: Mapped[Optional[str]] = mapped_column(String(100))
+    target: Mapped[Optional[str]] = mapped_column(String(100))
+    method: Mapped[Optional[str]] = mapped_column(Text)
+    result_value: Mapped[Optional[str]] = mapped_column(String(100))
+    delta: Mapped[Optional[str]] = mapped_column(String(100))
+    verdict: Mapped[Optional[str]] = mapped_column(String(20))
+    lesson: Mapped[Optional[str]] = mapped_column(Text)
+    consolidated_into: Mapped[Optional[str]] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(String(3), default="M", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=msk_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+    )
+    tested_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','testing','measured','closed')",
+            name="ck_hypotheses_status",
+        ),
+        CheckConstraint(
+            "confidence IN ('H','M','L')", name="ck_hypotheses_confidence"
+        ),
+        CheckConstraint(
+            "verdict IS NULL OR verdict IN ('accept','reject','iterate','inconclusive')",
+            name="ck_hypotheses_verdict",
+        ),
+        Index("idx_hypotheses_project", "project_id"),
+        Index("idx_hypotheses_task", "task_id"),
+        Index("idx_hypotheses_status", "status"),
+        Index("idx_hypotheses_verdict", "verdict"),
+        Index("idx_hypotheses_created", "created_at"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Audit log (append-only)                                                     #
 # --------------------------------------------------------------------------- #
 

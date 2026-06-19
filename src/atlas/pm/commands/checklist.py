@@ -1,6 +1,9 @@
 """CLI `atlas checklist ...` — чек-листы задач (шаги). На clikit."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Optional
+
 import typer
 from clikit import command, emit_data
 from sqlalchemy import func, select
@@ -11,7 +14,14 @@ from atlas.pm.slugs import resolve_task_ref
 from atlas.pm.sync import outbox as _outbox
 
 checklist_app = typer.Typer(no_args_is_help=True, help="Чек-листы задач (шаги ИИ-агента).")
-_PORTAL = "atlas-local"
+
+
+def _sync_portal_id() -> str:
+    """Slug портала-стора этого Atlas для ``source_portal_id`` событий синка —
+    из активного конфига (``cfg.portal_id``), а НЕ хардкод. Ядро резолвит
+    slug→portal по этому значению; неправильный slug → событие зависает pending."""
+    from atlas.appconfig import load_config
+    return load_config().portal_id
 
 
 def _db_url() -> str:
@@ -20,7 +30,10 @@ def _db_url() -> str:
 
 def _enqueue(session, op, obj, project):
     try:
-        _outbox.enqueue(session, op, "checklist", obj, project=project, portal_id=_PORTAL)
+        _outbox.enqueue(
+            session, op, "checklist", obj, project=project,
+            portal_id=_sync_portal_id(),
+        )
     except Exception:
         pass
 
@@ -30,8 +43,18 @@ def _enqueue(session, op, obj, project):
 def add_cmd(
     task: str = typer.Option(..., "--task", help="Task ref (number | slug | UUID)"),
     text: str = typer.Option(..., "--text"),
+    due: Optional[str] = typer.Option(
+        None, "--due", help="Срок пункта (YYYY-MM-DD или полный ISO)"
+    ),
 ) -> None:
     """Добавить пункт чек-листа к задаче."""
+    due_dt: Optional[datetime] = None
+    if due:
+        try:
+            due_dt = datetime.fromisoformat(due)
+        except ValueError:
+            print(f"Невалидный --due '{due}': ожидаю YYYY-MM-DD.")
+            raise typer.Exit(1)
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         t = resolve_task_ref(session, task)
@@ -40,7 +63,7 @@ def add_cmd(
         next_pos = session.execute(
             select(func.count()).select_from(ChecklistItem).where(ChecklistItem.task_id == t.id)
         ).scalar_one()
-        ci = ChecklistItem(task_id=t.id, text=text, position=next_pos)
+        ci = ChecklistItem(task_id=t.id, text=text, position=next_pos, due_date=due_dt)
         session.add(ci)
         session.flush()
         proj = session.get(Project, t.project_id)
@@ -92,4 +115,29 @@ def check_cmd(
         emit_data(
             {"id": ci.id, "is_done": ci.is_done},
             text_renderer=lambda d: print(f"{'☑' if d['is_done'] else '☐'} {d['id']}"),
+        )
+
+
+@checklist_app.command("delete")
+@command
+def delete_cmd(
+    item_id: str = typer.Argument(..., help="UUID пункта"),
+) -> None:
+    """Удалить пункт чек-листа (локально + enqueue delete наружу)."""
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        ci = session.get(ChecklistItem, item_id)
+        if ci is None:
+            raise typer.Exit(1)
+        # enqueue ДО удаления: mapper читает поля пункта и backend_id родителя.
+        task = session.get(Task, ci.task_id)
+        proj = session.get(Project, task.project_id) if task else None
+        if proj is not None:
+            _enqueue(session, "delete", ci, proj)
+        ci_id = ci.id
+        session.delete(ci)
+        session.commit()
+        emit_data(
+            {"id": ci_id, "deleted": True},
+            text_renderer=lambda d: print(f"✗ {d['id']} удалён"),
         )

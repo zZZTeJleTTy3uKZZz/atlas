@@ -92,10 +92,24 @@ def _task_payload(t: Any) -> dict:
     }
 
 
+def _checklist_due(c: Any) -> Any:
+    """due_date → ISO-строка "YYYY-MM-DD" (если datetime) | None."""
+    due = getattr(c, "due_date", None)
+    if due is None:
+        return None
+    return due.strftime("%Y-%m-%d") if hasattr(due, "strftime") else due
+
+
 def _checklist_payload(c: Any) -> dict:
+    """Словарь ЯДРА (контракт checklist_item). parent_task_backend_id
+    докладывается в ``to_event`` (он знает родителя). text→title,
+    is_done(0/1)→done(bool), position→order_idx, due_date→due(ISO|null)."""
     return {
-        "text": c.text, "is_done": c.is_done, "position": c.position,
-        "backend_id": c.backend_id,
+        "title": c.text,
+        "done": bool(c.is_done),
+        "due": _checklist_due(c),
+        "order_idx": c.position,
+        "parent_task_backend_id": None,
     }
 
 
@@ -115,6 +129,7 @@ def to_event(
     portal_id: str,
     project: Any = None,
     assignees: list[dict] | None = None,
+    parent_task: Any = None,
 ) -> dict:
     """Построить EventIn-dict из ORM-сущности.
 
@@ -142,8 +157,16 @@ def to_event(
         payload["project_backend_id"] = getattr(project, "backend_id", None)
     if entity_kind == "task":
         payload["assignees"] = list(assignees or [])
+    # checklist: на проводе entity_kind = канон ядра "checklist_item" (НЕ
+    # внутренний "checklist", который остаётся для policy/outbox). Родителя
+    # резолвит ядро по parent_task_backend_id = backend_id задачи-родителя.
+    wire_kind = entity_kind
+    if entity_kind == "checklist":
+        wire_kind = "checklist_item"
+        if parent_task is not None:
+            payload["parent_task_backend_id"] = getattr(parent_task, "backend_id", None)
     return {
-        "entity_kind": entity_kind,
+        "entity_kind": wire_kind,
         "op": op,
         "entity_id": backend_id or obj.id,
         "payload_json": payload,

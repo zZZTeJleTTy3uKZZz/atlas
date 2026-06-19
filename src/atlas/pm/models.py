@@ -463,6 +463,7 @@ class ChecklistItem(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     is_done: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     backend_id: Mapped[Optional[str]] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
 

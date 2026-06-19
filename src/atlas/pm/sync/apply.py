@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -80,30 +81,48 @@ def _upsert_epic(session: Session, bid: str, payload: dict) -> dict:
     return {"updated": "epic"}
 
 
+def _parse_due(value: Any):
+    """due (ISO "YYYY-MM-DD" или полный ISO) → datetime | None."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 def _upsert_checklist(session: Session, bid: str, payload: dict) -> dict:
+    """Поля ЯДРА (контракт checklist_item): title→text, done→is_done(int 0/1),
+    order_idx→position, due→due_date. Родитель резолвится по
+    payload["parent_task_backend_id"] через Task.backend_id."""
     ci = _by_backend(session, ChecklistItem, bid)
     if ci is None:
-        tbid = payload.get("task_backend_id")
+        tbid = payload.get("parent_task_backend_id")
         task = _by_backend(session, Task, tbid) if tbid else None
         if task is None:
             return {"skipped": "no_task"}
         ci = ChecklistItem(
             backend_id=bid, task_id=task.id,
-            text=payload.get("text") or "",
-            is_done=int(payload.get("is_done") or 0),
-            position=int(payload.get("position") or 0),
+            text=payload.get("title") or "",
+            is_done=int(bool(payload.get("done"))),
+            position=int(payload.get("order_idx") or 0),
+            due_date=_parse_due(payload.get("due")),
         )
         session.add(ci)
         return {"created": "checklist"}
-    if payload.get("text") is not None:
-        ci.text = payload["text"]
-    if payload.get("is_done") is not None:
-        ci.is_done = int(payload["is_done"])
+    if payload.get("title") is not None:
+        ci.text = payload["title"]
+    if payload.get("done") is not None:
+        ci.is_done = int(bool(payload["done"]))
+    if payload.get("order_idx") is not None:
+        ci.position = int(payload["order_idx"])
+    if "due" in payload:
+        ci.due_date = _parse_due(payload.get("due"))
     return {"updated": "checklist"}
 
 
 def _delete(session: Session, kind: str, bid: str) -> dict:
-    model = {"task": Task, "epic": Epic, "checklist": ChecklistItem}.get(kind)
+    model = {"task": Task, "epic": Epic, "checklist_item": ChecklistItem}.get(kind)
     if model is None:
         return {"skipped": f"kind:{kind}"}
     obj = _by_backend(session, model, bid)
@@ -116,7 +135,13 @@ def _delete(session: Session, kind: str, bid: str) -> dict:
     return {"deleted": kind}
 
 
-_UPSERT = {"task": _upsert_task, "epic": _upsert_epic, "checklist": _upsert_checklist}
+# Ключ = entity_kind НА ПРОВОДЕ. Ядро шлёт пункты как "checklist_item" (канон),
+# поэтому ключ именно такой (НЕ внутренний "checklist").
+_UPSERT = {
+    "task": _upsert_task,
+    "epic": _upsert_epic,
+    "checklist_item": _upsert_checklist,
+}
 
 
 def apply_event(session: Session, event: dict[str, Any]) -> dict:

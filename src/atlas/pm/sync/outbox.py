@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.pm._time import msk_now
-from atlas.pm.models import Outbox
+from atlas.pm.models import Outbox, Task
 from atlas.pm.sync import mapper, policy
 
 
@@ -25,9 +25,16 @@ def enqueue(
     if not policy.should_sync(session, entity_kind, project):
         return None
     members = mapper.assignees(session, obj) if entity_kind == "task" else None
+    # checklist: родитель-Task несёт backend_id для parent_task_backend_id —
+    # ядру он нужен, чтобы привязать пункт к задаче.
+    parent_task = (
+        session.get(Task, obj.task_id)
+        if entity_kind == "checklist" and getattr(obj, "task_id", None)
+        else None
+    )
     event = mapper.to_event(
         op, entity_kind, obj, portal_id=portal_id, project=project,
-        assignees=members,
+        assignees=members, parent_task=parent_task,
     )
     ob = Outbox(
         op=op,

@@ -1,1 +1,1 @@
-"""CLI-команды PM-слоя (portfolio / task / sprint / expense / action-log)."""
+"""CLI-команды PM-слоя (portfolio / task / epic / expense / action-log)."""

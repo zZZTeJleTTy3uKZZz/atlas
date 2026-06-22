@@ -79,7 +79,7 @@ def list_cmd(
     ),
     entity_type: Optional[str] = typer.Option(
         None, "--entity-type",
-        help="project | task | sprint | participant | project_type | ...",
+        help="project | task | epic | participant | project_type | ...",
     ),
     action: Optional[str] = typer.Option(
         None, "--action", help="Точное имя action: created / updated / ...",

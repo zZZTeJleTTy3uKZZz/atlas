@@ -3,7 +3,7 @@
 MVP-схема (Spike v0.4): project_types, project_statuses, projects, participants,
 project_participants, tasks, action_log.
 
-Расширения Sprint 1: sprints, expenses, prd_snapshots, stacks, project_stacks.
+Расширения Sprint 1: expenses, prd_snapshots, stacks, project_stacks.
 Расширения v0.7 (multi-agent): agent_runs, research_findings.
 
 Полная схема и обоснования — в `MODEL.md` NP-005.
@@ -256,7 +256,6 @@ class Task(Base):
     project_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("projects.id"), nullable=False
     )
-    sprint_id: Mapped[Optional[str]] = mapped_column(String(36))  # FK добавим в Sprint 1
     epic_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("epics.id"))
     assignee_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("participants.id")
@@ -322,7 +321,7 @@ class Task(Base):
             name="ck_tasks_origin",
         ),
         Index("idx_tasks_project", "project_id"),
-        Index("idx_tasks_sprint", "sprint_id"),
+        Index("idx_tasks_epic", "epic_id"),
         Index("idx_tasks_assignee", "assignee_id"),
         Index("idx_tasks_status", "status"),
         Index("idx_tasks_due", "due_date"),

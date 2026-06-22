@@ -65,6 +65,20 @@ def app():
 
 
 @pytest.fixture()
+def epic_app():
+    """CLI-приложение epic."""
+    from atlas.pm.commands.epic import epic_app
+    return epic_app
+
+
+@pytest.fixture()
+def root_app():
+    """Корневой CLI atlas (знает глобальный --text/--json для clikit-команд)."""
+    from atlas.cli import app as root
+    return root
+
+
+@pytest.fixture()
 def project_cifro(runner, projects_app, seeded_engine):
     """Создать проект 'cifro' с prefix 'cf' для тестов задач."""
     result = runner.invoke(
@@ -648,4 +662,176 @@ class TestDelete:
 
     def test_delete_nonexistent(self, runner, app, seeded_engine):
         result = runner.invoke(app, ["delete", "999"])
+        assert result.exit_code != 0
+
+
+# --------------------------------------------------------------------------- #
+# epic link (--epic): резолв slug/UUID → epic_id                              #
+# --------------------------------------------------------------------------- #
+
+
+def _make_epic(runner, epic_app, project: str, title: str) -> str:
+    """Создать эпик через CLI, вернуть его slug (= slugify(title)).
+
+    Достаём slug из БД (а не из stdout): формат вывода clikit (text/json)
+    может протекать глобально между invoke внутри одного процесса, поэтому
+    не полагаемся на парсинг stdout.
+    """
+    from atlas.pm.db import make_engine, make_session
+    from atlas.pm.db import resolve_db_url
+    from atlas.pm.models import Epic
+
+    res = runner.invoke(epic_app, ["add", "--project", project, "--title", title])
+    assert res.exit_code == 0, _combined(res)
+    with make_session(make_engine(resolve_db_url())) as session:
+        epic = session.execute(
+            select(Epic).where(Epic.title == title)
+        ).scalar_one()
+        return epic.slug
+
+
+class TestEpicLink:
+    def test_add_epic_resolves_slug_to_epic_id(
+        self, runner, app, epic_app, project_cifro, seeded_engine,
+    ):
+        """task add --epic <slug> → пишет epic_id (FK), а НЕ sprint_id."""
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Epic, Task
+
+        epic_slug = _make_epic(runner, epic_app, "cifro", "Sprint One")
+
+        result = _add_task(
+            runner, app,
+            "--project", "cifro", "--title", "T", "--cpp", "x",
+            "--epic", epic_slug,
+        )
+        assert result.exit_code == 0, _combined(result)
+
+        with make_session(seeded_engine) as session:
+            epic = session.execute(
+                select(Epic).where(Epic.slug == epic_slug)
+            ).scalar_one()
+            task = session.execute(
+                select(Task).where(Task.title == "T")
+            ).scalar_one()
+            assert task.epic_id == epic.id
+            # sprint_id колонки больше нет — атрибут на модели отсутствует
+            assert not hasattr(task, "sprint_id")
+
+    def test_add_epic_resolves_uuid(
+        self, runner, app, epic_app, project_cifro, seeded_engine,
+    ):
+        """task add --epic <UUID> → epic_id заполнен."""
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Epic, Task
+
+        epic_slug = _make_epic(runner, epic_app, "cifro", "Sprint Two")
+        with make_session(seeded_engine) as session:
+            epic = session.execute(
+                select(Epic).where(Epic.slug == epic_slug)
+            ).scalar_one()
+            epic_id = epic.id
+
+        result = _add_task(
+            runner, app,
+            "--project", "cifro", "--title", "ByUuid", "--cpp", "x",
+            "--epic", epic_id,
+        )
+        assert result.exit_code == 0, _combined(result)
+        with make_session(seeded_engine) as session:
+            task = session.execute(
+                select(Task).where(Task.title == "ByUuid")
+            ).scalar_one()
+            assert task.epic_id == epic_id
+
+    def test_add_nonexistent_epic_errors(
+        self, runner, app, project_cifro, seeded_engine,
+    ):
+        """task add --epic <несуществующий> → ошибка (exit != 0)."""
+        result = _add_task(
+            runner, app,
+            "--project", "cifro", "--title", "T", "--cpp", "x",
+            "--epic", "no-such-epic",
+        )
+        assert result.exit_code != 0
+        assert "epic" in _combined(result).lower()
+
+    def test_list_filter_by_epic(
+        self, runner, app, root_app, epic_app, project_cifro, seeded_engine,
+    ):
+        """task list --epic <slug> → только задачи этого эпика."""
+        epic_slug = _make_epic(runner, epic_app, "cifro", "Filter Epic")
+        _add_task(runner, app, "--project", "cifro",
+                  "--title", "Inside", "--cpp", "x", "--epic", epic_slug)
+        _add_task(runner, app, "--project", "cifro",
+                  "--title", "Outside", "--cpp", "x")
+
+        result = runner.invoke(
+            root_app, ["--text", "task", "list", "--epic", epic_slug]
+        )
+        assert result.exit_code == 0, _combined(result)
+        assert "inside" in result.stdout.lower()
+        assert "outside" not in result.stdout.lower()
+
+    def test_list_filter_nonexistent_epic_errors(
+        self, runner, app, project_cifro, seeded_engine,
+    ):
+        result = runner.invoke(app, ["list", "--epic", "ghost"])
+        assert result.exit_code != 0
+
+    def test_get_prints_epic_slug_text(
+        self, runner, app, root_app, epic_app, project_cifro, seeded_engine,
+    ):
+        """task get (--text) печатает 'Epic:' со slug эпика."""
+        epic_slug = _make_epic(runner, epic_app, "cifro", "Get Epic")
+        _add_task(runner, app, "--project", "cifro",
+                  "--title", "WithEpic", "--cpp", "x", "--epic", epic_slug)
+
+        result = runner.invoke(root_app, ["--text", "task", "get", "1"])
+        assert result.exit_code == 0, _combined(result)
+        assert "Epic:" in result.stdout
+        assert epic_slug in result.stdout
+        assert "Sprint:" not in result.stdout
+
+    def test_get_json_has_epic_field(
+        self, runner, app, root_app, epic_app, project_cifro, seeded_engine,
+    ):
+        """task get --json: поле 'epic' = slug, поля 'sprint_id' нет."""
+        epic_slug = _make_epic(runner, epic_app, "cifro", "Json Epic")
+        _add_task(runner, app, "--project", "cifro",
+                  "--title", "JEpic", "--cpp", "x", "--epic", epic_slug)
+
+        result = runner.invoke(root_app, ["--json", "task", "get", "1"])
+        assert result.exit_code == 0, _combined(result)
+        payload = json.loads(result.stdout)
+        assert payload["epic"] == epic_slug
+        assert "sprint_id" not in payload
+
+    def test_update_epic(
+        self, runner, app, epic_app, project_cifro, seeded_engine,
+    ):
+        """task update --epic <slug> → epic_id обновлён."""
+        from atlas.pm.db import make_session
+        from atlas.pm.models import Epic, Task
+
+        epic_slug = _make_epic(runner, epic_app, "cifro", "Upd Epic")
+        _add_task(runner, app, "--project", "cifro",
+                  "--title", "Upd", "--cpp", "x")
+
+        result = runner.invoke(app, ["update", "1", "--epic", epic_slug])
+        assert result.exit_code == 0, _combined(result)
+
+        with make_session(seeded_engine) as session:
+            epic = session.execute(
+                select(Epic).where(Epic.slug == epic_slug)
+            ).scalar_one()
+            task = session.execute(select(Task)).scalar_one()
+            assert task.epic_id == epic.id
+
+    def test_update_nonexistent_epic_errors(
+        self, runner, app, project_cifro, seeded_engine,
+    ):
+        _add_task(runner, app, "--project", "cifro",
+                  "--title", "Upd", "--cpp", "x")
+        result = runner.invoke(app, ["update", "1", "--epic", "ghost"])
         assert result.exit_code != 0

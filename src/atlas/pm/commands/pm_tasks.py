@@ -30,6 +30,7 @@ from atlas.pm._time import msk_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
     ActionLog,
+    Epic,
     Participant,
     Project,
     Task,
@@ -201,6 +202,50 @@ def _resolve_assignee_or_die(session: Session, slug: str) -> Participant:
     return p
 
 
+def _resolve_epic_or_die(session: Session, ref: str) -> Epic:
+    """Найти Epic по slug / full UUID / short UUID prefix (≥7). Нет → Exit(1).
+
+    По образцу resolve_project_ref: сначала slug (exact), затем UUID full,
+    затем UUID short prefix через LIKE 'ref%'. Неоднозначный short prefix
+    или отсутствие → typer.Exit(1).
+    """
+    from atlas.pm.slugs import (
+        UUID_SHORT_MIN,
+        _is_full_uuid,
+        _looks_like_uuid_prefix,
+    )
+
+    epic: Optional[Epic] = None
+    # 1. slug (exact)
+    epic = session.execute(
+        select(Epic).where(Epic.slug == ref)
+    ).scalar_one_or_none()
+    if epic is not None:
+        return epic
+    # 2. full UUID
+    if _is_full_uuid(ref):
+        epic = session.execute(
+            select(Epic).where(Epic.id == ref)
+        ).scalar_one_or_none()
+    # 3. short UUID prefix
+    elif len(ref) >= UUID_SHORT_MIN and _looks_like_uuid_prefix(ref):
+        matches = session.execute(
+            select(Epic).where(Epic.id.like(f"{ref}%"))
+        ).scalars().all()
+        if len(matches) > 1:
+            console.print(
+                f"[red]UUID prefix '{ref}' матчит {len(matches)} эпиков; "
+                f"уточни больше символов.[/red]"
+            )
+            raise typer.Exit(code=1)
+        epic = matches[0] if matches else None
+
+    if epic is None:
+        console.print(f"[red]Epic '{ref}' не найден.[/red]")
+        raise typer.Exit(code=1)
+    return epic
+
+
 def _resolve_task_or_die(session: Session, ref: str) -> Task:
     try:
         task = resolve_task_ref(session, ref)
@@ -233,9 +278,9 @@ def add_cmd(
     story_points: Optional[int] = typer.Option(None, "--story-points"),
     due_date: Optional[str] = typer.Option(None, "--due-date", help="YYYY-MM-DD"),
     assignee: Optional[str] = typer.Option(None, "--assignee", help="participant slug"),
-    sprint: Optional[str] = typer.Option(
-        None, "--sprint",
-        help="Sprint ref (UUID или slug). MVP: nullable, без FK-проверки.",
+    epic: Optional[str] = typer.Option(
+        None, "--epic",
+        help="Epic ref (slug | UUID). Резолвится в epic_id (FK→epics.id).",
     ),
     quality_tier: Optional[str] = typer.Option(None, "--quality-tier"),
     source_project: Optional[str] = typer.Option(
@@ -312,6 +357,11 @@ def add_cmd(
         if assignee:
             assignee_obj = _resolve_assignee_or_die(session, assignee)
 
+        # ----- epic -----
+        epic_obj: Optional[Epic] = None
+        if epic:
+            epic_obj = _resolve_epic_or_die(session, epic)
+
         # ----- provenance / инвариант origin↔source -----
         source_id: Optional[str] = None
         source_slug: Optional[str] = None
@@ -343,7 +393,7 @@ def add_cmd(
             number=number,
             slug=final_slug,
             project_id=proj.id,
-            sprint_id=sprint,  # MVP: храним как опциональный raw ref
+            epic_id=epic_obj.id if epic_obj else None,
             assignee_id=assignee_obj.id if assignee_obj else None,
             title=title,
             description=description,
@@ -414,7 +464,9 @@ def list_cmd(
     project: Optional[str] = typer.Option(None, "--project", help="Project ref"),
     status: Optional[str] = typer.Option(None, "--status"),
     assignee: Optional[str] = typer.Option(None, "--assignee"),
-    sprint: Optional[str] = typer.Option(None, "--sprint"),
+    epic: Optional[str] = typer.Option(
+        None, "--epic", help="Epic ref (slug | UUID) — фильтр по epic_id.",
+    ),
     source_project: Optional[str] = typer.Option(
         None, "--source-project", help="Фильтр по проекту-источнику (provenance).",
     ),
@@ -459,8 +511,9 @@ def list_cmd(
         if assignee is not None:
             ass_obj = _resolve_assignee_or_die(session, assignee)
             stmt = stmt.where(Task.assignee_id == ass_obj.id)
-        if sprint is not None:
-            stmt = stmt.where(Task.sprint_id == sprint)
+        if epic is not None:
+            epic_obj = _resolve_epic_or_die(session, epic)
+            stmt = stmt.where(Task.epic_id == epic_obj.id)
         if source_project is not None:
             src = _resolve_project_or_die(session, source_project)
             stmt = stmt.where(Task.source_project_id == src.id)
@@ -561,6 +614,12 @@ def get_cmd(
             session.get(Participant, task.assignee_id) if task.assignee_id else None
         )
 
+        # ----- epic (резолв epic_id → slug) -----
+        epic_slug = None
+        if task.epic_id:
+            ep = session.get(Epic, task.epic_id)
+            epic_slug = (ep.slug or ep.id) if ep is not None else task.epic_id
+
         # ----- provenance -----
         source_slug = None
         source_name = None
@@ -603,7 +662,7 @@ def get_cmd(
         "project": proj.slug if proj else None,
         "project_name": proj.name if proj else None,
         "assignee": assignee.slug if assignee else None,
-        "sprint_id": task.sprint_id,
+        "epic": epic_slug,
         "quality_tier": task.quality_tier,
         # provenance
         "origin": task.origin,
@@ -657,8 +716,8 @@ def _render_task_get(d: dict[str, Any]) -> None:
         console.print(f"  Assignee:  {d['assignee']}")
     else:
         console.print("  Assignee:  —")
-    if d["sprint_id"]:
-        console.print(f"  Sprint:    {d['sprint_id']}")
+    if d["epic"]:
+        console.print(f"  Epic:      {d['epic']}")
     if d["quality_tier"]:
         console.print(f"  Quality:   {d['quality_tier']}")
 
@@ -721,7 +780,9 @@ def update_cmd(
     story_points: Optional[int] = typer.Option(None, "--story-points"),
     due_date: Optional[str] = typer.Option(None, "--due-date", help="YYYY-MM-DD"),
     assignee: Optional[str] = typer.Option(None, "--assignee"),
-    sprint: Optional[str] = typer.Option(None, "--sprint"),
+    epic: Optional[str] = typer.Option(
+        None, "--epic", help="Epic ref (slug | UUID) → epic_id.",
+    ),
     quality_tier: Optional[str] = typer.Option(None, "--quality-tier"),
     notion_page_id: Optional[str] = typer.Option(None, "--notion-page-id"),
     git_branch: Optional[str] = typer.Option(None, "--git-branch"),
@@ -791,7 +852,6 @@ def update_cmd(
         _maybe_update("priority", priority)
         _maybe_update("story_points", story_points)
         _maybe_update("due_date", due_dt)
-        _maybe_update("sprint_id", sprint)
         _maybe_update("quality_tier", quality_tier)
         _maybe_update("notion_page_id", notion_page_id)
         _maybe_update("git_branch", git_branch)
@@ -808,6 +868,16 @@ def update_cmd(
                     "new": assignee,
                 }
                 task.assignee_id = ass_obj.id
+
+        # epic — нужен resolve через ref (slug | UUID); diff логируем slug'ами
+        if epic is not None:
+            epic_obj = _resolve_epic_or_die(session, epic)
+            if task.epic_id != epic_obj.id:
+                diffs["epic"] = {
+                    "old": _slug_for_epic(session, task.epic_id),
+                    "new": epic_obj.slug or epic_obj.id,
+                }
+                task.epic_id = epic_obj.id
 
         # status — особая логика для started_at / completed_at
         if status is not None and task.status != status:
@@ -865,6 +935,13 @@ def _slug_for_assignee(session: Session, assignee_id: Optional[str]) -> Optional
         return None
     p = session.get(Participant, assignee_id)
     return p.slug if p else None
+
+
+def _slug_for_epic(session: Session, epic_id: Optional[str]) -> Optional[str]:
+    if epic_id is None:
+        return None
+    e = session.get(Epic, epic_id)
+    return (e.slug or e.id) if e else None
 
 
 # --------------------------------------------------------------------------- #

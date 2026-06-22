@@ -20,10 +20,11 @@ from datetime import datetime
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from atlas.pm._time import msk_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
@@ -70,6 +71,7 @@ VALID_STATUSES = {
     "done", "blocked", "cancelled",
 }
 VALID_QUALITY_TIERS = {"T1", "T2", "T3"}
+VALID_ORIGINS = {"native", "injected", "imported", "split"}
 SLUG_PART_RE = re.compile(r"^[a-z0-9-]{2,50}$")
 DEFAULT_ACTOR_SLUG = "dmitry"
 
@@ -158,6 +160,15 @@ def _validate_quality_tier(tier: str) -> None:
         raise typer.Exit(code=1)
 
 
+def _validate_origin(origin: str) -> None:
+    if origin not in VALID_ORIGINS:
+        console.print(
+            f"[red]Невалидный origin '{origin}': "
+            f"допустимы {sorted(VALID_ORIGINS)}.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
 def _parse_date(value: str, label: str) -> datetime:
     try:
         return datetime.fromisoformat(value)
@@ -227,12 +238,27 @@ def add_cmd(
         help="Sprint ref (UUID или slug). MVP: nullable, без FK-проверки.",
     ),
     quality_tier: Optional[str] = typer.Option(None, "--quality-tier"),
+    source_project: Optional[str] = typer.Option(
+        None, "--source-project",
+        help="Проект-источник (slug | UUID). Задаёт provenance + origin='injected'.",
+    ),
+    rationale: Optional[str] = typer.Option(
+        None, "--rationale", help="Почему/по какому принципу заведена задача.",
+    ),
+    origin: Optional[str] = typer.Option(
+        None, "--origin", help="native | injected | imported | split.",
+    ),
+    injected_by: Optional[str] = typer.Option(
+        None, "--injected-by", help="Participant slug, кто инжектировал.",
+    ),
 ) -> None:
     """Создать задачу."""
     _validate_priority(priority)
     _validate_status(status)
     if quality_tier is not None:
         _validate_quality_tier(quality_tier)
+    if origin is not None:
+        _validate_origin(origin)
 
     due_dt: Optional[datetime] = None
     if due_date:
@@ -286,6 +312,29 @@ def add_cmd(
         if assignee:
             assignee_obj = _resolve_assignee_or_die(session, assignee)
 
+        # ----- provenance / инвариант origin↔source -----
+        source_id: Optional[str] = None
+        source_slug: Optional[str] = None
+        final_origin = origin or "native"
+        injected_at: Optional[datetime] = None
+        injector: Optional[Participant] = None
+        if source_project is not None:
+            src = _resolve_project_or_die(session, source_project)
+            if src.id == proj.id:
+                # self-inject — это не инжект: warning, остаёмся native.
+                console.print(
+                    "[yellow]Предупреждение: source-project совпадает с целевым — "
+                    "это не инжект, origin остаётся 'native'.[/yellow]"
+                )
+            else:
+                source_id = src.id
+                source_slug = src.slug
+                if origin is None:
+                    final_origin = "injected"
+                injected_at = msk_now()
+                if injected_by is not None:
+                    injector = _resolve_assignee_or_die(session, injected_by)
+
         # ----- number -----
         number = next_task_number(session)
 
@@ -304,6 +353,11 @@ def add_cmd(
             story_points=story_points,
             due_date=due_dt,
             quality_tier=quality_tier,
+            source_project_id=source_id,
+            origin=final_origin,
+            rationale=rationale,
+            injected_by=injector.id if injector else None,
+            injected_at=injected_at,
         )
         session.add(task)
         session.flush()
@@ -320,6 +374,9 @@ def add_cmd(
                 "priority": priority,
                 "status": status,
                 "assignee": assignee,
+                "origin": final_origin,
+                "source_project": source_slug,
+                "rationale": rationale,
             },
         )
         # F3c: поставить в outbox для синка наружу (если политика проекта разрешает)
@@ -348,18 +405,25 @@ def add_cmd(
 # --------------------------------------------------------------------------- #
 
 
+_SRC_PROJECT = aliased(Project)
+
+
 @pm_tasks_app.command("list")
+@command
 def list_cmd(
     project: Optional[str] = typer.Option(None, "--project", help="Project ref"),
     status: Optional[str] = typer.Option(None, "--status"),
     assignee: Optional[str] = typer.Option(None, "--assignee"),
     sprint: Optional[str] = typer.Option(None, "--sprint"),
+    source_project: Optional[str] = typer.Option(
+        None, "--source-project", help="Фильтр по проекту-источнику (provenance).",
+    ),
     archived: bool = typer.Option(
         False, "--archived/--no-archived",
         help="Показывать архивные (по умолчанию скрыты)",
     ),
 ) -> None:
-    """Список задач (табличный вывод)."""
+    """Список задач (--json по умолчанию; --text — таблица)."""
     if status is not None:
         _validate_status(status)
 
@@ -377,11 +441,14 @@ def list_cmd(
                 Task.priority,
                 Task.due_date,
                 Task.archived_at,
+                Task.origin,
                 Project.slug.label("project_slug"),
                 Participant.slug.label("assignee_slug"),
+                _SRC_PROJECT.slug.label("source_project_slug"),
             )
             .join(Project, Task.project_id == Project.id)
             .join(Participant, Task.assignee_id == Participant.id, isouter=True)
+            .join(_SRC_PROJECT, Task.source_project_id == _SRC_PROJECT.id, isouter=True)
         )
 
         if project is not None:
@@ -394,14 +461,13 @@ def list_cmd(
             stmt = stmt.where(Task.assignee_id == ass_obj.id)
         if sprint is not None:
             stmt = stmt.where(Task.sprint_id == sprint)
+        if source_project is not None:
+            src = _resolve_project_or_die(session, source_project)
+            stmt = stmt.where(Task.source_project_id == src.id)
         if not archived:
             stmt = stmt.where(Task.archived_at.is_(None))
 
         rows = session.execute(stmt).all()
-
-    if not rows:
-        console.print("[yellow]Задач не найдено.[/yellow]")
-        return
 
     # Sort: priority asc (P0 first), number desc (новые сверху).
     sorted_rows = sorted(
@@ -412,30 +478,63 @@ def list_cmd(
         ),
     )
 
-    table = Table(title=f"PM Tasks ({len(sorted_rows)})")
+    data = [
+        {
+            "id": r.id,
+            "number": r.number,
+            "slug": r.slug,
+            "title": r.title,
+            "status": r.status,
+            "priority": r.priority,
+            "assignee": r.assignee_slug,
+            "due_date": r.due_date.strftime("%Y-%m-%d") if r.due_date else None,
+            "project": r.project_slug,
+            "origin": r.origin,
+            "source_project": r.source_project_slug,
+            "archived": r.archived_at is not None,
+        }
+        for r in sorted_rows
+    ]
+
+    emit_data(data, text_renderer=_render_task_list)
+
+
+def _render_task_list(data: list[dict[str, Any]]) -> None:
+    if not data:
+        console.print("[yellow]Задач не найдено.[/yellow]")
+        return
+
+    table = Table(title=f"PM Tasks ({len(data)})")
     table.add_column("#", justify="right", style="bold")
     table.add_column("Slug", style="cyan", no_wrap=True)
     table.add_column("Title")
     table.add_column("Status", style="magenta")
     table.add_column("P", justify="center", style="bold")
+    table.add_column("Origin", style="yellow")
     table.add_column("Assignee", style="green")
     table.add_column("Due", style="dim")
     table.add_column("Project", style="dim")
 
-    for row in sorted_rows:
-        title = row.title
-        if row.archived_at is not None:
-            title = f"[strike]{row.title}[/strike] [dim](archived)[/dim]"
-        due = row.due_date.strftime("%Y-%m-%d") if row.due_date else "—"
+    for row in data:
+        title = row["title"]
+        if row["archived"]:
+            title = f"[strike]{row['title']}[/strike] [dim](archived)[/dim]"
+        # Origin-маркер: injected/imported/split — со ссылкой на источник.
+        if row["origin"] != "native":
+            src = row["source_project"]
+            origin_cell = f"{row['origin']} ←{src}" if src else row["origin"]
+        else:
+            origin_cell = "—"
         table.add_row(
-            f"#{row.number}" if row.number else "—",
-            row.slug or "—",
+            f"#{row['number']}" if row["number"] else "—",
+            row["slug"] or "—",
             title,
-            row.status,
-            row.priority,
-            row.assignee_slug or "—",
-            due,
-            row.project_slug,
+            row["status"],
+            row["priority"],
+            origin_cell,
+            row["assignee"] or "—",
+            row["due_date"] or "—",
+            row["project"],
         )
     console.print(table)
 
@@ -446,10 +545,11 @@ def list_cmd(
 
 
 @pm_tasks_app.command("get")
+@command
 def get_cmd(
     ref: str = typer.Argument(..., help="number | slug | full UUID | short UUID prefix"),
 ) -> None:
-    """Показать карточку задачи."""
+    """Показать карточку задачи (--json по умолчанию; --text — карточка)."""
     url = _db_url()
     engine = make_engine(url)
 
@@ -461,6 +561,21 @@ def get_cmd(
             session.get(Participant, task.assignee_id) if task.assignee_id else None
         )
 
+        # ----- provenance -----
+        source_slug = None
+        source_name = None
+        if task.source_project_id:
+            src = session.get(Project, task.source_project_id)
+            if src is not None:
+                source_slug = src.slug
+                source_name = src.name
+            else:
+                source_slug = task.source_project_id
+        injector_slug = None
+        if task.injected_by:
+            inj = session.get(Participant, task.injected_by)
+            injector_slug = inj.slug if inj else task.injected_by
+
         log_rows = session.execute(
             select(ActionLog)
             .where(ActionLog.entity_type == "task")
@@ -469,72 +584,125 @@ def get_cmd(
             .limit(5)
         ).scalars().all()
 
+        recent = [
+            {"timestamp": e.timestamp.strftime("%Y-%m-%d %H:%M"), "action": e.action}
+            for e in log_rows
+        ]
+
+    data = {
+        "id": task.id,
+        "number": task.number,
+        "slug": task.slug,
+        "title": task.title,
+        "cpp": task.cpp_description,
+        "description": task.description,
+        "status": task.status,
+        "priority": task.priority,
+        "story_points": task.story_points,
+        "due_date": task.due_date.strftime("%Y-%m-%d") if task.due_date else None,
+        "project": proj.slug if proj else None,
+        "project_name": proj.name if proj else None,
+        "assignee": assignee.slug if assignee else None,
+        "sprint_id": task.sprint_id,
+        "quality_tier": task.quality_tier,
+        # provenance
+        "origin": task.origin,
+        "source_project": source_slug,
+        "source_project_name": source_name,
+        "rationale": task.rationale,
+        "injected_by": injector_slug,
+        "injected_at": task.injected_at.isoformat() if task.injected_at else None,
+        # integrations
+        "notion_page_id": task.notion_page_id,
+        "git_branch": task.git_branch,
+        "git_pr_url": task.git_pr_url,
+        "superpowers_spec_path": task.superpowers_spec_path,
+        "superpowers_plan_path": task.superpowers_plan_path,
+        # timestamps
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "archived_at": task.archived_at.isoformat() if task.archived_at else None,
+        "recent_activity": recent,
+    }
+
+    emit_data(data, text_renderer=_render_task_get)
+
+
+def _render_task_get(d: dict[str, Any]) -> None:
     archived_marker = ""
-    if task.archived_at is not None:
-        archived_marker = (
-            f"  [bold red]ARCHIVED[/bold red] "
-            f"({task.archived_at.strftime('%Y-%m-%d')})"
-        )
-    number_str = f"#{task.number}" if task.number else "—"
+    if d["archived_at"]:
+        archived_marker = f"  [bold red]ARCHIVED[/bold red] ({d['archived_at']})"
+    number_str = f"#{d['number']}" if d["number"] else "—"
     console.print(
-        f"[bold cyan]{task.slug or '—'}[/bold cyan]  {number_str} — "
-        f"{task.title}{archived_marker}"
+        f"[bold cyan]{d['slug'] or '—'}[/bold cyan]  {number_str} — "
+        f"{d['title']}{archived_marker}"
     )
-    console.print(f"  ID:        {task.id}")
+    console.print(f"  ID:        {d['id']}")
     console.print(f"  Number:    {number_str}")
-    console.print(f"  Slug:      {task.slug or '—'}")
-    console.print(f"  CPP:       {task.cpp_description}")
-    if task.description:
-        console.print(f"  Description: {task.description}")
-    console.print(f"  Status:    {task.status}")
-    console.print(f"  Priority:  {task.priority}")
-    if task.story_points is not None:
-        console.print(f"  Story pts: {task.story_points}")
-    if task.due_date:
-        console.print(f"  Due:       {task.due_date.strftime('%Y-%m-%d')}")
-    if proj:
-        console.print(f"  Project:   {proj.slug} ({proj.name})")
-    if assignee:
-        console.print(
-            f"  Assignee:  {assignee.slug} ({assignee.name}, {assignee.kind})"
-        )
+    console.print(f"  Slug:      {d['slug'] or '—'}")
+    console.print(f"  CPP:       {d['cpp']}")
+    if d["description"]:
+        console.print(f"  Description: {d['description']}")
+    console.print(f"  Status:    {d['status']}")
+    console.print(f"  Priority:  {d['priority']}")
+    if d["story_points"] is not None:
+        console.print(f"  Story pts: {d['story_points']}")
+    if d["due_date"]:
+        console.print(f"  Due:       {d['due_date']}")
+    if d["project"]:
+        console.print(f"  Project:   {d['project']} ({d['project_name']})")
+    if d["assignee"]:
+        console.print(f"  Assignee:  {d['assignee']}")
     else:
         console.print("  Assignee:  —")
-    if task.sprint_id:
-        console.print(f"  Sprint:    {task.sprint_id}")
-    if task.quality_tier:
-        console.print(f"  Quality:   {task.quality_tier}")
+    if d["sprint_id"]:
+        console.print(f"  Sprint:    {d['sprint_id']}")
+    if d["quality_tier"]:
+        console.print(f"  Quality:   {d['quality_tier']}")
+
+    # Provenance — только если задача не нативная или есть источник.
+    if d["origin"] != "native" or d["source_project"]:
+        src = d["source_project"]
+        if src and d["source_project_name"]:
+            src = f"{src} ({d['source_project_name']})"
+        console.print("\n[bold]Provenance:[/bold]")
+        console.print(f"  Source project: {src or '—'}")
+        console.print(f"  Origin:         {d['origin']}")
+        console.print(f"  Rationale:      {d['rationale'] or '—'}")
+        console.print(f"  Injected by:    {d['injected_by'] or '—'}")
+        console.print(f"  Injected at:    {d['injected_at'] or '—'}")
 
     integrations = []
-    if task.notion_page_id:
-        integrations.append(f"  Notion:    {task.notion_page_id}")
-    if task.git_branch:
-        integrations.append(f"  Branch:    {task.git_branch}")
-    if task.git_pr_url:
-        integrations.append(f"  PR:        {task.git_pr_url}")
-    if task.superpowers_spec_path:
-        integrations.append(f"  Spec:      {task.superpowers_spec_path}")
-    if task.superpowers_plan_path:
-        integrations.append(f"  Plan:      {task.superpowers_plan_path}")
+    if d["notion_page_id"]:
+        integrations.append(f"  Notion:    {d['notion_page_id']}")
+    if d["git_branch"]:
+        integrations.append(f"  Branch:    {d['git_branch']}")
+    if d["git_pr_url"]:
+        integrations.append(f"  PR:        {d['git_pr_url']}")
+    if d["superpowers_spec_path"]:
+        integrations.append(f"  Spec:      {d['superpowers_spec_path']}")
+    if d["superpowers_plan_path"]:
+        integrations.append(f"  Plan:      {d['superpowers_plan_path']}")
     if integrations:
         console.print("\n[bold]Integrations:[/bold]")
         for line in integrations:
             console.print(line)
 
-    console.print(f"\n  Created:   {task.created_at}")
-    console.print(f"  Updated:   {task.updated_at}")
-    if task.started_at:
-        console.print(f"  Started:   {task.started_at}")
-    if task.completed_at:
-        console.print(f"  Completed: {task.completed_at}")
-    if task.archived_at:
-        console.print(f"  Archived:  {task.archived_at}")
+    console.print(f"\n  Created:   {d['created_at']}")
+    console.print(f"  Updated:   {d['updated_at']}")
+    if d["started_at"]:
+        console.print(f"  Started:   {d['started_at']}")
+    if d["completed_at"]:
+        console.print(f"  Completed: {d['completed_at']}")
+    if d["archived_at"]:
+        console.print(f"  Archived:  {d['archived_at']}")
 
-    if log_rows:
+    if d["recent_activity"]:
         console.print("\n[bold]Recent activity:[/bold]")
-        for entry in log_rows:
-            ts = entry.timestamp.strftime("%Y-%m-%d %H:%M")
-            console.print(f"  • {ts} — {entry.action}")
+        for entry in d["recent_activity"]:
+            console.print(f"  • {entry['timestamp']} — {entry['action']}")
 
 
 # --------------------------------------------------------------------------- #

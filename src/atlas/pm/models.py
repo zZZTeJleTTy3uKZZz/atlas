@@ -257,6 +257,26 @@ class Task(Base):
     superpowers_spec_path: Mapped[Optional[str]] = mapped_column(String(500))
     superpowers_plan_path: Mapped[Optional[str]] = mapped_column(String(500))
     quality_tier: Mapped[Optional[str]] = mapped_column(String(3))
+    # --- Provenance: происхождение задачи (миграция provenance) -----------
+    # source_project_id — проект-источник (NULL = нативная задача).
+    # origin — как заведена: native|injected|imported|split.
+    # rationale — почему/по какому принципу заведена.
+    # injected_by / injected_at — кто и когда инжектировал из источника.
+    # source_project_id индексируется именованным idx_tasks_source_project
+    # ниже (в __table_args__) — детерминированное имя для миграции, поэтому
+    # index=True на колонке не ставим (иначе дубль с auto ix_*).
+    source_project_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=True
+    )
+    origin: Mapped[str] = mapped_column(
+        String(20), default="native", server_default="native", nullable=False
+    )
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    injected_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("participants.id"), nullable=True
+    )
+    injected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, nullable=False
     )
@@ -279,11 +299,16 @@ class Task(Base):
             "quality_tier IS NULL OR quality_tier IN ('T1','T2','T3')",
             name="ck_tasks_quality_tier",
         ),
+        CheckConstraint(
+            "origin IN ('native','injected','imported','split')",
+            name="ck_tasks_origin",
+        ),
         Index("idx_tasks_project", "project_id"),
         Index("idx_tasks_sprint", "sprint_id"),
         Index("idx_tasks_assignee", "assignee_id"),
         Index("idx_tasks_status", "status"),
         Index("idx_tasks_due", "due_date"),
+        Index("idx_tasks_source_project", "source_project_id"),
     )
 
 
@@ -505,17 +530,38 @@ class Epic(Base):
         String(36), ForeignKey("projects.id"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     goal: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     starts_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     backend_id: Mapped[Optional[str]] = mapped_column(String(36))
+    # --- Provenance: происхождение эпика (миграция provenance) ------------
+    source_project_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=True
+    )
+    origin: Mapped[str] = mapped_column(
+        String(20), default="native", server_default="native", nullable=False
+    )
+    rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    injected_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("participants.id"), nullable=True
+    )
+    injected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, onupdate=msk_now, nullable=False
     )
 
-    __table_args__ = (Index("idx_epics_project", "project_id"),)
+    __table_args__ = (
+        CheckConstraint(
+            "origin IN ('native','injected','imported','split')",
+            name="ck_epics_origin",
+        ),
+        Index("idx_epics_project", "project_id"),
+        Index("idx_epics_source_project", "source_project_id"),
+    )
 
 
 class ChecklistItem(Base):

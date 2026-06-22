@@ -189,19 +189,26 @@ def _junction_target_via_fsutil(p: Path) -> Optional[Path]:
 
 
 def create_junction(link: Path, target: Path) -> None:
-    """Создать junction `link` → `target`.
+    """Создать ссылку-директорию `link` → `target` (kross-platform).
 
-    Порядок проверок (до subprocess):
+    Порядок проверок (до создания, общий для всех ОС):
     1. ``link.parent`` существует.
     2. ``link`` ещё не существует.
     3. ``target`` существует и является директорией.
 
-    Дальше вызывается ``cmd /c mklink /J "<link>" "<target>"``. Любая ошибка
-    подпроцесса (или исключение) превращается в `JunctionError` с деталями.
+    На Windows используется ``cmd /c mklink /J "<link>" "<target>"`` (NTFS
+    junction, не требует админ-прав на локальном томе). На POSIX используется
+    ``os.symlink(target, link, target_is_directory=True)`` — обычный
+    directory-симлинк (``target_is_directory`` важен только для сигнатуры
+    Windows-совместимости, на POSIX игнорируется).
+
+    Любая ошибка (non-zero subprocess или исключение) превращается в
+    `JunctionError` с деталями.
     """
     link = Path(link)
     target = Path(target)
 
+    # --- pre-проверки, общие для всех ОС (ДО ветвления) ---
     if not link.parent.exists():
         raise JunctionError(
             f"Parent directory не существует: {link.parent}. "
@@ -213,31 +220,42 @@ def create_junction(link: Path, target: Path) -> None:
         )
     if not target.exists():
         raise JunctionError(
-            f"Target не существует: {target}. mklink /J требует "
+            f"Target не существует: {target}. Создание ссылки требует "
             f"существующую директорию-таргет."
         )
     if not target.is_dir():
         raise JunctionError(
-            f"Target не является директорией: {target}. Junction требует "
-            f"директорию."
+            f"Target не является директорией: {target}. Junction/symlink "
+            f"требует директорию."
         )
 
-    cmd = ["cmd", "/c", "mklink", "/J", str(link), str(target)]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise JunctionError(f"mklink subprocess failed: {exc}") from exc
+    if is_windows():
+        cmd = ["cmd", "/c", "mklink", "/J", str(link), str(target)]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise JunctionError(f"mklink subprocess failed: {exc}") from exc
 
-    if result.returncode != 0:
-        raise JunctionError(
-            f"mklink /J вернул {result.returncode}. "
-            f"stdout: {result.stdout.strip()!r}; stderr: {result.stderr.strip()!r}"
-        )
+        if result.returncode != 0:
+            raise JunctionError(
+                f"mklink /J вернул {result.returncode}. "
+                f"stdout: {result.stdout.strip()!r}; "
+                f"stderr: {result.stderr.strip()!r}"
+            )
+    else:
+        # POSIX: обычный directory-симлинк. `target_is_directory` нужен только
+        # для совместимости сигнатуры с Windows; на POSIX он игнорируется.
+        try:
+            os.symlink(str(target), str(link), target_is_directory=True)
+        except OSError as exc:
+            raise JunctionError(
+                f"symlink({link} -> {target}) failed: {exc}"
+            ) from exc
 
 
 def remove_junction(link: Path) -> None:

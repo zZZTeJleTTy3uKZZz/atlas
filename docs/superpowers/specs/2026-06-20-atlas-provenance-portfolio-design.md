@@ -16,9 +16,16 @@
 
 ## Не входит в scope (отдельные спеки)
 
-- Контейнеры/модули (`parent_id`), типы-роли (kit/service/superskill), конфиг-типы, OS-symlink в
-  `create_junction` — это **спека #2 (структура/типы)**.
+- Контейнеры/модули (`parent_id`), типы-роли (kit/service/superskill), конфиг-типы — это
+  **спека #2 (структура/типы)**.
 - Изменения протокола синка, бэкенда, провижна.
+
+## Bundled fix (по запросу 2026-06-20, кросс-OS)
+
+`junctions.create_junction` сейчас Windows-only (`cmd /c mklink /J`). Добавляем POSIX-ветку
+`os.symlink(target, link, target_is_directory=True)` под `is_windows()` (детекция ОС уже есть в модуле;
+`is_junction`/`remove_junction` уже ветвятся на POSIX). Без новых зависимостей — централизацию в
+`librarykit` отложить (рефактор kit→librarykit ещё идёт). Цель: layout/junction работает на любой ОС.
 
 ## Архитектура
 

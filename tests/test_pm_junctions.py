@@ -270,3 +270,82 @@ class TestJunctionsIntegration:
         real = tmp_path / "real"
         real.mkdir()
         assert is_junction(real) is False
+
+
+# --------------------------------------------------------------------------- #
+# Integration tests — кросс-платформенные (текущая ОС, не только Windows)      #
+# --------------------------------------------------------------------------- #
+
+
+class TestJunctionsCurrentOS:
+    """Полный цикл create → is_junction → junction_target → remove на
+    ТЕКУЩЕЙ ОС (Windows = junction, POSIX = directory-symlink).
+
+    Эти тесты проверяют, что `create_junction` кросс-платформенно создаёт
+    рабочую ссылку, а не падает на не-Windows.
+    """
+
+    def test_full_lifecycle(self, tmp_path):
+        from atlas.pm.junctions import (
+            create_junction,
+            is_junction,
+            junction_target,
+            remove_junction,
+        )
+
+        target = tmp_path / "storage" / "proj"
+        target.mkdir(parents=True)
+        marker = target / "file.txt"
+        marker.write_text("payload", encoding="utf-8")
+
+        link_parent = tmp_path / "Logical"
+        link_parent.mkdir()
+        link = link_parent / "proj"
+
+        # create
+        create_junction(link, target)
+        assert link.exists()
+
+        # is_junction
+        assert is_junction(link) is True
+
+        # сквозной доступ к реальным файлам через ссылку
+        assert (link / "file.txt").read_text(encoding="utf-8") == "payload"
+
+        # junction_target указывает на реальный таргет
+        resolved = junction_target(link)
+        assert resolved is not None
+        assert Path(resolved).resolve() == target.resolve()
+
+        # remove снимает только ссылку, таргет и файл целы
+        remove_junction(link)
+        assert not link.exists()
+        assert target.exists()
+        assert marker.read_text(encoding="utf-8") == "payload"
+
+    def test_remove_real_directory_raises_safety_error(self, tmp_path):
+        """SafetyError при попытке remove_junction на реальной папке —
+        кросс-платформенно (это не ОС-специфика, а защита в самой функции)."""
+        from atlas.pm.junctions import SafetyError, remove_junction
+
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        (real_dir / "keep.txt").write_text("MUST SURVIVE", encoding="utf-8")
+
+        with pytest.raises(SafetyError):
+            remove_junction(real_dir)
+
+        assert real_dir.exists()
+        assert (real_dir / "keep.txt").read_text(encoding="utf-8") == "MUST SURVIVE"
+
+    def test_create_junction_raises_if_link_exists_real_create(self, tmp_path):
+        """После реального create повторный create на тот же link → JunctionError."""
+        from atlas.pm.junctions import JunctionError, create_junction
+
+        target = tmp_path / "t"
+        target.mkdir()
+        link = tmp_path / "lnk"
+
+        create_junction(link, target)
+        with pytest.raises(JunctionError):
+            create_junction(link, target)

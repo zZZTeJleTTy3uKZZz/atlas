@@ -49,11 +49,10 @@ class TestTypeSlugToGroup:
         from atlas.pm.paths import type_slug_to_group
         assert type_slug_to_group("inbox") == "inbox"
 
-    def test_type_slug_unknown_raises(self):
+    def test_type_slug_unknown_falls_back_products(self):
+        """Канон: неизвестный slug → products (а не ValueError)."""
         from atlas.pm.paths import type_slug_to_group
-        with pytest.raises(ValueError) as excinfo:
-            type_slug_to_group("unknown-type-slug")
-        assert "unknown-type-slug" in str(excinfo.value)
+        assert type_slug_to_group("unknown-type-slug") == "products"
 
 
 # --------------------------------------------------------------------------- #

@@ -608,6 +608,10 @@ def add_cmd(
         False, "--no-sync",
         help="Не раскладывать в ядро/Notion (создать только в Atlas).",
     ),
+    parent: Optional[str] = typer.Option(
+        None, "--parent",
+        help="Родительский проект-контейнер (slug | UUID). Делает проект модулем.",
+    ),
 ) -> None:
     """Создать новый проект в портфеле.
 
@@ -658,6 +662,12 @@ def add_cmd(
                 f"[red]Статус '{status_slug}' не найден. См. `atlas projects statuses`.[/red]"
             )
             raise typer.Exit(code=1)
+
+        # ----- parent (опц.): резолв в id; на add цикл невозможен -----
+        parent_id: Optional[str] = None
+        if parent is not None:
+            parent_proj = _resolve_parent_or_die(session, parent)
+            parent_id = parent_proj.id
 
         # ----- slug -----
         slug_auto = False
@@ -748,6 +758,7 @@ def add_cmd(
             estimated_deadline=deadline_dt,
             git_repo_url=git_repo_url,
             local_path=resolved_local_path,
+            parent_id=parent_id,
         )
         session.add(project)
         session.flush()  # получить project.id
@@ -790,6 +801,8 @@ def add_cmd(
         }
         if tag_slugs_for_log:
             details["tags"] = tag_slugs_for_log
+        if parent_id is not None:
+            details["parent"] = parent_proj.slug
 
         _log_action(
             session,
@@ -1111,8 +1124,22 @@ def list_cmd(
         None, "--tag", "-t",
         help="Фильтр по тегу (AND-семантика, можно несколько раз).",
     ),
+    parent: Optional[str] = typer.Option(
+        None, "--parent",
+        help="Только модули этого контейнера (slug | UUID родителя).",
+    ),
+    standalone: bool = typer.Option(
+        False, "--standalone",
+        help="Только самостоятельные проекты (без родителя, parent IS NULL).",
+    ),
 ) -> None:
     """Список проектов (табличный вывод)."""
+    if parent is not None and standalone:
+        console.print(
+            "[red]--parent и --standalone взаимоисключающи.[/red]"
+        )
+        raise typer.Exit(code=1)
+
     url = _db_url()
     engine = make_engine(url)
 
@@ -1158,6 +1185,11 @@ def list_cmd(
             stmt = stmt.where(Project.archived_at.is_(None))
         if tag_project_ids is not None:
             stmt = stmt.where(Project.id.in_(tag_project_ids))
+        if parent is not None:
+            parent_proj = _resolve_parent_or_die(session, parent)
+            stmt = stmt.where(Project.parent_id == parent_proj.id)
+        if standalone:
+            stmt = stmt.where(Project.parent_id.is_(None))
 
         rows = session.execute(stmt).all()
 
@@ -1201,6 +1233,10 @@ def list_cmd(
 @projects_app.command("get")
 def get_cmd(
     ref: str = typer.Argument(..., help="slug | full UUID | short UUID prefix (≥ 7 chars)"),
+    as_json: bool = typer.Option(
+        False, "--json",
+        help="Вывести карточку как JSON (включая parent и modules).",
+    ),
 ) -> None:
     """Показать карточку проекта."""
     url = _db_url()
@@ -1220,6 +1256,29 @@ def get_cmd(
         pt = session.get(ProjectType, project.type_id)
         ps = session.get(ProjectStatus, project.status_id)
 
+        # parent (если проект — модуль): slug + name
+        parent_info: Optional[dict[str, Any]] = None
+        if project.parent_id is not None:
+            parent_proj = session.get(Project, project.parent_id)
+            if parent_proj is not None:
+                parent_info = {"slug": parent_proj.slug, "name": parent_proj.name}
+
+        # modules (если проект — контейнер): дети с типом
+        module_rows = session.execute(
+            select(
+                Project.slug,
+                Project.name,
+                ProjectType.slug.label("type_slug"),
+            )
+            .join(ProjectType, Project.type_id == ProjectType.id)
+            .where(Project.parent_id == project.id)
+            .order_by(Project.name)
+        ).all()
+        modules_info = [
+            {"slug": r.slug, "name": r.name, "type": r.type_slug}
+            for r in module_rows
+        ]
+
         # участники
         link_rows = session.execute(
             select(ProjectParticipant, Participant)
@@ -1238,6 +1297,36 @@ def get_cmd(
             .order_by(ActionLog.timestamp.desc())
             .limit(5)
         ).scalars().all()
+
+    # ----- JSON-режим: чистый дамп без rich-разметки -----
+    if as_json:
+        payload = {
+            "id": project.id,
+            "slug": project.slug,
+            "prefix": project.prefix,
+            "name": project.name,
+            "type": pt.slug if pt else None,
+            "status": ps.slug if ps else None,
+            "priority": project.priority,
+            "description": project.description,
+            "one_line_summary": project.one_line_summary,
+            "local_path": project.local_path,
+            "archived_at": (
+                project.archived_at.isoformat() if project.archived_at else None
+            ),
+            "parent": parent_info,
+            "modules": modules_info,
+            "participants": [
+                {"name": p.name, "slug": p.slug, "role": link.role_in_project}
+                for link, p in link_rows
+            ],
+            "tags": [
+                {"slug": t.slug, "category": t.category, "name": t.name}
+                for t in project_tags
+            ],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
 
     # вывод
     archived_marker = ""
@@ -1266,10 +1355,19 @@ def get_cmd(
         console.print(f"  Git:       {project.git_repo_url}")
     if project.local_path:
         console.print(f"  Path:      {project.local_path}")
+    if parent_info is not None:
+        console.print(
+            f"  Parent:    {parent_info['slug']} ({parent_info['name']})"
+        )
     console.print(f"  Created:   {project.created_at}")
     console.print(f"  Updated:   {project.updated_at}")
     if project.last_touched_at:
         console.print(f"  Touched:   {project.last_touched_at}")
+
+    if modules_info:
+        console.print(f"\n[bold]Modules ({len(modules_info)}):[/bold]")
+        for m in modules_info:
+            console.print(f"  • {m['slug']} — {m['name']} [magenta]{m['type']}[/magenta]")
 
     if link_rows:
         console.print("\n[bold]Participants:[/bold]")
@@ -1337,8 +1435,22 @@ def update_cmd(
         None, "--slug",
         help="ЗАПРЕЩЕНО менять slug — это часть task IDs. Используй delete + add.",
     ),
+    parent: Optional[str] = typer.Option(
+        None, "--parent",
+        help="Сделать проект модулем контейнера (slug | UUID). Защита от цикла.",
+    ),
+    no_parent: bool = typer.Option(
+        False, "--no-parent",
+        help="Отвязать проект от родителя (parent IS NULL). Взаимоисключает --parent.",
+    ),
 ) -> None:
     """Обновить поля проекта (любые, кроме slug)."""
+    if parent is not None and no_parent:
+        console.print(
+            "[red]--parent и --no-parent взаимоисключающи.[/red]"
+        )
+        raise typer.Exit(code=1)
+
     if slug is not None:
         console.print(
             "[red]Изменение slug запрещено: slug участвует в task IDs. "
@@ -1430,6 +1542,31 @@ def update_cmd(
                 raise typer.Exit(code=1)
             diffs["prefix"] = {"old": project.prefix, "new": prefix}
             project.prefix = prefix
+
+        # ----- parent / no-parent -----
+        if no_parent:
+            if project.parent_id is not None:
+                old_parent = session.get(Project, project.parent_id)
+                diffs["parent"] = {
+                    "old": old_parent.slug if old_parent else project.parent_id,
+                    "new": None,
+                }
+                project.parent_id = None
+        elif parent is not None:
+            new_parent = _resolve_parent_or_die(session, parent)
+            if new_parent.id != project.parent_id:
+                _check_no_cycle_or_die(
+                    session, project_id=project.id, new_parent_id=new_parent.id
+                )
+                old_parent = (
+                    session.get(Project, project.parent_id)
+                    if project.parent_id is not None else None
+                )
+                diffs["parent"] = {
+                    "old": old_parent.slug if old_parent else None,
+                    "new": new_parent.slug,
+                }
+                project.parent_id = new_parent.id
 
         if not diffs:
             console.print("[yellow]Нечего обновлять.[/yellow]")
@@ -1987,6 +2124,55 @@ def _resolve_project_or_die(session: Session, ref: str) -> Project:
         console.print(f"[red]Project '{ref}' не найден.[/red]")
         raise typer.Exit(code=1)
     return project
+
+
+def _resolve_parent_or_die(session: Session, ref: str) -> Project:
+    """Резолв parent-ref в Project. Ошибки → typer.Exit(1).
+
+    Сообщение об ошибке упоминает 'parent', чтобы причина была понятна.
+    """
+    try:
+        parent = resolve_project_ref(session, ref)
+    except AmbiguousRefError as exc:
+        console.print(f"[red]Parent: {exc}[/red]")
+        raise typer.Exit(code=1)
+    if parent is None:
+        console.print(f"[red]Parent '{ref}' не найден.[/red]")
+        raise typer.Exit(code=1)
+    return parent
+
+
+def _check_no_cycle_or_die(
+    session: Session, *, project_id: str, new_parent_id: str
+) -> None:
+    """Проверить, что назначение new_parent проекту project_id не создаёт цикл.
+
+    Поднимаемся по цепочке parent_id от нового родителя вверх; если по пути
+    встретили сам project_id — цикл (A→…→A). Self-parent (new_parent==project)
+    ловится здесь же на первом шаге.
+    """
+    if new_parent_id == project_id:
+        console.print(
+            "[red]Проект не может быть родителем самому себе.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    seen: set[str] = set()
+    cursor: Optional[str] = new_parent_id
+    while cursor is not None:
+        if cursor == project_id:
+            console.print(
+                "[red]Смена parent создаст цикл в иерархии проектов "
+                "(cycle detected). Отменено.[/red]"
+            )
+            raise typer.Exit(code=1)
+        if cursor in seen:
+            # защита от уже существующего цикла в данных (не наш случай).
+            break
+        seen.add(cursor)
+        cursor = session.execute(
+            select(Project.parent_id).where(Project.id == cursor)
+        ).scalar_one_or_none()
 
 
 def _status_by_slug_or_die(session: Session, status_slug: str) -> ProjectStatus:

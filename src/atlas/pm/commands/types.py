@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas.pm.db import make_engine, make_session, resolve_db_url
-from atlas.pm.models import ActionLog, Participant, ProjectType
+from atlas.pm.models import ActionLog, Participant, ProjectType, SyncPolicy
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -27,6 +27,9 @@ console = Console()
 
 SLUG_RE = re.compile(r"^[a-z0-9-]{2,50}$")
 DEFAULT_ACTOR_SLUG = "dmitry"
+VALID_GROUPS = ("clients", "products", "tests", "inbox")
+DEFAULT_GROUP = "products"
+DEFAULT_POLICY = "local"
 
 
 # --------------------------------------------------------------------------- #
@@ -70,6 +73,26 @@ def _validate_slug(slug: str) -> None:
         raise typer.Exit(code=1)
 
 
+def _validate_group(group: str) -> None:
+    if group not in VALID_GROUPS:
+        console.print(
+            f"[red]Невалидная группа '{group}'. Допустимо: {', '.join(VALID_GROUPS)}.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
+def _validate_policy(session: Session, policy: str) -> None:
+    exists = session.execute(
+        select(SyncPolicy).where(SyncPolicy.slug == policy)
+    ).scalar_one_or_none()
+    if exists is None:
+        known = session.execute(select(SyncPolicy.slug).order_by(SyncPolicy.slug)).scalars().all()
+        console.print(
+            f"[red]Неизвестная sync-policy '{policy}'. Известные: {', '.join(known)}.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+
 # --------------------------------------------------------------------------- #
 # add                                                                         #
 # --------------------------------------------------------------------------- #
@@ -81,14 +104,25 @@ def add_cmd(
     name: str = typer.Option(..., "--name"),
     description: Optional[str] = typer.Option(None, "--description"),
     color: Optional[str] = typer.Option(None, "--color", help='Hex, напр. "#FF5733"'),
+    group: str = typer.Option(
+        DEFAULT_GROUP, "--group",
+        help="Физическая группа: clients|products|tests|inbox (дефолт products)",
+    ),
+    default_sync_policy: str = typer.Option(
+        DEFAULT_POLICY, "--default-sync-policy",
+        help="slug политики синка (sync_policies); дефолт local",
+    ),
 ) -> None:
     """Создать новый тип проекта."""
     _validate_slug(slug)
+    _validate_group(group)
 
     url = _db_url()
     engine = make_engine(url)
 
     with make_session(engine) as session:
+        _validate_policy(session, default_sync_policy)
+
         existing = session.execute(
             select(ProjectType).where(ProjectType.slug == slug)
         ).scalar_one_or_none()
@@ -103,6 +137,8 @@ def add_cmd(
             name=name,
             description=description,
             color=color,
+            storage_group=group,
+            default_sync_policy=default_sync_policy,
         )
         session.add(pt)
         session.flush()
@@ -116,12 +152,85 @@ def add_cmd(
                 "name": name,
                 "description": description,
                 "color": color,
+                "storage_group": group,
+                "default_sync_policy": default_sync_policy,
             },
         )
         session.commit()
 
         console.print(
-            f"[green]✓ Project type '{slug}' created[/green] · {name}"
+            f"[green]✓ Project type '{slug}' created[/green] · {name} "
+            f"· group={group} · policy={default_sync_policy}"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# edit                                                                        #
+# --------------------------------------------------------------------------- #
+
+
+@app.command("edit")
+def edit_cmd(
+    ref: str = typer.Argument(..., help="slug типа (неизменяемый идентификатор)"),
+    name: Optional[str] = typer.Option(None, "--name"),
+    description: Optional[str] = typer.Option(None, "--description"),
+    color: Optional[str] = typer.Option(None, "--color"),
+    group: Optional[str] = typer.Option(
+        None, "--group", help="clients|products|tests|inbox"
+    ),
+    default_sync_policy: Optional[str] = typer.Option(
+        None, "--default-sync-policy", help="slug политики синка (sync_policies)"
+    ),
+) -> None:
+    """Отредактировать существующий тип (slug не меняется)."""
+    url = _db_url()
+    engine = make_engine(url)
+
+    with make_session(engine) as session:
+        pt = session.execute(
+            select(ProjectType).where(ProjectType.slug == ref)
+        ).scalar_one_or_none()
+        if pt is None:
+            console.print(f"[red]Project type '{ref}' не найден.[/red]")
+            raise typer.Exit(code=1)
+
+        if group is not None:
+            _validate_group(group)
+        if default_sync_policy is not None:
+            _validate_policy(session, default_sync_policy)
+
+        changes: dict[str, Any] = {}
+        if name is not None:
+            pt.name = name
+            changes["name"] = name
+        if description is not None:
+            pt.description = description
+            changes["description"] = description
+        if color is not None:
+            pt.color = color
+            changes["color"] = color
+        if group is not None:
+            pt.storage_group = group
+            changes["storage_group"] = group
+        if default_sync_policy is not None:
+            pt.default_sync_policy = default_sync_policy
+            changes["default_sync_policy"] = default_sync_policy
+
+        if not changes:
+            console.print("[yellow]Нечего менять (не передано ни одно поле).[/yellow]")
+            raise typer.Exit(code=0)
+
+        _log_action(
+            session,
+            action="project_type_updated",
+            entity_id=pt.id,
+            details={"slug": ref, **changes},
+        )
+        session.commit()
+
+        console.print(
+            f"[green]✓ Project type '{ref}' updated[/green] · "
+            + ", ".join(f"{k}={v}" for k, v in changes.items())
         )
 
 
@@ -151,15 +260,18 @@ def list_cmd(
         return
 
     table = Table(title=f"Project Types ({len(rows)})")
-    table.add_column("Slug", style="cyan")
-    table.add_column("Name")
+    table.add_column("Slug", style="cyan", no_wrap=True)
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Group", style="green", no_wrap=True)
+    table.add_column("Sync policy", style="magenta", no_wrap=True)
     table.add_column("Description", overflow="fold")
-    table.add_column("Color", style="dim")
     table.add_column("Archived", justify="center")
     for t in rows:
         table.add_row(
-            t.slug, t.name, t.description or "",
-            t.color or "—",
+            t.slug, t.name,
+            t.storage_group or "—",
+            t.default_sync_policy or "—",
+            t.description or "",
             "✓" if t.is_archived else "—",
         )
     console.print(table)

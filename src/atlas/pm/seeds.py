@@ -5,6 +5,10 @@
 """
 from __future__ import annotations
 
+import os
+import tomllib
+from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,38 +18,103 @@ from atlas.pm.models import Participant, ProjectStatus, ProjectType, Tag
 # Seed data                                                                   #
 # --------------------------------------------------------------------------- #
 
-PROJECT_TYPES: list[dict[str, str]] = [
+# Единый источник правды по типам проектов (канон).
+# Раньше тип был размазан по трём хардкод-спискам: PROJECT_TYPES (name/desc/color),
+# DEFAULT_SYNC_POLICY_BY_TYPE (policy) и paths.TYPE_TO_GROUP (storage_group).
+# Теперь — одна ПОЛНАЯ запись на тип: {slug,name,description,color,
+# default_sync_policy,storage_group}. seed_project_types читает merged(base+user).
+#
+# Поля storage_group: clients|products|tests|inbox (физическая раскладка).
+# default_sync_policy: slug из sync_policies (local|epics|media|full).
+BASE_PROJECT_TYPES: list[dict[str, str]] = [
+    # --- исходные 5 (name/description/color сохранены ДОСЛОВНО) -------------
     {
         "slug": "client-project",
         "name": "Клиентские проекты",
         "description": "Внедрения Bitrix24 + AI-агенты для клиентов Cifro.pro",
         "color": "#F97316",
+        "storage_group": "clients",
+        "default_sync_policy": "full",
     },
     {
         "slug": "business-product",
         "name": "Новые бизнес-продукты",
         "description": "SaaS-продукты Cifro.pro (NP-001..005+)",
         "color": "#10B981",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
     },
     {
         "slug": "personal-utility",
         "name": "Личные утилиты",
         "description": "Dev-утилиты Дмитрия (Tests/* и пр.)",
         "color": "#8B5CF6",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
     },
     {
         "slug": "personal-project",
         "name": "Личные проекты",
         "description": "Собственные инициативы (Дима/*)",
         "color": "#EC4899",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
     },
     {
         "slug": "shared-infrastructure",
         "name": "Общая инфраструктура",
         "description": "Инструменты, используемые многими проектами (notion-task-cli и пр.)",
         "color": "#6B7280",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
+    },
+    # --- роли-типы (выражают реальные классы портфеля) ---------------------
+    {
+        "slug": "kit",
+        "name": "Kit / SDK-тулкит",
+        "description": "Переиспользуемый SDK (BaseX+registry+contract-tests): adapterkit/clikit/librarykit",
+        "color": "#0EA5E9",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
+    },
+    {
+        "slug": "service",
+        "name": "Сервис",
+        "description": "Деплоится, состояние, потребляет киты: gateway/bublictr/workerkit",
+        "color": "#14B8A6",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
+    },
+    {
+        "slug": "superskill",
+        "name": "Супернавык",
+        "description": "skill+CLI+lib под сервис, dual (шарится+адаптер): notebooklm/yt-uploader",
+        "color": "#A855F7",
+        "storage_group": "products",
+        "default_sync_policy": "epics",
+    },
+    # --- спец-типы (раньше «фантомы» в маппингах без записи в PROJECT_TYPES) -
+    {
+        "slug": "test",
+        "name": "Тесты / спайки",
+        "description": "Короткоживущие тестовые проекты и спайки (Tests/*)",
+        "color": "#9CA3AF",
+        "storage_group": "tests",
+        "default_sync_policy": "local",
+    },
+    {
+        "slug": "inbox",
+        "name": "Inbox",
+        "description": "Сырой материал на разбор AI (_Inbox/*)",
+        "color": "#64748B",
+        "storage_group": "inbox",
+        "default_sync_policy": "local",
     },
 ]
+
+# Поля, которые upsert переносит в ProjectType (остальные ключи из toml игнор).
+_TYPE_FIELDS = ("slug", "name", "description", "color", "storage_group", "default_sync_policy")
+_VALID_GROUPS = ("clients", "products", "tests", "inbox")
 
 PROJECT_STATUSES: list[dict[str, str | int]] = [
     # Канонический набор (W45-39, 2026-04-29). Раньше было 6+ статусов
@@ -130,15 +199,83 @@ COUNTERPARTIES_SEED = [
     {"slug": "dmitry", "kind": "person", "name": "Дмитрий Семёнов"},
 ]
 
-DEFAULT_SYNC_POLICY_BY_TYPE = {
-    "client-project": "full",
-    "business-product": "epics",
-    "personal-utility": "epics",
-    "personal-project": "epics",
-    "shared-infrastructure": "epics",
-    "test": "local",
-    "inbox": "local",
-}
+# --------------------------------------------------------------------------- #
+# User-override типов (types.toml) + merge                                    #
+# --------------------------------------------------------------------------- #
+
+
+def _user_types_path() -> Path:
+    """Путь к пользовательскому types.toml.
+
+    Приоритет: env ``ATLAS_TYPES_FILE`` → ``~/.atlas/types.toml``.
+    Тип — свойство пользователя (глобально), не стора/профиля.
+    """
+    override = os.environ.get("ATLAS_TYPES_FILE")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".atlas" / "types.toml"
+
+
+def load_user_types() -> list[dict[str, str]]:
+    """Загрузить пользовательские типы из types.toml (если файл есть).
+
+    Формат::
+
+        [[types]]
+        slug = "worker-kit"
+        name = "Worker Kit"
+        default_sync_policy = "epics"
+        storage_group = "products"
+
+    Нет файла → ``[]``. Битый slug/group/policy → ValueError (не молча).
+    """
+    path = _user_types_path()
+    if not path.exists():
+        return []
+
+    with path.open("rb") as fh:
+        data = tomllib.load(fh)
+
+    raw = data.get("types", [])
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{path}: ключ 'types' должен быть массивом таблиц [[types]]."
+        )
+
+    result: list[dict[str, str]] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict) or not entry.get("slug"):
+            raise ValueError(f"{path}: types[{i}] без обязательного 'slug'.")
+        slug = entry["slug"]
+        group = entry.get("storage_group")
+        if group is not None and group not in _VALID_GROUPS:
+            raise ValueError(
+                f"{path}: тип '{slug}' — невалидный storage_group '{group}'. "
+                f"Допустимо: {', '.join(_VALID_GROUPS)}."
+            )
+        result.append({k: v for k, v in entry.items() if k in _TYPE_FIELDS})
+    return result
+
+
+def merged_project_types() -> list[dict[str, str]]:
+    """Базовые типы, поверх которых наложены пользовательские (merge by slug).
+
+    User переопределяет существующий тип (частично — только переданные поля)
+    и/или добавляет новые. Порядок: базовые сохраняют позицию, новые user-типы
+    добавляются в конец.
+    """
+    by_slug: dict[str, dict[str, str]] = {t["slug"]: dict(t) for t in BASE_PROJECT_TYPES}
+    order: list[str] = [t["slug"] for t in BASE_PROJECT_TYPES]
+
+    for ut in load_user_types():
+        slug = ut["slug"]
+        if slug in by_slug:
+            by_slug[slug].update(ut)  # частичный override
+        else:
+            by_slug[slug] = dict(ut)
+            order.append(slug)
+
+    return [by_slug[s] for s in order]
 
 
 # --------------------------------------------------------------------------- #
@@ -170,8 +307,20 @@ def _upsert(session: Session, model, unique_field: str, data: dict) -> object:
 
 
 def seed_project_types(session: Session) -> list[ProjectType]:
-    """Заселить справочник project_types."""
-    return [_upsert(session, ProjectType, "slug", pt) for pt in PROJECT_TYPES]
+    """Заселить справочник project_types из merged(base + types.toml).
+
+    Идемпотентно по slug: существующий тип обновляется (name/description/color/
+    storage_group/default_sync_policy), новый — создаётся. Политика и группа
+    идут в самой записи типа (отдельный seed_type_default_policies больше не
+    нужен).
+
+    У типа есть FK ``default_sync_policy → sync_policies.slug`` (в SQLite
+    FK-enforcement включён), поэтому сначала гарантируем наличие политик —
+    идемпотентно. Так ``seed_project_types`` безопасен и при автономном вызове.
+    """
+    seed_sync_policies(session)
+    session.flush()
+    return [_upsert(session, ProjectType, "slug", pt) for pt in merged_project_types()]
 
 
 def seed_project_statuses(session: Session) -> list[ProjectStatus]:
@@ -215,28 +364,18 @@ def seed_counterparties(session: Session) -> list:
     return [_upsert(session, Counterparty, "slug", cp) for cp in COUNTERPARTIES_SEED]
 
 
-def seed_type_default_policies(session: Session) -> int:
-    from atlas.pm.models import ProjectType
-    n = 0
-    for slug, policy in DEFAULT_SYNC_POLICY_BY_TYPE.items():
-        pt = session.execute(
-            select(ProjectType).where(ProjectType.slug == slug)
-        ).scalar_one_or_none()
-        if pt is not None:
-            pt.default_sync_policy = policy
-            n += 1
-    return n
-
-
 def seed_all(session: Session) -> dict[str, int | dict[str, int]]:
-    """Запустить все seeds. Возвращает counts."""
+    """Запустить все seeds. Возвращает counts.
+
+    Порядок: sync_policies ДО project_types — у типа есть FK
+    default_sync_policy → sync_policies.slug (SQLite FK enforcement включён).
+    """
+    policies = seed_sync_policies(session)
     types = seed_project_types(session)
     statuses = seed_project_statuses(session)
     participants = seed_participants(session)
     tags = seed_base_tags(session)
-    policies = seed_sync_policies(session)
     counterparties = seed_counterparties(session)
-    type_defaults = seed_type_default_policies(session)
     session.commit()
     return {
         "project_types": len(types),
@@ -245,5 +384,4 @@ def seed_all(session: Session) -> dict[str, int | dict[str, int]]:
         "tags": tags,
         "sync_policies": len(policies),
         "counterparties": len(counterparties),
-        "type_defaults": type_defaults,
     }

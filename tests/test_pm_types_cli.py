@@ -157,3 +157,86 @@ class TestAdd:
             assert entry.entity_type == "project_type"
             details = json.loads(entry.details_json)
             assert details["slug"] == "logged-type"
+
+    def test_add_with_group_and_policy(self, runner, app, seeded_engine):
+        from atlas.pm.db import make_session
+        from atlas.pm.models import ProjectType
+
+        result = runner.invoke(app, [
+            "add", "--slug", "worker-kit", "--name", "Worker Kit",
+            "--group", "products", "--default-sync-policy", "epics",
+        ])
+        assert result.exit_code == 0, _combined(result)
+
+        with make_session(seeded_engine) as session:
+            t = session.execute(
+                select(ProjectType).where(ProjectType.slug == "worker-kit")
+            ).scalar_one()
+            assert t.storage_group == "products"
+            assert t.default_sync_policy == "epics"
+
+    def test_add_defaults_group_products_policy_local(self, runner, app, seeded_engine):
+        from atlas.pm.db import make_session
+        from atlas.pm.models import ProjectType
+
+        result = runner.invoke(app, [
+            "add", "--slug", "bare-type", "--name", "Bare",
+        ])
+        assert result.exit_code == 0, _combined(result)
+
+        with make_session(seeded_engine) as session:
+            t = session.execute(
+                select(ProjectType).where(ProjectType.slug == "bare-type")
+            ).scalar_one()
+            assert t.storage_group == "products"
+            assert t.default_sync_policy == "local"
+
+    def test_add_invalid_group_rejected(self, runner, app, seeded_engine):
+        result = runner.invoke(app, [
+            "add", "--slug", "x-type", "--name", "X", "--group", "nonsense",
+        ])
+        assert result.exit_code != 0
+
+    def test_add_invalid_policy_rejected(self, runner, app, seeded_engine):
+        result = runner.invoke(app, [
+            "add", "--slug", "y-type", "--name", "Y",
+            "--default-sync-policy", "nonexistent-policy",
+        ])
+        assert result.exit_code != 0
+
+
+# --------------------------------------------------------------------------- #
+# edit                                                                        #
+# --------------------------------------------------------------------------- #
+
+
+class TestEdit:
+    def test_edit_changes_fields(self, runner, app, seeded_engine):
+        from atlas.pm.db import make_session
+        from atlas.pm.models import ProjectType
+
+        result = runner.invoke(app, [
+            "edit", "client-project",
+            "--name", "Клиентские (ред.)",
+            "--group", "products",
+            "--default-sync-policy", "epics",
+        ])
+        assert result.exit_code == 0, _combined(result)
+
+        with make_session(seeded_engine) as session:
+            t = session.execute(
+                select(ProjectType).where(ProjectType.slug == "client-project")
+            ).scalar_one()
+            assert t.name == "Клиентские (ред.)"
+            assert t.storage_group == "products"
+            assert t.default_sync_policy == "epics"
+
+    def test_edit_unknown_ref_fails(self, runner, app, seeded_engine):
+        result = runner.invoke(app, ["edit", "no-such-type", "--name", "Z"])
+        assert result.exit_code != 0
+
+    def test_edit_invalid_policy_rejected(self, runner, app, seeded_engine):
+        result = runner.invoke(app, [
+            "edit", "client-project", "--default-sync-policy", "bogus",
+        ])
+        assert result.exit_code != 0

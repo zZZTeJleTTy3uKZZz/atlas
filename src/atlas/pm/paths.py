@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
+
+from sqlalchemy import select
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 # --------------------------------------------------------------------------- #
 # Types & Mappings                                                            #
@@ -35,7 +40,9 @@ GROUP_FOLDER_NAMES: dict[str, str] = {
     "inbox": "_Inbox",
 }
 
-# Какой project_type.slug в какую группу попадает физически.
+# Аварийный bootstrap-дефолт раскладки типов (до первого seed / без сессии).
+# Канонический источник — ProjectType.storage_group в БД (см. type_slug_to_group).
+# Карта оставлена тонкой страховкой для путей, вызываемых без доступа к сессии.
 TYPE_TO_GROUP: dict[str, Group] = {
     "client-project": "clients",
     "business-product": "products",
@@ -45,6 +52,9 @@ TYPE_TO_GROUP: dict[str, Group] = {
     "test": "tests",
     "inbox": "inbox",
 }
+
+# Группа по умолчанию, если тип/группа не найдены (вместо ValueError).
+DEFAULT_GROUP: Group = "products"
 
 
 # --------------------------------------------------------------------------- #
@@ -70,22 +80,29 @@ def get_projects_root() -> Path:
 # --------------------------------------------------------------------------- #
 
 
-def type_slug_to_group(type_slug: str) -> Group:
+def type_slug_to_group(
+    type_slug: str, *, session: "Optional[Session]" = None
+) -> Group:
     """project_type.slug → группа для физического размещения.
 
-    Raises:
-        ValueError: если type_slug не в TYPE_TO_GROUP (пусть пользователь
-                    добавит маппинг сам, чтобы не молча промахнуться).
+    Источник правды — ``ProjectType.storage_group`` в БД (канон типов). Если
+    передана ``session`` — читаем из БД; иначе используем bootstrap-дефолт
+    ``TYPE_TO_GROUP``. В любом случае при отсутствии типа/группы возвращаем
+    ``DEFAULT_GROUP`` ('products') — НЕ кидаем ValueError, чтобы кастомный тип
+    (заведённый через ``type add``) не ломал раскладку.
     """
-    try:
-        return TYPE_TO_GROUP[type_slug]
-    except KeyError:
-        known = ", ".join(sorted(TYPE_TO_GROUP.keys()))
-        raise ValueError(
-            f"Неизвестный project_type.slug '{type_slug}'. "
-            f"Известные: {known}. "
-            f"Добавьте маппинг в atlas.pm.paths.TYPE_TO_GROUP."
-        )
+    if session is not None:
+        from atlas.pm.models import ProjectType  # локальный импорт (избегаем цикла)
+
+        pt = session.execute(
+            select(ProjectType).where(ProjectType.slug == type_slug)
+        ).scalar_one_or_none()
+        if pt is not None and pt.storage_group:
+            return pt.storage_group  # type: ignore[return-value]
+        # тип не найден или без группы → bootstrap, затем дефолт
+        return TYPE_TO_GROUP.get(type_slug, DEFAULT_GROUP)
+
+    return TYPE_TO_GROUP.get(type_slug, DEFAULT_GROUP)
 
 
 # --------------------------------------------------------------------------- #

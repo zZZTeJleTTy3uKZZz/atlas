@@ -57,6 +57,12 @@ class ProjectType(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     color: Mapped[Optional[str]] = mapped_column(String(20))
     is_archived: Mapped[bool] = mapped_column(Integer, default=0, nullable=False)
+    # --- Канон типов (миграция canon) -------------------------------------
+    # storage_group — физическая группа размещения проекта этого типа на диске:
+    # clients|products|tests|inbox. Свод хардкода paths.TYPE_TO_GROUP в БД.
+    # NULL допустим (старые/кастомные типы без явной группы).
+    storage_group: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # ----------------------------------------------------------------------
     default_sync_policy: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("sync_policies.slug")
     )
@@ -142,6 +148,17 @@ class Project(Base):
     )
     backend_id: Mapped[Optional[str]] = mapped_column(String(36))
     # ----------------------------------------------------------------------
+    # --- Канон типов: иерархия проектов (миграция canon) ------------------
+    # parent_id — родительский проект (под-проект / направление внутри
+    # портфеля контрагента). FK на ORM-уровне для метаданных; в миграции
+    # как DB-constraint НЕ создаётся (безымянный FK в batch падает —
+    # как в provenance-миграции c1d2e3f4a5b6). Индексируется именованным
+    # idx_projects_parent ниже (в __table_args__) — детерминированное имя
+    # для миграции; index=True на колонке не ставим (иначе дубль с auto ix_*).
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=True
+    )
+    # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=msk_now, nullable=False
     )
@@ -171,6 +188,7 @@ class Project(Base):
         Index("idx_projects_status", "status_id"),
         Index("idx_projects_priority", "priority"),
         Index("idx_projects_last_touched", "last_touched_at"),
+        Index("idx_projects_parent", "parent_id"),
     )
 
 

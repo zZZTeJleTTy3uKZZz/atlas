@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table, is_json
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -230,6 +230,7 @@ def perform_git_init(
 
 
 @git_app.command("init")
+@command
 def init_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix проекта"),
     provider: str = typer.Option("gitlab", "--provider", help="git host provider (gitlab|github)"),
@@ -264,10 +265,21 @@ def init_cmd(
             raise typer.Exit(code=1)
         session.commit()
 
-    console.print(f"[green]✓ Git initialized for '{project.slug}'[/green]")
-    console.print(f"  URL:     {result['url']}")
-    console.print(f"  Branch:  {result['branch']}")
-    console.print(f"  Group:   {result['group_path']}")
+    emit_data(
+        {
+            "ok": True,
+            "slug": project.slug,
+            "url": result["url"],
+            "branch": result["branch"],
+            "group": result["group_path"],
+        },
+        text_renderer=lambda d: (
+            console.print(f"[green]✓ Git initialized for '{d['slug']}'[/green]"),
+            console.print(f"  URL:     {d['url']}"),
+            console.print(f"  Branch:  {d['branch']}"),
+            console.print(f"  Group:   {d['group']}"),
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -276,6 +288,7 @@ def init_cmd(
 
 
 @git_app.command("status")
+@command
 def status_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
 ) -> None:
@@ -306,31 +319,54 @@ def status_cmd(
         else:
             warning = "local_path не задан."
 
-    table = Table(title=f"Git status — {project.slug}")
-    table.add_column("Field", style="cyan", no_wrap=True)
-    table.add_column("Value", style="bold")
-    table.add_row("URL", url or "—")
-    table.add_row("Default branch", branch or "—")
-    table.add_row(
-        "Initialized at",
-        initialized.strftime("%Y-%m-%d %H:%M") if initialized else "—",
-    )
-    table.add_row(
-        "Last pushed at",
-        last_pushed.strftime("%Y-%m-%d %H:%M") if last_pushed else "—",
-    )
-
+    data: dict[str, Any] = {
+        "slug": project.slug,
+        "url": url,
+        "default_branch": branch,
+        "initialized_at": initialized.isoformat() if initialized else None,
+        "last_pushed_at": last_pushed.isoformat() if last_pushed else None,
+        "local": None,
+        "warning": warning,
+    }
     if local_status is not None:
-        table.add_row("Local branch", str(local_status.get("branch") or "—"))
-        table.add_row("Dirty", "yes" if local_status.get("dirty") else "no")
-        table.add_row("Last SHA", str(local_status.get("last_sha") or "—"))
+        data["local"] = {
+            "branch": local_status.get("branch"),
+            "dirty": bool(local_status.get("dirty")),
+            "last_sha": local_status.get("last_sha"),
+            "ahead": int(local_status.get("ahead", 0)),
+            "behind": int(local_status.get("behind", 0)),
+        }
+
+    def _render(d: dict[str, Any]) -> None:
+        from rich.table import Table
+
+        table = Table(title=f"Git status — {d['slug']}")
+        table.add_column("Field", style="cyan", no_wrap=True)
+        table.add_column("Value", style="bold")
+        table.add_row("URL", d["url"] or "—")
+        table.add_row("Default branch", d["default_branch"] or "—")
         table.add_row(
-            "Ahead/behind",
-            f"+{local_status.get('ahead', 0)} / -{local_status.get('behind', 0)}",
+            "Initialized at",
+            initialized.strftime("%Y-%m-%d %H:%M") if initialized else "—",
         )
-    console.print(table)
-    if warning:
-        console.print(f"[yellow]⚠ {warning}[/yellow]")
+        table.add_row(
+            "Last pushed at",
+            last_pushed.strftime("%Y-%m-%d %H:%M") if last_pushed else "—",
+        )
+        local = d["local"]
+        if local is not None:
+            table.add_row("Local branch", str(local.get("branch") or "—"))
+            table.add_row("Dirty", "yes" if local.get("dirty") else "no")
+            table.add_row("Last SHA", str(local.get("last_sha") or "—"))
+            table.add_row(
+                "Ahead/behind",
+                f"+{local.get('ahead', 0)} / -{local.get('behind', 0)}",
+            )
+        console.print(table)
+        if d["warning"]:
+            console.print(f"[yellow]⚠ {d['warning']}[/yellow]")
+
+    emit_data(data, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -339,6 +375,7 @@ def status_cmd(
 
 
 @git_app.command("push")
+@command
 def push_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
 ) -> None:
@@ -379,8 +416,11 @@ def push_cmd(
         )
         session.commit()
 
-    console.print(
-        f"[green]✓ Pushed '{project.slug}' to origin/{branch}[/green]"
+    emit_data(
+        {"ok": True, "slug": project.slug, "branch": branch},
+        text_renderer=lambda d: console.print(
+            f"[green]✓ Pushed '{d['slug']}' to origin/{d['branch']}[/green]"
+        ),
     )
 
 
@@ -390,6 +430,7 @@ def push_cmd(
 
 
 @git_app.command("link")
+@command
 def link_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     url: str = typer.Option(..., "--url", help="URL уже существующего репо"),
@@ -449,9 +490,22 @@ def link_cmd(
         )
         session.commit()
 
-    console.print(f"[green]✓ Linked '{project.slug}' to existing remote[/green]")
-    console.print(f"  URL:    {url}")
-    console.print(f"  Branch: {branch}")
+    emit_data(
+        {
+            "ok": True,
+            "slug": project.slug,
+            "url": url,
+            "branch": branch,
+            "provider": provider,
+        },
+        text_renderer=lambda d: (
+            console.print(
+                f"[green]✓ Linked '{d['slug']}' to existing remote[/green]"
+            ),
+            console.print(f"  URL:    {d['url']}"),
+            console.print(f"  Branch: {d['branch']}"),
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -482,6 +536,7 @@ def _repo_full_path_from_url(url: str) -> str:
 
 
 @git_app.command("move")
+@command
 def move_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     to_group: str = typer.Option(..., "--to-group", help="Новая GitLab group path"),
@@ -537,8 +592,17 @@ def move_cmd(
         )
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{project.slug}' moved → {new_url}[/green]"
+    emit_data(
+        {
+            "ok": True,
+            "slug": project.slug,
+            "old_url": old_url,
+            "new_url": new_url,
+            "to_group": to_group,
+        },
+        text_renderer=lambda d: console.print(
+            f"[green]✓ Project '{d['slug']}' moved → {d['new_url']}[/green]"
+        ),
     )
 
 
@@ -548,6 +612,7 @@ def move_cmd(
 
 
 @git_app.command("status-all")
+@command
 def status_all_cmd(
     type_slug: Optional[str] = typer.Option(None, "--type"),
     status_slug: Optional[str] = typer.Option(None, "--status"),
@@ -566,7 +631,7 @@ def status_all_cmd(
             matching = filter_projects_by_tags(session, slugs, archived=True)
             candidate_ids = {p.id for p in matching}
             if not candidate_ids:
-                console.print("[yellow]Проектов не найдено.[/yellow]")
+                emit_table([], empty_message="[yellow]Проектов не найдено.[/yellow]")
                 return
 
         stmt = (
@@ -590,12 +655,12 @@ def status_all_cmd(
         for proj, _t_slug, _s_slug in rows:
             entry: dict[str, Any] = {
                 "slug": proj.slug,
-                "url": proj.git_remote_url or "—",
-                "branch": proj.git_default_branch or "—",
-                "dirty": "—",
+                "url": proj.git_remote_url,
+                "branch": proj.git_default_branch,
+                "dirty": None,
                 "last_pushed": (
                     proj.git_last_pushed_at.strftime("%Y-%m-%d %H:%M")
-                    if proj.git_last_pushed_at else "—"
+                    if proj.git_last_pushed_at else None
                 ),
             }
             if proj.local_path:
@@ -609,19 +674,18 @@ def status_all_cmd(
                         entry["dirty"] = "?"
             table_rows.append(entry)
 
-    if not table_rows:
-        console.print("[yellow]Проектов не найдено.[/yellow]")
-        return
-
-    table = Table(title=f"Git status-all ({len(table_rows)})")
-    table.add_column("slug", style="cyan", no_wrap=True)
-    table.add_column("URL", style="dim")
-    table.add_column("branch", style="magenta")
-    table.add_column("dirty", justify="center")
-    table.add_column("last_pushed", style="dim")
-    for r in table_rows:
-        table.add_row(r["slug"], r["url"], r["branch"], r["dirty"], r["last_pushed"])
-    console.print(table)
+    emit_table(
+        table_rows,
+        title=f"Git status-all ({len(table_rows)})",
+        columns=[
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {"key": "url", "header": "URL", "style": "dim"},
+            {"key": "branch", "header": "branch", "style": "magenta"},
+            {"key": "dirty", "header": "dirty", "justify": "center"},
+            {"key": "last_pushed", "header": "last_pushed", "style": "dim"},
+        ],
+        empty_message="[yellow]Проектов не найдено.[/yellow]",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -630,6 +694,7 @@ def status_all_cmd(
 
 
 @git_app.command("sync-from-remote")
+@command
 def sync_from_remote_cmd(
     dry_run: bool = typer.Option(
         False, "--dry-run/--apply",
@@ -681,26 +746,31 @@ def sync_from_remote_cmd(
                     "action": "ok",
                 })
 
-        # Render
-        table = Table(title=f"sync-from-remote ({len(actions)} projects)")
-        table.add_column("slug", style="cyan")
-        table.add_column("stored", style="dim")
-        table.add_column("remote", style="bold")
-        table.add_column("action")
-        for a in actions:
-            act = a["action"]
-            if a.get("reason"):
-                act = f"{act} ({a['reason']})"
-            table.add_row(
-                a["slug"],
-                a.get("stored") or "—",
-                a.get("remote") or "—",
-                act,
-            )
-        console.print(table)
+        # Render — результат команды (per-project diff) JSON-консистентно.
+        emit_table(
+            actions,
+            title=f"sync-from-remote ({len(actions)} projects)",
+            columns=[
+                {"key": "slug", "header": "slug", "style": "cyan"},
+                {"key": "stored", "header": "stored", "style": "dim"},
+                {"key": "remote", "header": "remote", "style": "bold"},
+                {"key": "action", "header": "action"},
+            ],
+            empty_message="sync-from-remote (0 projects)",
+        )
+        # action+reason — человеку, в text-режиме отдельной строкой к таблице
+        # выше не вписать (raw action идёт в json), поэтому в text печатаем
+        # причины ошибок дополнительным блоком.
+        if not is_json():
+            for a in actions:
+                if a.get("reason"):
+                    console.print(
+                        f"  [dim]{a['slug']}: {a['action']} ({a['reason']})[/dim]"
+                    )
 
         if dry_run:
-            console.print("[yellow]Dry run. Use --apply to write DB.[/yellow]")
+            if not is_json():
+                console.print("[yellow]Dry run. Use --apply to write DB.[/yellow]")
             return
 
         # apply updates
@@ -726,6 +796,8 @@ def sync_from_remote_cmd(
 
         if updated:
             session.commit()
-            console.print(f"[green]✓ Updated {updated} project(s).[/green]")
-        else:
-            console.print("[dim]Нечего обновлять.[/dim]")
+        if not is_json():
+            if updated:
+                console.print(f"[green]✓ Updated {updated} project(s).[/green]")
+            else:
+                console.print("[dim]Нечего обновлять.[/dim]")

@@ -92,7 +92,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "s-adapterkit", specifier = ">=0.1.2" },
-    { name = "s-clikit", specifier = ">=0.1.3" },
+    { name = "s-clikit", specifier = ">=0.1.4" },
     { name = "s-librarykit", specifier = ">=0.1.3" },
     { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "typer", specifier = ">=0.12" },
@@ -1087,7 +1087,7 @@ wheels = [
 
 [[package]]
 name = "s-clikit"
-version = "0.1.3"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1100,9 +1100,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/95/34cda976bb7fa8e3a1850d27650eae560bca4d071f49e01589335c94a5cc/s_clikit-0.1.3.tar.gz", hash = "sha256:3e636ae8db131577f61030a9280b1dc840b0b951d0f7dd6633a9efcf14f1bc81", size = 101840, upload-time = "2026-06-23T15:45:41.493Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/bb/bb1a0df0cfe89b503b0b05166a1028874d020ecb0ed4d375a34b5f8ed980/s_clikit-0.1.4.tar.gz", hash = "sha256:f2dadb23a1fb55bacadcaf8bc6ab72bca79ff4eb49b8984a6b549ef3d8e85d87", size = 104045, upload-time = "2026-06-23T17:50:29.027Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/a0/dc1e4f26c5e6a55e3830fe3c79b43b2070bcba9b155922a000f6523ad911/s_clikit-0.1.3-py3-none-any.whl", hash = "sha256:53c32653ec31e2b91baa04a7ab227f1dfc3c808184c053ce7f02c843e5e6db7f", size = 34229, upload-time = "2026-06-23T15:45:40.395Z" },
+    { url = "https://files.pythonhosted.org/packages/84/1e/c56ea5001d0e907d1a037f49bc3865394753377c043030bc3aceef40412c/s_clikit-0.1.4-py3-none-any.whl", hash = "sha256:038bc40cd55b5b6f49172ea31f8afa4e8943207b8796ed95a8ef903d622f979f", size = 35502, upload-time = "2026-06-23T17:50:28.096Z" },
 ]
 
 [[package]]

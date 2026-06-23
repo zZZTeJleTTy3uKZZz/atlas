@@ -188,8 +188,10 @@ class TestList:
 
         result = runner.invoke(app, ["list", "--limit", "3"])
         assert result.exit_code == 0
-        # ровно 3 строки event_*
-        count = sum(1 for line in result.stdout.split("\n") if "event_" in line)
+        # ровно 3 записи (json-дефолт → массив объектов)
+        import json as _json
+        rows = _json.loads(result.stdout)
+        count = sum(1 for r in rows if str(r.get("action", "")).startswith("event_"))
         assert count == 3
 
     def test_list_sorted_desc(self, runner, app, seeded_engine):

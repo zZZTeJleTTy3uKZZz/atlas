@@ -9,8 +9,8 @@ from datetime import datetime
 from typing import Optional
 
 import typer
+from clikit import command, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -69,6 +69,7 @@ def _truncate_details(details_json: Optional[str], max_len: int = 60) -> str:
 
 
 @app.command("list")
+@command
 def list_cmd(
     project: Optional[str] = typer.Option(
         None, "--project",
@@ -158,23 +159,45 @@ def list_cmd(
             ).scalars().all():
                 actor_map[p.id] = p.slug
 
-    if not rows:
-        console.print("[yellow]Нет записей action_log.[/yellow]")
-        return
+    def _details_obj(details_json):
+        if not details_json:
+            return None
+        try:
+            return json.loads(details_json)
+        except json.JSONDecodeError:
+            return details_json
 
-    table = Table(title=f"Action Log ({len(rows)})")
-    table.add_column("Timestamp", style="cyan", no_wrap=True)
-    table.add_column("Actor", style="green")
-    table.add_column("Entity", style="magenta")
-    table.add_column("Action", style="bold", no_wrap=True)
-    table.add_column("Details", overflow="fold")
-
+    data = []
     for r in rows:
-        ts = r.timestamp.strftime("%Y-%m-%d %H:%M") if r.timestamp else "—"
-        actor_slug = actor_map.get(r.actor_id, "—") if r.actor_id else "—"
+        ts = r.timestamp.strftime("%Y-%m-%d %H:%M") if r.timestamp else None
+        actor_slug = actor_map.get(r.actor_id) if r.actor_id else None
         entity = (
             f"{r.entity_type}:{(r.entity_id or '')[:8]}"
             if r.entity_id else r.entity_type
         )
-        table.add_row(ts, actor_slug, entity, r.action, _truncate_details(r.details_json))
-    console.print(table)
+        data.append({
+            "timestamp": ts,
+            "actor": actor_slug,
+            "entity": entity,
+            "entity_type": r.entity_type,
+            "entity_id": r.entity_id,
+            "action": r.action,
+            "details": _details_obj(r.details_json),
+            "details_text": _truncate_details(r.details_json),
+        })
+
+    emit_table(
+        data,
+        columns=[
+            {"key": "timestamp", "header": "Timestamp", "style": "cyan",
+             "no_wrap": True, "format": lambda v: v or "—"},
+            {"key": "actor", "header": "Actor", "style": "green",
+             "format": lambda v: v or "—"},
+            {"key": "entity", "header": "Entity", "style": "magenta"},
+            {"key": "action", "header": "Action", "style": "bold", "no_wrap": True},
+            {"key": "details_text", "header": "Details",
+             "format": lambda v: v or ""},
+        ],
+        title=f"Action Log ({len(data)})",
+        empty_message="[yellow]Нет записей action_log.[/yellow]",
+    )

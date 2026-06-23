@@ -24,8 +24,8 @@ import re
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table, is_json
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -261,6 +261,7 @@ def _apply_status_timestamps(h: Hypothesis, new_status: str, diffs: dict) -> Non
 
 
 @hypothesis_app.command("add")
+@command
 def add_cmd(
     project: str = typer.Option(..., "--project", help="Project ref (slug | UUID)"),
     title: str = typer.Option(..., "--title", help="Короткое имя гипотезы"),
@@ -377,13 +378,28 @@ def add_cmd(
         )
         session.commit()
 
-        if slug_auto:
-            console.print(f"[dim]slug auto-generated: {final_slug}[/dim]")
+        def _render(d: dict) -> None:
+            if d["slug_auto"]:
+                console.print(f"[dim]slug auto-generated: {d['slug']}[/dim]")
+            task_part = f" · task: {d['task']}" if d["task"] else ""
+            console.print(
+                f"[green]✓ Hypothesis #{d['number']} '{d['slug']}' created[/green] · "
+                f"{d['title']} · {d['status']} · conf={d['confidence']}{task_part}"
+            )
 
-        task_part = f" · task: {task_obj.slug}" if task_obj else ""
-        console.print(
-            f"[green]✓ Hypothesis #{number} '{final_slug}' created[/green] · "
-            f"{title} · {status} · conf={confidence}{task_part}"
+        emit_data(
+            {
+                "id": hyp.id,
+                "number": number,
+                "slug": final_slug,
+                "title": title,
+                "status": status,
+                "confidence": confidence,
+                "project": proj.slug,
+                "task": task_obj.slug if task_obj else None,
+                "slug_auto": slug_auto,
+            },
+            text_renderer=_render,
         )
 
 
@@ -393,6 +409,7 @@ def add_cmd(
 
 
 @hypothesis_app.command("list")
+@command
 def list_cmd(
     project: Optional[str] = typer.Option(None, "--project", help="Project ref"),
     status: Optional[str] = typer.Option(None, "--status"),
@@ -451,43 +468,59 @@ def list_cmd(
 
         rows = session.execute(stmt).all()
 
-    if not rows:
-        console.print("[yellow]Гипотез не найдено.[/yellow]")
-        return
-
     # Новые сверху (number desc).
     sorted_rows = sorted(rows, key=lambda r: -(r.number or 0))
 
-    table = Table(title=f"Hypotheses ({len(sorted_rows)})")
-    table.add_column("#", justify="right", style="bold")
-    table.add_column("Slug", style="cyan", no_wrap=True)
-    table.add_column("Title")
-    table.add_column("Status", style="magenta")
-    table.add_column("Verdict", style="yellow")
-    table.add_column("C", justify="center", style="bold")
-    table.add_column("Metric Δ", style="green")
-    table.add_column("Project", style="dim")
-    table.add_column("Task", style="dim")
-
+    data = []
     for row in sorted_rows:
-        title = row.title
-        if row.archived_at is not None:
-            title = f"[strike]{row.title}[/strike] [dim](archived)[/dim]"
-        metric_delta = "—"
+        metric_delta = None
         if row.metric or row.delta:
             metric_delta = f"{row.metric or '—'}: {row.delta or '—'}"
-        table.add_row(
-            f"#{row.number}" if row.number else "—",
-            row.slug or "—",
-            title,
-            row.status,
-            row.verdict or "—",
-            row.confidence,
-            metric_delta,
-            row.project_slug,
-            row.task_slug or "—",
-        )
-    console.print(table)
+        # title для text-режима: strike-маркер если archived. В JSON отдаём
+        # сырые title + archived (см. columns ниже — format только для text).
+        archived = row.archived_at is not None
+        if archived:
+            title_text = f"[strike]{row.title}[/strike] [dim](archived)[/dim]"
+        else:
+            title_text = row.title
+        data.append({
+            "number": row.number,
+            "slug": row.slug,
+            "title": row.title,
+            "status": row.status,
+            "verdict": row.verdict,
+            "confidence": row.confidence,
+            "metric": row.metric,
+            "delta": row.delta,
+            "metric_delta": metric_delta,
+            "project": row.project_slug,
+            "task": row.task_slug,
+            "archived": archived,
+            "_title_text": title_text,
+        })
+
+    emit_table(
+        [{k: v for k, v in row.items() if k != "_title_text"} for row in data]
+        if is_json() else data,
+        columns=[
+            {"key": "number", "header": "#", "justify": "right", "style": "bold",
+             "format": lambda v: f"#{v}" if v else "—"},
+            {"key": "slug", "header": "Slug", "style": "cyan", "no_wrap": True,
+             "format": lambda v: v or "—"},
+            {"key": "_title_text", "header": "Title"},
+            {"key": "status", "header": "Status", "style": "magenta"},
+            {"key": "verdict", "header": "Verdict", "style": "yellow",
+             "format": lambda v: v or "—"},
+            {"key": "confidence", "header": "C", "justify": "center", "style": "bold"},
+            {"key": "metric_delta", "header": "Metric Δ", "style": "green",
+             "format": lambda v: v or "—"},
+            {"key": "project", "header": "Project", "style": "dim"},
+            {"key": "task", "header": "Task", "style": "dim",
+             "format": lambda v: v or "—"},
+        ],
+        title=f"Hypotheses ({len(data)})",
+        empty_message="[yellow]Гипотез не найдено.[/yellow]",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -496,6 +529,7 @@ def list_cmd(
 
 
 @hypothesis_app.command("get")
+@command
 def get_cmd(
     ref: str = typer.Argument(..., help="number | slug | full UUID | short UUID prefix"),
 ) -> None:
@@ -519,62 +553,98 @@ def get_cmd(
             .limit(5)
         ).scalars().all()
 
-    archived_marker = ""
-    if hyp.archived_at is not None:
-        archived_marker = (
-            f"  [bold red]ARCHIVED[/bold red] "
-            f"({hyp.archived_at.strftime('%Y-%m-%d')})"
+        data = {
+            "id": hyp.id,
+            "number": hyp.number,
+            "slug": hyp.slug,
+            "title": hyp.title,
+            "statement": hyp.statement,
+            "status": hyp.status,
+            "confidence": hyp.confidence,
+            "verdict": hyp.verdict,
+            "metric": hyp.metric,
+            "baseline": hyp.baseline,
+            "target": hyp.target,
+            "method": hyp.method,
+            "result_value": hyp.result_value,
+            "delta": hyp.delta,
+            "lesson": hyp.lesson,
+            "consolidated_into": hyp.consolidated_into,
+            "project": proj.slug if proj else None,
+            "project_name": proj.name if proj else None,
+            "task": (task.slug or task.id) if task else None,
+            "created_at": hyp.created_at.isoformat() if hyp.created_at else None,
+            "updated_at": hyp.updated_at.isoformat() if hyp.updated_at else None,
+            "tested_at": hyp.tested_at.isoformat() if hyp.tested_at else None,
+            "closed_at": hyp.closed_at.isoformat() if hyp.closed_at else None,
+            "archived_at": hyp.archived_at.isoformat() if hyp.archived_at else None,
+            "recent_activity": [
+                {
+                    "timestamp": e.timestamp.strftime("%Y-%m-%d %H:%M")
+                    if e.timestamp else None,
+                    "action": e.action,
+                }
+                for e in log_rows
+            ],
+        }
+
+    def _render(d: dict) -> None:
+        archived_marker = ""
+        if d["archived_at"] is not None:
+            archived_marker = (
+                f"  [bold red]ARCHIVED[/bold red] ({d['archived_at'][:10]})"
+            )
+        number_str = f"#{d['number']}" if d["number"] else "—"
+        console.print(
+            f"[bold cyan]{d['slug'] or '—'}[/bold cyan]  {number_str} — "
+            f"{d['title']}{archived_marker}"
         )
-    number_str = f"#{hyp.number}" if hyp.number else "—"
-    console.print(
-        f"[bold cyan]{hyp.slug or '—'}[/bold cyan]  {number_str} — "
-        f"{hyp.title}{archived_marker}"
-    )
-    console.print(f"  ID:         {hyp.id}")
-    console.print(f"  Number:     {number_str}")
-    console.print(f"  Slug:       {hyp.slug or '—'}")
-    if hyp.statement:
-        console.print(f"  Statement:  {hyp.statement}")
-    console.print(f"  Status:     {hyp.status}")
-    console.print(f"  Confidence: {hyp.confidence}")
-    console.print(f"  Verdict:    {hyp.verdict or '—'}")
-    if hyp.metric:
-        console.print(f"  Metric:     {hyp.metric}")
-    if hyp.baseline:
-        console.print(f"  Baseline:   {hyp.baseline}")
-    if hyp.target:
-        console.print(f"  Target:     {hyp.target}")
-    if hyp.method:
-        console.print(f"  Method:     {hyp.method}")
-    if hyp.result_value:
-        console.print(f"  Result:     {hyp.result_value}")
-    if hyp.delta:
-        console.print(f"  Delta:      {hyp.delta}")
-    if hyp.lesson:
-        console.print(f"  Lesson:     {hyp.lesson}")
-    if hyp.consolidated_into:
-        console.print(f"  Consolidated into: {hyp.consolidated_into}")
-    if proj:
-        console.print(f"  Project:    {proj.slug} ({proj.name})")
-    if task:
-        console.print(f"  Task:       {task.slug or task.id}")
-    else:
-        console.print("  Task:       —")
+        console.print(f"  ID:         {d['id']}")
+        console.print(f"  Number:     {number_str}")
+        console.print(f"  Slug:       {d['slug'] or '—'}")
+        if d["statement"]:
+            console.print(f"  Statement:  {d['statement']}")
+        console.print(f"  Status:     {d['status']}")
+        console.print(f"  Confidence: {d['confidence']}")
+        console.print(f"  Verdict:    {d['verdict'] or '—'}")
+        if d["metric"]:
+            console.print(f"  Metric:     {d['metric']}")
+        if d["baseline"]:
+            console.print(f"  Baseline:   {d['baseline']}")
+        if d["target"]:
+            console.print(f"  Target:     {d['target']}")
+        if d["method"]:
+            console.print(f"  Method:     {d['method']}")
+        if d["result_value"]:
+            console.print(f"  Result:     {d['result_value']}")
+        if d["delta"]:
+            console.print(f"  Delta:      {d['delta']}")
+        if d["lesson"]:
+            console.print(f"  Lesson:     {d['lesson']}")
+        if d["consolidated_into"]:
+            console.print(f"  Consolidated into: {d['consolidated_into']}")
+        if d["project"]:
+            console.print(f"  Project:    {d['project']} ({d['project_name']})")
+        if d["task"]:
+            console.print(f"  Task:       {d['task']}")
+        else:
+            console.print("  Task:       —")
 
-    console.print(f"\n  Created:    {hyp.created_at}")
-    console.print(f"  Updated:    {hyp.updated_at}")
-    if hyp.tested_at:
-        console.print(f"  Tested:     {hyp.tested_at}")
-    if hyp.closed_at:
-        console.print(f"  Closed:     {hyp.closed_at}")
-    if hyp.archived_at:
-        console.print(f"  Archived:   {hyp.archived_at}")
+        console.print(f"\n  Created:    {d['created_at']}")
+        console.print(f"  Updated:    {d['updated_at']}")
+        if d["tested_at"]:
+            console.print(f"  Tested:     {d['tested_at']}")
+        if d["closed_at"]:
+            console.print(f"  Closed:     {d['closed_at']}")
+        if d["archived_at"]:
+            console.print(f"  Archived:   {d['archived_at']}")
 
-    if log_rows:
-        console.print("\n[bold]Recent activity:[/bold]")
-        for entry in log_rows:
-            ts = entry.timestamp.strftime("%Y-%m-%d %H:%M")
-            console.print(f"  • {ts} — {entry.action}")
+        if d["recent_activity"]:
+            console.print("\n[bold]Recent activity:[/bold]")
+            for entry in d["recent_activity"]:
+                console.print(f"  • {entry['timestamp']} — {entry['action']}")
+
+    emit_data(data, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -583,6 +653,7 @@ def get_cmd(
 
 
 @hypothesis_app.command("update")
+@command
 def update_cmd(
     ref: str = typer.Argument(..., help="number | slug | UUID"),
     title: Optional[str] = typer.Option(None, "--title"),
@@ -663,7 +734,13 @@ def update_cmd(
             _apply_status_timestamps(hyp, status, diffs)
 
         if not diffs:
-            console.print("[yellow]Нечего обновлять.[/yellow]")
+            emit_data(
+                {"number": hyp.number, "slug": hyp.slug, "updated": False,
+                 "diffs": {}},
+                text_renderer=lambda d: console.print(
+                    "[yellow]Нечего обновлять.[/yellow]"
+                ),
+            )
             return
 
         _log_action(
@@ -674,14 +751,21 @@ def update_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Hypothesis #{hyp.number} '{hyp.slug}' updated[/green] "
-            f"({len(diffs)} field(s))"
-        )
-        for field, diff in diffs.items():
+        def _render(d: dict) -> None:
             console.print(
-                f"  {field}: [dim]{diff['old']}[/dim] → [bold]{diff['new']}[/bold]"
+                f"[green]✓ Hypothesis #{d['number']} '{d['slug']}' updated[/green] "
+                f"({len(d['diffs'])} field(s))"
             )
+            for field, diff in d["diffs"].items():
+                console.print(
+                    f"  {field}: [dim]{diff['old']}[/dim] → [bold]{diff['new']}[/bold]"
+                )
+
+        emit_data(
+            {"number": hyp.number, "slug": hyp.slug, "updated": True,
+             "diffs": diffs},
+            text_renderer=_render,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -690,6 +774,7 @@ def update_cmd(
 
 
 @hypothesis_app.command("close")
+@command
 def close_cmd(
     ref: str = typer.Argument(..., help="number | slug | UUID"),
     verdict: str = typer.Option(
@@ -741,9 +826,13 @@ def close_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Hypothesis #{hyp.number} '{hyp.slug}' closed[/green] · "
-            f"verdict={verdict}"
+        emit_data(
+            {"number": hyp.number, "slug": hyp.slug, "status": "closed",
+             "verdict": verdict},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Hypothesis #{d['number']} '{d['slug']}' closed[/green] · "
+                f"verdict={d['verdict']}"
+            ),
         )
 
 
@@ -753,6 +842,7 @@ def close_cmd(
 
 
 @hypothesis_app.command("delete")
+@command
 def delete_cmd(
     ref: str = typer.Argument(..., help="number | slug | UUID"),
     hard: bool = typer.Option(
@@ -787,16 +877,26 @@ def delete_cmd(
             )
             session.delete(hyp)
             session.commit()
-            console.print(
-                f"[red]✗ Hypothesis #{number_for_msg} '{slug_for_msg}' "
-                f"физически удалена.[/red]"
+            emit_data(
+                {"number": number_for_msg, "slug": slug_for_msg,
+                 "deleted": True, "mode": "hard"},
+                text_renderer=lambda d: console.print(
+                    f"[red]✗ Hypothesis #{d['number']} '{d['slug']}' "
+                    f"физически удалена.[/red]"
+                ),
             )
             return
 
         if hyp.archived_at is not None:
-            console.print(
-                f"[yellow]Hypothesis #{number_for_msg} '{slug_for_msg}' уже archived "
-                f"({hyp.archived_at}).[/yellow]"
+            archived_at_iso = hyp.archived_at.isoformat()
+            emit_data(
+                {"number": number_for_msg, "slug": slug_for_msg,
+                 "deleted": False, "mode": "soft", "already_archived": True,
+                 "archived_at": archived_at_iso},
+                text_renderer=lambda d: console.print(
+                    f"[yellow]Hypothesis #{d['number']} '{d['slug']}' уже archived "
+                    f"({d['archived_at']}).[/yellow]"
+                ),
             )
             return
 
@@ -812,6 +912,11 @@ def delete_cmd(
             },
         )
         session.commit()
-        console.print(
-            f"[green]✓ Hypothesis #{number_for_msg} archived[/green]"
+        emit_data(
+            {"number": number_for_msg, "slug": slug_for_msg,
+             "deleted": True, "mode": "soft",
+             "archived_at": hyp.archived_at.isoformat()},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Hypothesis #{d['number']} archived[/green]"
+            ),
         )

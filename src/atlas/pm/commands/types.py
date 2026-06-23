@@ -11,8 +11,8 @@ import re
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -99,6 +99,7 @@ def _validate_policy(session: Session, policy: str) -> None:
 
 
 @app.command("add")
+@command
 def add_cmd(
     slug: str = typer.Option(..., "--slug", help="Уникальный slug ([a-z0-9-], 2-50)"),
     name: str = typer.Option(..., "--name"),
@@ -158,9 +159,18 @@ def add_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project type '{slug}' created[/green] · {name} "
-            f"· group={group} · policy={default_sync_policy}"
+        emit_data(
+            {
+                "id": pt.id,
+                "slug": slug,
+                "name": name,
+                "storage_group": group,
+                "default_sync_policy": default_sync_policy,
+            },
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project type '{d['slug']}' created[/green] · {d['name']} "
+                f"· group={d['storage_group']} · policy={d['default_sync_policy']}"
+            ),
         )
 
 
@@ -170,6 +180,7 @@ def add_cmd(
 
 
 @app.command("edit")
+@command
 def edit_cmd(
     ref: str = typer.Argument(..., help="slug типа (неизменяемый идентификатор)"),
     name: Optional[str] = typer.Option(None, "--name"),
@@ -228,9 +239,12 @@ def edit_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project type '{ref}' updated[/green] · "
-            + ", ".join(f"{k}={v}" for k, v in changes.items())
+        emit_data(
+            {"slug": ref, **changes},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project type '{ref}' updated[/green] · "
+                + ", ".join(f"{k}={v}" for k, v in changes.items())
+            ),
         )
 
 
@@ -240,6 +254,7 @@ def edit_cmd(
 
 
 @app.command("list")
+@command
 def list_cmd(
     archived: bool = typer.Option(
         False, "--archived",
@@ -255,23 +270,29 @@ def list_cmd(
             stmt = stmt.where(ProjectType.is_archived == False)  # noqa: E712
         rows = session.execute(stmt).scalars().all()
 
-    if not rows:
-        console.print("[yellow]Типов не найдено.[/yellow]")
-        return
-
-    table = Table(title=f"Project Types ({len(rows)})")
-    table.add_column("Slug", style="cyan", no_wrap=True)
-    table.add_column("Name", no_wrap=True)
-    table.add_column("Group", style="green", no_wrap=True)
-    table.add_column("Sync policy", style="magenta", no_wrap=True)
-    table.add_column("Description", overflow="fold")
-    table.add_column("Archived", justify="center")
-    for t in rows:
-        table.add_row(
-            t.slug, t.name,
-            t.storage_group or "—",
-            t.default_sync_policy or "—",
-            t.description or "",
-            "✓" if t.is_archived else "—",
-        )
-    console.print(table)
+    data = [
+        {
+            "slug": t.slug,
+            "name": t.name,
+            "storage_group": t.storage_group,
+            "default_sync_policy": t.default_sync_policy,
+            "description": t.description,
+            "is_archived": t.is_archived,
+        }
+        for t in rows
+    ]
+    emit_table(
+        data,
+        columns=[
+            {"key": "slug", "header": "Slug", "style": "cyan", "no_wrap": True},
+            {"key": "name", "header": "Name", "no_wrap": True},
+            {"key": "storage_group", "header": "Group", "style": "green", "no_wrap": True},
+            {"key": "default_sync_policy", "header": "Sync policy",
+             "style": "magenta", "no_wrap": True},
+            {"key": "description", "header": "Description",
+             "format": lambda v: v or ""},
+            {"key": "is_archived", "header": "Archived", "justify": "center"},
+        ],
+        title=f"Project Types ({len(data)})",
+        empty_message="[yellow]Типов не найдено.[/yellow]",
+    )

@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -173,6 +173,7 @@ def _project_owner_tags(session: Session, project_id: str) -> list[str]:
 
 
 @ideas_app.command("add")
+@command
 def add_cmd(
     name: str = typer.Option(..., "--name", help="Название идеи"),
     type_slug: str = typer.Option(
@@ -299,12 +300,25 @@ def add_cmd(
         )
         session.commit()
 
-    console.print(f"[green]✓ Idea '{final_slug}' created[/green]")
-    console.print(f"  Name:     {name}")
-    console.print(f"  Type:     {type_slug}")
-    console.print(f"  Priority: {priority}")
-    console.print(f"  Status:   {status_slug}")
-    console.print(f"  Path:     {md_path}")
+    def _render(d: dict[str, Any]) -> None:
+        console.print(f"[green]✓ Idea '{d['slug']}' created[/green]")
+        console.print(f"  Name:     {d['name']}")
+        console.print(f"  Type:     {d['type']}")
+        console.print(f"  Priority: {d['priority']}")
+        console.print(f"  Status:   {d['status']}")
+        console.print(f"  Path:     {d['path']}")
+
+    emit_data(
+        {
+            "slug": final_slug,
+            "name": name,
+            "type": type_slug,
+            "priority": priority,
+            "status": status_slug,
+            "path": str(md_path),
+        },
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -313,6 +327,7 @@ def add_cmd(
 
 
 @ideas_app.command("list")
+@command
 def list_cmd(
     type_slug: Optional[str] = typer.Option(None, "--type"),
     status_slug: Optional[str] = typer.Option(None, "--status"),
@@ -348,30 +363,34 @@ def list_cmd(
             )}
             ideas = [p for p in ideas if p.id in allowed_set]
 
-        if not ideas:
-            console.print("[dim]Идей не найдено.[/dim]")
-            return
-
-        table = Table(title=f"Ideas ({len(ideas)})")
-        table.add_column("Slug")
-        table.add_column("Name")
-        table.add_column("Type")
-        table.add_column("Status")
-        table.add_column("P")
-        table.add_column("Tags")
+        data: list[dict[str, Any]] = []
         for p in ideas:
             pt = session.get(ProjectType, p.type_id)
             ps = session.get(ProjectStatus, p.status_id)
             tag_slugs = [t.slug for t in list_project_tags(session, p.id)]
-            table.add_row(
-                p.slug,
-                p.name,
-                pt.slug if pt else "?",
-                ps.slug if ps else "?",
-                p.priority,
-                ", ".join(tag_slugs) or "—",
-            )
-        console.print(table)
+            data.append({
+                "slug": p.slug,
+                "name": p.name,
+                "type": pt.slug if pt else "?",
+                "status": ps.slug if ps else "?",
+                "priority": p.priority,
+                "tags": tag_slugs,
+            })
+
+        emit_table(
+            data,
+            columns=[
+                ("slug", "Slug"),
+                ("name", "Name"),
+                ("type", "Type"),
+                ("status", "Status"),
+                ("priority", "P"),
+                {"key": "tags", "header": "Tags",
+                 "format": lambda v: ", ".join(v) if v else "—"},
+            ],
+            title=f"Ideas ({len(data)})",
+            empty_message="[dim]Идей не найдено.[/dim]",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -380,6 +399,7 @@ def list_cmd(
 
 
 @ideas_app.command("show")
+@command
 def show_cmd(
     ref: str = typer.Argument(..., help="slug | UUID идеи"),
     no_md: bool = typer.Option(False, "--no-md", help="Не печатать содержимое .md"),
@@ -392,23 +412,46 @@ def show_cmd(
         ps = session.get(ProjectStatus, proj.status_id)
         tags = list_project_tags(session, proj.id)
 
-        console.print(f"[bold]{proj.slug}[/bold]  — {proj.name}")
-        console.print(f"  Kind:     idea")
-        console.print(f"  Type:     {pt.slug if pt else '—'}")
-        console.print(f"  Status:   {ps.slug if ps else '—'}")
-        console.print(f"  Priority: {proj.priority}")
-        console.print(f"  Created:  {proj.created_at:%Y-%m-%d}")
-        console.print(f"  Path:     {proj.local_path}")
-        if tags:
-            console.print(f"  Tags:     {', '.join(t.slug for t in tags)}")
+        md_content: Optional[str] = None
+        md_missing: Optional[str] = None
+        if not no_md and proj.local_path:
+            path = Path(proj.local_path)
+            if path.exists():
+                md_content = path.read_text(encoding="utf-8")
+            else:
+                md_missing = str(path)
 
-    if not no_md and proj.local_path:
-        path = Path(proj.local_path)
-        if path.exists():
+        data = {
+            "slug": proj.slug,
+            "name": proj.name,
+            "kind": "idea",
+            "type": pt.slug if pt else None,
+            "status": ps.slug if ps else None,
+            "priority": proj.priority,
+            "created": f"{proj.created_at:%Y-%m-%d}",
+            "path": proj.local_path,
+            "tags": [t.slug for t in tags],
+            "md_content": md_content,
+            "md_missing": md_missing,
+        }
+
+    def _render(d: dict[str, Any]) -> None:
+        console.print(f"[bold]{d['slug']}[/bold]  — {d['name']}")
+        console.print(f"  Kind:     idea")
+        console.print(f"  Type:     {d['type'] or '—'}")
+        console.print(f"  Status:   {d['status'] or '—'}")
+        console.print(f"  Priority: {d['priority']}")
+        console.print(f"  Created:  {d['created']}")
+        console.print(f"  Path:     {d['path']}")
+        if d["tags"]:
+            console.print(f"  Tags:     {', '.join(d['tags'])}")
+        if d["md_content"] is not None:
             console.print("\n[bold]--- _Ideas/<slug>.md ---[/bold]\n")
-            console.print(path.read_text(encoding="utf-8"))
-        else:
-            console.print(f"\n[yellow]⚠ MD не найден: {path}[/yellow]")
+            console.print(d["md_content"])
+        elif d["md_missing"] is not None:
+            console.print(f"\n[yellow]⚠ MD не найден: {d['md_missing']}[/yellow]")
+
+    emit_data(data, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -417,6 +460,7 @@ def show_cmd(
 
 
 @ideas_app.command("promote")
+@command
 def promote_cmd(
     ref: str = typer.Argument(..., help="slug идеи"),
     status_slug: str = typer.Option(
@@ -519,13 +563,18 @@ def promote_cmd(
         )
         session.commit()
 
-        console.print(f"[green]✓ Idea '{proj.slug}' promoted to project[/green]")
-        console.print(f"  Storage:  {storage}")
-        console.print(f"  Junction: {logical} → {storage}")
-        if idea_md_path is not None:
-            console.print(f"  MD moved: {idea_md_path.name} → IDEA.md")
-        if backlog_extracted:
-            console.print(f"  Backlog:  extracted from _Ideas/BACKLOG.md")
+        result: dict[str, Any] = {
+            "slug": proj.slug,
+            "promoted": True,
+            "storage": str(storage),
+            "junction": f"{logical} → {storage}",
+            "md_moved": idea_md_path.name if idea_md_path is not None else None,
+            "backlog_extracted": backlog_extracted,
+            "canonical_files": None,
+            "canonical_error": None,
+            "git_url": None,
+            "git_error": None,
+        }
 
         # 5. Canonical files (optional).
         if canonical:
@@ -540,9 +589,9 @@ def promote_cmd(
                     if str(logical).startswith(str(root)) else str(logical),
                 )
                 if created:
-                    console.print(f"  Files:    {', '.join(created)}")
+                    result["canonical_files"] = list(created)
             except Exception as exc:
-                console.print(f"  [yellow]⚠ canonical files: {exc}[/yellow]")
+                result["canonical_error"] = str(exc)
 
         # 6. Git init (optional).
         if init_git:
@@ -554,7 +603,7 @@ def promote_cmd(
                 proj_for_git = session.execute(
                     select(Project).where(Project.id == proj.id)
                 ).scalar_one()
-                result = perform_git_init(
+                git_result = perform_git_init(
                     session, proj_for_git,
                     group=group,
                     private=private,
@@ -562,10 +611,29 @@ def promote_cmd(
                     log_action_fn=_log_action,
                 )
                 session.commit()
-                console.print(f"  [green]✓ Git initialized[/green]")
-                console.print(f"    URL:    {result['url']}")
+                result["git_url"] = git_result["url"]
             except RuntimeError as exc:
-                console.print(f"  [red]✗ Git init failed: {exc}[/red]")
+                result["git_error"] = str(exc)
+
+    def _render(d: dict[str, Any]) -> None:
+        console.print(f"[green]✓ Idea '{d['slug']}' promoted to project[/green]")
+        console.print(f"  Storage:  {d['storage']}")
+        console.print(f"  Junction: {d['junction']}")
+        if d["md_moved"] is not None:
+            console.print(f"  MD moved: {d['md_moved']} → IDEA.md")
+        if d["backlog_extracted"]:
+            console.print(f"  Backlog:  extracted from _Ideas/BACKLOG.md")
+        if d["canonical_files"]:
+            console.print(f"  Files:    {', '.join(d['canonical_files'])}")
+        if d["canonical_error"]:
+            console.print(f"  [yellow]⚠ canonical files: {d['canonical_error']}[/yellow]")
+        if d["git_url"]:
+            console.print(f"  [green]✓ Git initialized[/green]")
+            console.print(f"    URL:    {d['git_url']}")
+        if d["git_error"]:
+            console.print(f"  [red]✗ Git init failed: {d['git_error']}[/red]")
+
+    emit_data(result, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -574,6 +642,7 @@ def promote_cmd(
 
 
 @ideas_app.command("demote")
+@command
 def demote_cmd(
     ref: str = typer.Argument(..., help="slug проекта (бывшая идея)"),
     confirm: bool = typer.Option(False, "--confirm"),
@@ -650,8 +719,14 @@ def demote_cmd(
             details={"slug": proj.slug},
         )
         session.commit()
+        demoted_slug = proj.slug
 
-    console.print(f"[green]✓ Project '{proj.slug}' demoted to idea[/green]")
+    emit_data(
+        {"slug": demoted_slug, "demoted": True},
+        text_renderer=lambda d: console.print(
+            f"[green]✓ Project '{d['slug']}' demoted to idea[/green]"
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -660,6 +735,7 @@ def demote_cmd(
 
 
 @ideas_app.command("update")
+@command
 def update_cmd(
     ref: str = typer.Argument(...),
     name: Optional[str] = typer.Option(None, "--name"),
@@ -702,7 +778,10 @@ def update_cmd(
                 proj.status_id = ps.id
 
         if not diffs:
-            console.print("[dim]Нечего обновлять.[/dim]")
+            emit_data(
+                {"slug": proj.slug, "updated": False, "changes": {}},
+                text_renderer=lambda d: console.print("[dim]Нечего обновлять.[/dim]"),
+            )
             return
 
         proj.last_touched_at = local_now()
@@ -713,7 +792,16 @@ def update_cmd(
             details=diffs,
         )
         session.commit()
+        updated_slug = proj.slug
 
-    console.print(f"[green]✓ Idea '{proj.slug}' updated[/green]")
-    for field, d in diffs.items():
-        console.print(f"  {field}: [dim]{d['old']}[/dim] → [bold]{d['new']}[/bold]")
+    def _render(d: dict[str, Any]) -> None:
+        console.print(f"[green]✓ Idea '{d['slug']}' updated[/green]")
+        for field, change in d["changes"].items():
+            console.print(
+                f"  {field}: [dim]{change['old']}[/dim] → [bold]{change['new']}[/bold]"
+            )
+
+    emit_data(
+        {"slug": updated_slug, "updated": True, "changes": diffs},
+        text_renderer=_render,
+    )

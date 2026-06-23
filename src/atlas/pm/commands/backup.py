@@ -26,12 +26,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table, is_json
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import local_now
 from atlas.pm.backup import backup_repo
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
@@ -176,6 +175,7 @@ def _select_projects(
 
 
 @backup_app.command("run")
+@command
 def run_cmd(
     type_slug: Optional[str] = typer.Option(None, "--type", help="Фильтр: тип проекта"),
     status_slug: Optional[str] = typer.Option(None, "--status", help="Фильтр: статус"),
@@ -210,7 +210,12 @@ def run_cmd(
         )
 
         if not projects:
-            console.print("[yellow]Подходящих проектов не найдено.[/yellow]")
+            emit_table(
+                [],
+                columns=[("slug", "slug"), ("status", "status"), ("message", "message")],
+                title="Backup summary (0)",
+                empty_message="[yellow]Подходящих проектов не найдено.[/yellow]",
+            )
             return
 
         for project in projects:
@@ -222,9 +227,10 @@ def run_cmd(
                 })
                 continue
             if not project.git_repo_url:
-                console.print(
-                    f"[yellow]⚠ {project.slug}: пустой git_repo_url — пропуск.[/yellow]"
-                )
+                if not is_json():
+                    console.print(
+                        f"[yellow]⚠ {project.slug}: пустой git_repo_url — пропуск.[/yellow]"
+                    )
                 summary_rows.append({
                     "slug": project.slug,
                     "status": "skipped",
@@ -240,7 +246,8 @@ def run_cmd(
                 })
                 continue
 
-            console.print(f"[cyan]→ {project.slug}[/cyan]  ({project.local_path})")
+            if not is_json():
+                console.print(f"[cyan]→ {project.slug}[/cyan]  ({project.local_path})")
             try:
                 result = backup_repo(Path(project.local_path))
             except Exception as exc:  # pragma: no cover — defensive
@@ -266,29 +273,25 @@ def run_cmd(
         if not dry_run:
             session.commit()
 
-    # Render summary.
-    table = Table(title=f"Backup summary ({len(summary_rows)})")
-    table.add_column("slug", style="cyan", no_wrap=True)
-    table.add_column("status", style="bold")
-    table.add_column("message", overflow="fold")
-    for row in summary_rows:
-        status = row.get("status", "")
-        style = ""
-        if status == "pushed":
-            style = "[green]"
-        elif status == "skipped":
-            style = "[yellow]"
-        elif status == "failed":
-            style = "[red]"
-        elif status == "dry-run":
-            style = "[magenta]"
-        end = "[/]" if style else ""
-        table.add_row(
-            row.get("slug", ""),
-            f"{style}{status}{end}",
-            row.get("message", ""),
-        )
-    console.print(table)
+    # Render summary (json: сырые dict'ы; text: rich-таблица с раскраской).
+    _status_styles = {
+        "pushed": "[green]", "skipped": "[yellow]",
+        "failed": "[red]", "dry-run": "[magenta]",
+    }
+
+    def _fmt_status(status: str) -> str:
+        style = _status_styles.get(status, "")
+        return f"{style}{status}[/]" if style else status
+
+    emit_table(
+        summary_rows,
+        columns=[
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {"key": "status", "header": "status", "format": _fmt_status},
+            {"key": "message", "header": "message"},
+        ],
+        title=f"Backup summary ({len(summary_rows)})",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -297,6 +300,7 @@ def run_cmd(
 
 
 @backup_app.command("status")
+@command
 def status_cmd(
     days: int = typer.Option(7, "--days", help="За сколько дней показывать (default 7)."),
     ref: Optional[str] = typer.Option(None, "--ref", help="Один проект."),
@@ -328,44 +332,53 @@ def status_cmd(
 
         rows = session.execute(stmt).scalars().all()
 
-    if not rows:
-        console.print("[yellow]Записей backup нет.[/yellow]")
-        return
+        data: list[dict[str, Any]] = []
+        for r in rows:
+            ts = r.timestamp.strftime("%Y-%m-%d %H:%M") if r.timestamp else "—"
+            try:
+                details = json.loads(r.details_json) if r.details_json else {}
+            except json.JSONDecodeError:
+                details = {}
+            status = str(details.get("status", "—"))
+            slug = str(details.get("project_slug") or (r.entity_id or "")[:8])
 
-    table = Table(title=f"Backup history (last {days}d, {len(rows)} entries)")
-    table.add_column("Timestamp", style="cyan", no_wrap=True)
-    table.add_column("Project", style="magenta")
-    table.add_column("Status", style="bold")
-    table.add_column("Commit / Reason", overflow="fold")
-    table.add_column("Error", overflow="fold")
+            commit = details.get("commit_sha") or details.get("reason") or ""
+            if (
+                isinstance(commit, str)
+                and len(commit) > 12
+                and "no_changes" not in commit
+            ):
+                commit = commit[:12]
+            error = str(details.get("error", ""))[:80]
 
-    for r in rows:
-        ts = r.timestamp.strftime("%Y-%m-%d %H:%M") if r.timestamp else "—"
-        try:
-            details = json.loads(r.details_json) if r.details_json else {}
-        except json.JSONDecodeError:
-            details = {}
-        status = str(details.get("status", "—"))
-        slug = str(details.get("project_slug") or (r.entity_id or "")[:8])
+            data.append({
+                "timestamp": ts,
+                "project": slug,
+                "status": status,
+                "commit_or_reason": str(commit),
+                "error": error,
+            })
 
-        commit = details.get("commit_sha") or details.get("reason") or ""
-        if isinstance(commit, str) and len(commit) > 12 and "no_changes" not in commit:
-            commit = commit[:12]
-        error = str(details.get("error", ""))[:80]
+    _status_styles = {
+        "pushed": "[green]", "skipped": "[yellow]", "failed": "[red]",
+    }
 
-        style = ""
-        if status == "pushed":
-            style = "[green]"
-        elif status == "skipped":
-            style = "[yellow]"
-        elif status == "failed":
-            style = "[red]"
-        end = "[/]" if style else ""
+    def _fmt_status(status: str) -> str:
+        style = _status_styles.get(status, "")
+        return f"{style}{status}[/]" if style else status
 
-        table.add_row(
-            ts, slug, f"{style}{status}{end}", str(commit), error,
-        )
-    console.print(table)
+    emit_table(
+        data,
+        columns=[
+            {"key": "timestamp", "header": "Timestamp", "style": "cyan", "no_wrap": True},
+            {"key": "project", "header": "Project", "style": "magenta"},
+            {"key": "status", "header": "Status", "format": _fmt_status},
+            {"key": "commit_or_reason", "header": "Commit / Reason"},
+            {"key": "error", "header": "Error"},
+        ],
+        title=f"Backup history (last {days}d, {len(data)} entries)",
+        empty_message="[yellow]Записей backup нет.[/yellow]",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -374,6 +387,7 @@ def status_cmd(
 
 
 @backup_app.command("install")
+@command
 def install_cmd(
     time: str = typer.Option(
         DEFAULT_TIME, "--time", help="HH:MM — время ежедневного запуска."
@@ -393,21 +407,39 @@ def install_cmd(
         "-File", str(script),
         "-Time", time,
     ]
-    console.print(f"[cyan]Регистрирую Scheduled Task '{TASK_NAME}' на {time}...[/cyan]")
+    if not is_json():
+        console.print(
+            f"[cyan]Регистрирую Scheduled Task '{TASK_NAME}' на {time}...[/cyan]"
+        )
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.stdout:
-        console.print(proc.stdout)
     if proc.returncode != 0:
+        if proc.stdout and not is_json():
+            console.print(proc.stdout)
         if proc.stderr:
             console.print(f"[red]{proc.stderr}[/red]")
         console.print("[red]Установка не удалась.[/red]")
         raise typer.Exit(code=proc.returncode or 1)
 
-    console.print(f"[green]✓ Task '{TASK_NAME}' установлен на {time}.[/green]")
-    console.print("Команды управления:")
-    console.print(f"  Запустить сейчас:  Start-ScheduledTask -TaskName '{TASK_NAME}'")
-    console.print(f"  Состояние:         atlas backup list-tasks")
-    console.print(f"  Удалить:           atlas backup uninstall")
+    def _render(d: dict[str, Any]) -> None:
+        if d["stdout"]:
+            console.print(d["stdout"])
+        console.print(f"[green]✓ Task '{d['task']}' установлен на {d['time']}.[/green]")
+        console.print("Команды управления:")
+        console.print(
+            f"  Запустить сейчас:  Start-ScheduledTask -TaskName '{d['task']}'"
+        )
+        console.print(f"  Состояние:         atlas backup list-tasks")
+        console.print(f"  Удалить:           atlas backup uninstall")
+
+    emit_data(
+        {
+            "task": TASK_NAME,
+            "time": time,
+            "installed": True,
+            "stdout": proc.stdout or "",
+        },
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -416,6 +448,7 @@ def install_cmd(
 
 
 @backup_app.command("uninstall")
+@command
 def uninstall_cmd() -> None:
     """Снять Scheduled Task ``atlas-daily-backup``."""
     cmd = [
@@ -426,14 +459,23 @@ def uninstall_cmd() -> None:
         f"Unregister-ScheduledTask -TaskName '{TASK_NAME}' -Confirm:$false",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.stdout:
-        console.print(proc.stdout)
     if proc.returncode != 0:
+        if proc.stdout and not is_json():
+            console.print(proc.stdout)
         if proc.stderr:
             console.print(f"[red]{proc.stderr}[/red]")
         console.print("[red]Не удалось удалить Scheduled Task.[/red]")
         raise typer.Exit(code=proc.returncode or 1)
-    console.print(f"[green]✓ Task '{TASK_NAME}' удалён.[/green]")
+
+    def _render(d: dict[str, Any]) -> None:
+        if d["stdout"]:
+            console.print(d["stdout"])
+        console.print(f"[green]✓ Task '{d['task']}' удалён.[/green]")
+
+    emit_data(
+        {"task": TASK_NAME, "uninstalled": True, "stdout": proc.stdout or ""},
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -442,6 +484,7 @@ def uninstall_cmd() -> None:
 
 
 @backup_app.command("list-tasks")
+@command
 def list_tasks_cmd() -> None:
     """Показать состояние зарегистрированной Scheduled Task."""
     cmd = [
@@ -461,5 +504,8 @@ def list_tasks_cmd() -> None:
             f"Установите через `atlas backup install`.[/yellow]"
         )
         raise typer.Exit(code=proc.returncode or 1)
-    if proc.stdout:
-        console.print(proc.stdout)
+
+    emit_data(
+        {"task": TASK_NAME, "info": proc.stdout or ""},
+        text_renderer=lambda d: console.print(d["info"]) if d["info"] else None,
+    )

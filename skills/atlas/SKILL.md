@@ -29,6 +29,7 @@ Project → Epic (веха/спринт) → Task (для ИИ-агента) →
 |---|---|
 | Проекты | `atlas project list|show|create` |
 | Задачи | `atlas task add|list|get|update|delete` (ЦКП `--cpp` обязателен при add) |
+| Lease задач (мультиагентность) | `atlas task claim|release|renew|take|stale` — TTL-аренда: взять/отпустить задачу; занятую другим взять нельзя (W8, см. `references/commands.md`) |
 | Эпики | `atlas epic add|list|get --project <ref>` |
 | Чек-листы | `atlas checklist add|list|check --task <ref>` |
 | Участники | `atlas member add|list|rm --task <ref> --participant <slug> --role <responsible\|executor\|watcher>` |

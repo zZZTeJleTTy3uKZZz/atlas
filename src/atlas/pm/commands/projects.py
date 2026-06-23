@@ -302,7 +302,134 @@ atlas projects get {slug}
 - `atlas projects get {slug}` — карточка проекта
 - `atlas pm-tasks list --project {slug}` — задачи проекта (когда W7
   волна будет реализована)
+
+{atlas_prompt_block}
 """
+
+# --------------------------------------------------------------------------- #
+# Onboarding prompt block (задача #211)                                        #
+#                                                                              #
+# Маркер-делимитированный блок-указатель, который Atlas ИДЕМПОТЕНТНО вписывает  #
+# в AGENTS.md (и CLAUDE.md при наличии) проекта: «веди задачи/проекты через CLI #
+# atlas и вызывай навык atlas». Маркеры позволяют апдейтить блок без дублей.    #
+# --------------------------------------------------------------------------- #
+
+ATLAS_PROMPT_START = "<!-- atlas:usage:start -->"
+ATLAS_PROMPT_END = "<!-- atlas:usage:end -->"
+
+#: Внутренность блока (между маркерами, без самих маркеров).
+ATLAS_PROMPT_BODY = """\
+## Управление проектом — через Atlas
+
+Этот проект ведётся в Atlas (личная PM-система портфеля). Для задач/проектов/эпиков/бэкапов
+используй CLI `atlas` и вызывай навык `atlas` — вся логика и роутинг внутри навыка."""
+
+#: Полный блок с маркерами (вставляется в файлы и в шаблон AGENTS.md).
+ATLAS_PROMPT_BLOCK = f"{ATLAS_PROMPT_START}\n{ATLAS_PROMPT_BODY}\n{ATLAS_PROMPT_END}"
+
+#: Регексп для вычистки ЛЮБОЙ корректной пары маркеров (START..END).
+#: Между START и END запрещён вложенный START — иначе сиротский START без своего
+#: END «склеился» бы с END следующего легитимного блока и вычистил весь
+#: пользовательский контент между ними (потеря данных, #211 finding 1). С запретом
+#: вложенного START сиротский START просто не матчится и остаётся как обычный
+#: текст, а валидные блоки удаляются по отдельности (дедупликация, findings 2/5/9).
+_ATLAS_PROMPT_BLOCK_RE = re.compile(
+    re.escape(ATLAS_PROMPT_START)
+    + r"(?:(?!" + re.escape(ATLAS_PROMPT_START) + r").)*?"
+    + re.escape(ATLAS_PROMPT_END),
+    re.DOTALL,
+)
+
+
+def _ensure_atlas_prompt_block(path: Path) -> bool:
+    """Идемпотентно вписать блок-указатель «пользуйся Atlas» в существующий файл.
+
+    Поведение (самоисцеляющееся — гарантирует РОВНО одну пару маркеров на любом
+    входе, включая повреждённый: несколько пар, сиротский START без END и т.п.):
+
+    - Файла нет → ничего не делаем (CLAUDE.md не создаём), возвращаем ``False``.
+    - Все существующие корректные пары маркеров (``START..END``) вычищаются
+      регекспом, затем единственный канонический блок дописывается в конец.
+      Так файл с 0/1/N парами всегда приводится к инварианту ``(1, 1)``.
+    - Сиротский START без END (или END раньше START) НЕ матчится регекспом и
+      остаётся в тексте как обычный контент — второй (валидный) блок при этом
+      дописывается отдельно, поэтому append НЕ затирает пользовательский контент
+      между сиротским маркером и хвостом файла.
+    - Если после нормализации текст не изменился → ``False`` (идемпотентность).
+
+    Окончания строк исходного файла сохраняются: если файл был в CRLF — результат
+    тоже в CRLF (вставляется только одна секция, а не нормализуется весь файл).
+    Чтение через ``newline=""`` отключает universal-newline трансляцию.
+
+    Возвращает ``True``, если файл был изменён. Запись атомарная
+    (tmp-файл + ``os.replace``), чтобы не оставить полу-записанный файл.
+    """
+    if not path.exists():
+        return False
+
+    # newline="" → НЕ транслируем CRLF→LF: сохраняем исходные окончания строк.
+    original = path.read_text(encoding="utf-8", newline="")
+
+    # Определяем доминирующий стиль окончаний строк исходного файла.
+    crlf = "\r\n" in original
+    eol = "\r\n" if crlf else "\n"
+
+    # Работаем в LF-нормализованном пространстве, чтобы единообразно вычищать
+    # маркеры и собирать блок; стиль окончаний восстанавливаем перед записью.
+    lf_original = original.replace("\r\n", "\n")
+
+    # Вычищаем ВСЕ корректные пары маркеров (дедупликация + удаление устаревших).
+    stripped = _ATLAS_PROMPT_BLOCK_RE.sub("", lf_original)
+
+    # Единственный канонический блок дописываем в конец с разделителем.
+    new_lf = stripped.rstrip("\n") + "\n\n" + ATLAS_PROMPT_BLOCK + "\n"
+
+    # Восстанавливаем исходный стиль окончаний строк.
+    new_text = new_lf.replace("\n", eol) if crlf else new_lf
+
+    if new_text == original:
+        return False
+
+    _atomic_write_text(path, new_text, eol=eol)
+    return True
+
+
+def _atomic_write_text(path: Path, text: str, *, eol: str = "\n") -> None:
+    """Атомарно записать текст в ``path`` (tmp в той же директории + replace).
+
+    ``text`` записывается как есть (``newline=""``): окончания строк в ``text``
+    уже приведены к нужному стилю вызывающим, поэтому повторной трансляции нет.
+    """
+    import tempfile
+
+    directory = path.parent
+    fd, tmp_str = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(directory))
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _ensure_atlas_prompt_in_dir(directory: Path) -> list[str]:
+    """Вписать онбординг-блок в AGENTS.md/CLAUDE.md директории, если они есть.
+
+    Единый хелпер для обоих онбординг-флоу (`project add --canonical` и
+    `idea promote --canonical`), чтобы поведение не расходилось: дополняем
+    блоком уже существующие файлы (новый AGENTS.md приходит из шаблона с блоком,
+    а существовавший AGENTS.md и любой CLAUDE.md — иначе остались бы без блока).
+
+    Возвращает список имён файлов, которые были изменены.
+    """
+    prompted: list[str] = []
+    for fname in ("AGENTS.md", "CLAUDE.md"):
+        if _ensure_atlas_prompt_block(directory / fname):
+            prompted.append(fname)
+    return prompted
+
 
 CANONICAL_GITIGNORE_TEMPLATE = """\
 # === atlas universal gitignore ===
@@ -380,6 +507,7 @@ def _create_canonical_files(
         "tags_str": ", ".join(f"`{t}`" for t in tag_slugs) if tag_slugs else "—",
         "created_date": datetime.now().strftime("%Y-%m-%d"),
         "logical_rel": logical_rel,
+        "atlas_prompt_block": ATLAS_PROMPT_BLOCK,
     }
     targets = [
         ("README.md", CANONICAL_README_TEMPLATE),
@@ -893,6 +1021,15 @@ def add_cmd(
                 created_payload["canonical_files"] = created_files
                 if created_files:
                     emit_message(f"Files: {', '.join(created_files)}")
+
+                # ----- onboarding prompt block (#211) -----
+                # Идемпотентно вписываем блок-указатель «пользуйся Atlas» в
+                # AGENTS.md (создан из шаблона → уже с блоком; существовавший →
+                # дополним) и в CLAUDE.md, но ТОЛЬКО если он уже существует.
+                prompted = _ensure_atlas_prompt_in_dir(local_p)
+                created_payload["atlas_prompt_files"] = prompted
+                if prompted:
+                    emit_message(f"Atlas prompt block → {', '.join(prompted)}")
             except Exception as exc:
                 emit_message(f"⚠ canonical files failed: {exc}", level="warn")
 

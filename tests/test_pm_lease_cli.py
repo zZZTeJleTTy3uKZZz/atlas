@@ -31,6 +31,17 @@ def seeded_engine(fresh_engine):
     return fresh_engine
 
 
+@pytest.fixture(autouse=True)
+def _reset_output_mode():
+    """Сброс clikit module-global ``_mode`` на json: другие CLI-тесты форсят
+    ``--text`` и не возвращают режим, из-за чего наши json.loads падали при
+    общем прогоне (изоляция от утечки глобального состояния)."""
+    from clikit import output as _out
+
+    _out._mode = "json"
+    yield
+
+
 @pytest.fixture()
 def runner():
     return CliRunner()
@@ -88,7 +99,10 @@ def test_claim_held_by_other_exits_nonzero(runner, app, task_ref):
     assert runner.invoke(app, ["claim", task_ref, "--actor", "claude-code"]).exit_code == 0
     r = runner.invoke(app, ["claim", task_ref, "--actor", "dmitry"])
     assert r.exit_code != 0
-    assert "занята" in r.stdout
+    # CliError("lease_held", ...) → emit_error в stderr (json-режим). Сообщение
+    # "занята" — в error-записи. CliRunner разделяет потоки: смотрим оба.
+    combined = (r.stdout or "") + (r.stderr or "")
+    assert "занята" in combined or "lease_held" in combined
 
 
 def test_release(runner, app, task_ref):

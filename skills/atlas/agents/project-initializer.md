@@ -80,7 +80,7 @@ model: inherit
 
 - `slug` проекта в Atlas (например `playwright-network-dump`)
 - `local_path` физической папки (обычно
-  `C:/Users/79288/Documents/PROJECT/_storage/<slug>/`)
+  `~/Documents/PROJECT/_storage/<slug>/`)
 
 Опционально:
 

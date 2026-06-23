@@ -3,10 +3,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import (
+from atlas.models import (
     Base, Project, ProjectStatus, ProjectType, SyncPolicy,
 )
-from atlas.pm.sync import policy
+from atlas.sync import policy
 
 
 @pytest.fixture

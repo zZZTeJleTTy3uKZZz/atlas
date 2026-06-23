@@ -2,7 +2,7 @@
 
 Стиль — как test_epic_cli.py / test_pm_tasks_provenance_cli.py: sqlite-файл,
 ATLAS_DB_URL, seed_all, CliRunner. Проверяем оба режима вывода (--json дефолт
-и --text). git-режим (#131) мокает atlas.pm.stats.run, чтобы не дёргать
+и --text). git-режим (#131) мокает atlas.stats.run, чтобы не дёргать
 реальный git.
 
 Команды/режимы:
@@ -19,8 +19,8 @@ import pytest
 from typer.testing import CliRunner
 
 from atlas.cli import app
-from atlas.pm.db import make_engine, make_session
-from atlas.pm.models import (
+from atlas.db import make_engine, make_session
+from atlas.models import (
     Base,
     Counterparty,
     Project,
@@ -28,7 +28,7 @@ from atlas.pm.models import (
     ProjectType,
     Task,
 )
-from atlas.pm.seeds import seed_all
+from atlas.seeds import seed_all
 
 runner = CliRunner()
 
@@ -148,7 +148,7 @@ def test_stats_period_filter_by_tag(tmp_path):
     """--tag реально фильтрует (раньше был silent no-op)."""
     _prep(tmp_path)
     try:
-        from atlas.pm.models import ProjectTag, Tag
+        from atlas.models import ProjectTag, Tag
 
         url = os.environ["ATLAS_DB_URL"]
         engine = make_engine(url)
@@ -237,7 +237,7 @@ def _fake_git_run(cmd, cwd=None):
 def test_stats_project_git_json(tmp_path, monkeypatch):
     _prep(tmp_path)
     try:
-        from atlas.pm import stats as stats_mod
+        from atlas import stats as stats_mod
         monkeypatch.setattr(stats_mod, "run", _fake_git_run)
         res = runner.invoke(app, ["stats", "--project", "acme"])
         assert res.exit_code == 0, res.stdout
@@ -268,7 +268,7 @@ def test_stats_project_git_exposes_last_pushed_at(tmp_path, monkeypatch):
     try:
         from datetime import datetime
 
-        from atlas.pm import stats as stats_mod
+        from atlas import stats as stats_mod
         monkeypatch.setattr(stats_mod, "run", _fake_git_run)
 
         url = os.environ["ATLAS_DB_URL"]
@@ -290,7 +290,7 @@ def test_stats_project_git_exposes_last_pushed_at(tmp_path, monkeypatch):
 def test_stats_project_git_text(tmp_path, monkeypatch):
     _prep(tmp_path)
     try:
-        from atlas.pm import stats as stats_mod
+        from atlas import stats as stats_mod
         monkeypatch.setattr(stats_mod, "run", _fake_git_run)
         res = runner.invoke(app, ["--text", "stats", "--project", "acme"])
         assert res.exit_code == 0, res.stdout

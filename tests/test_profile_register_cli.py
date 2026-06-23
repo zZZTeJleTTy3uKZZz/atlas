@@ -52,7 +52,7 @@ def fake_register(monkeypatch):
         return {"member_slug": member_slug, "portal_slug": portal_slug, "api_key": "k2"}
 
     monkeypatch.setattr(
-        "atlas.pm.sync.backend_client.BackendClient.register_profile", _fake
+        "atlas.sync.backend_client.BackendClient.register_profile", _fake
     )
     return captured
 

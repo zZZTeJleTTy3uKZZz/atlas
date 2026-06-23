@@ -1,7 +1,7 @@
 """F3a: BackendClient — клиент к backend-хабу (X-API-Key) поверх adapterkit/librarykit."""
 import pytest
 
-from atlas.pm.sync.backend_client import BackendClient
+from atlas.sync.backend_client import BackendClient
 
 
 async def test_push_events_sends_api_key(httpx_mock):

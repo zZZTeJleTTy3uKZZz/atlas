@@ -10,8 +10,8 @@ from typer.testing import CliRunner
 
 @pytest.fixture()
 def fresh_engine(tmp_path, monkeypatch):
-    from atlas.pm.db import make_engine
-    from atlas.pm.models import Base
+    from atlas.db import make_engine
+    from atlas.models import Base
 
     url = f"sqlite:///{tmp_path / 'atlas.db'}"
     monkeypatch.setenv("ATLAS_DB_URL", url)
@@ -22,8 +22,8 @@ def fresh_engine(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def seeded_engine(fresh_engine):
-    from atlas.pm.db import make_session
-    from atlas.pm.seeds import seed_all
+    from atlas.db import make_session
+    from atlas.seeds import seed_all
 
     with make_session(fresh_engine) as s:
         seed_all(s)
@@ -49,23 +49,23 @@ def runner():
 
 @pytest.fixture()
 def task_app():
-    import atlas.pm.commands.task_lease  # noqa: F401  (регистрирует lease-команды)
-    from atlas.pm.commands.pm_tasks import pm_tasks_app
+    import atlas.commands.task_lease  # noqa: F401  (регистрирует lease-команды)
+    from atlas.commands.task import task_app
 
-    return pm_tasks_app
+    return task_app
 
 
 @pytest.fixture()
 def epic_app():
-    import atlas.pm.commands.task_lease  # noqa: F401  (регистрирует epic claim/release)
-    from atlas.pm.commands.epic import epic_app
+    import atlas.commands.task_lease  # noqa: F401  (регистрирует epic claim/release)
+    from atlas.commands.epic import epic_app
 
     return epic_app
 
 
 @pytest.fixture()
 def projects_app():
-    from atlas.pm.commands.projects import projects_app
+    from atlas.commands.projects import projects_app
 
     return projects_app
 
@@ -88,8 +88,8 @@ def setup(runner, task_app, epic_app, projects_app, seeded_engine):
         )
         assert r.exit_code == 0, r.stdout
 
-    from atlas.pm.db import make_session
-    from atlas.pm.models import Epic, Task
+    from atlas.db import make_session
+    from atlas.models import Epic, Task
 
     with make_session(seeded_engine) as s:
         epic = s.execute(select(Epic)).scalars().first()
@@ -216,9 +216,9 @@ def test_stale_report_and_reap_surface_epic(runner, task_app, epic_app, setup, s
     """
     from datetime import timedelta
 
-    from atlas.pm._time import local_now
-    from atlas.pm.db import make_session
-    from atlas.pm.models import Epic, Task
+    from atlas._time import local_now
+    from atlas.db import make_session
+    from atlas.models import Epic, Task
 
     assert runner.invoke(
         epic_app, ["claim", setup["epic"], "--actor", "claude-code"]
@@ -260,8 +260,8 @@ def test_epic_claim_no_outbox(runner, epic_app, setup, seeded_engine):
 
     (Записи от `epic add`/`task add` в фикстуре допустимы — проверяем дельту.)
     """
-    from atlas.pm.db import make_session
-    from atlas.pm.models import Outbox
+    from atlas.db import make_session
+    from atlas.models import Outbox
 
     with make_session(seeded_engine) as s:
         before = len(s.execute(select(Outbox)).scalars().all())

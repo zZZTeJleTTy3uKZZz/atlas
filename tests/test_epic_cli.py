@@ -4,9 +4,9 @@ import os
 from typer.testing import CliRunner
 
 from atlas.cli import app
-from atlas.pm.db import make_engine, make_session
-from atlas.pm.models import Base, Epic, Outbox, Project, ProjectStatus, ProjectType, SyncPolicy
-from atlas.pm.seeds import seed_all
+from atlas.db import make_engine, make_session
+from atlas.models import Base, Epic, Outbox, Project, ProjectStatus, ProjectType, SyncPolicy
+from atlas.seeds import seed_all
 
 runner = CliRunner()
 

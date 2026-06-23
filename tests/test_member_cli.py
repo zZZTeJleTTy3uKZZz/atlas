@@ -5,8 +5,8 @@ import os
 from typer.testing import CliRunner
 
 from atlas.cli import app
-from atlas.pm.db import make_engine, make_session
-from atlas.pm.models import (
+from atlas.db import make_engine, make_session
+from atlas.models import (
     Base, Outbox, Participant, Project, ProjectStatus, ProjectType, SyncPolicy,
     Task, TaskMember,
 )

@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_message, emit_table
+from clikit import CliError, command, emit_data, emit_message, emit_table
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,11 +50,20 @@ from atlas.pm.models import (
     ProjectType,
     Tag,
 )
-from atlas.pm.junctions import is_junction, remove_junction
+from atlas.pm.junctions import (
+    JunctionError,
+    SafetyError,
+    create_junction,
+    is_junction,
+    junction_target,
+    remove_junction,
+)
 from atlas.pm.layout import (
     _perform_storage_move,
+    container_own_logical,
     get_logical_path,
     get_storage_path,
+    resolve_container_logical,
 )
 from atlas.pm.paths import (
     archive_path,
@@ -529,20 +538,24 @@ def _setup_storage_and_junction(
     *,
     archived: bool = False,
     archived_group: Optional[str] = None,
+    parent_id: Optional[str] = None,
+    container_logical: Optional[Path] = None,
 ) -> tuple[Path, Path, bool]:
     """Создать `_storage/<slug>/` и junction в logical, если нужно.
 
     Возвращает ``(logical_path, storage_path, junction_created)``.
 
+    Module-aware (#163/#126): если задан ``parent_id`` И ``container_logical``
+    (логический путь проекта-контейнера), то junction кладётся в
+    ``<container_logical>/modules/<slug>/`` (а не в type-группу). Это делает
+    проект ФИЗИЧЕСКИМ модулем контейнера. Для standalone/контейнера — прежнее
+    поведение (type-группа). Идемпотентно: правильный junction не пересоздаём.
+
     NOTE: Если logical уже существует и НЕ junction — оставляем как есть
     (логика migrate-to-storage обработает позднее, через `atlas projects
-    layout init`).
+    layout init`). SAFETY: реальные директории не удаляем; снятие junction —
+    только через `remove_junction` (is_junction-проверка внутри).
     """
-    from atlas.pm.layout import (
-        get_logical_path,
-        get_storage_path,
-    )
-
     root = get_projects_root()
     storage = get_storage_path(slug, root=root)
     storage.mkdir(parents=True, exist_ok=True)
@@ -555,34 +568,310 @@ def _setup_storage_and_junction(
             "type_slug": type_slug,
             "archived": archived,
             "archived_group": archived_group,
+            "parent_id": parent_id,
         },
     )()
-    logical = get_logical_path(fake_proj, root=root)
+    logical = get_logical_path(
+        fake_proj, root=root, container_logical=container_logical
+    )
 
     junction_created = False
     if logical.resolve() != storage.resolve():
         if not logical.exists():
-            from atlas.pm.junctions import create_junction
-
+            # Для модуля это создаст и промежуточную папку modules/.
             logical.parent.mkdir(parents=True, exist_ok=True)
             create_junction(logical, storage)
             junction_created = True
         elif is_junction(logical):
             current = None
             try:
-                from atlas.pm.junctions import junction_target
-
                 current = junction_target(logical)
             except Exception:
                 pass
             if current is None or current.resolve() != storage.resolve():
                 remove_junction(logical)
-                from atlas.pm.junctions import create_junction
-
                 create_junction(logical, storage)
                 junction_created = True
 
     return logical, storage, junction_created
+
+
+def _view_container(session: Session, pid: str):
+    """duck-typed view контейнера по id (несёт local_path для #1/#12).
+
+    Возвращает None, если контейнер не найден (висячий parent_id, #16).
+    """
+    proj = session.get(Project, pid)
+    if proj is None:
+        return None
+    pt = session.get(ProjectType, proj.type_id)
+    return type(
+        "C",
+        (),
+        {
+            "slug": proj.slug,
+            "type_slug": pt.slug if pt else "business-product",
+            "archived": proj.archived_at is not None,
+            "archived_group": proj.archived_group,
+            "parent_id": proj.parent_id,
+            "local_path": proj.local_path,
+        },
+    )()
+
+
+def _container_logical_for(
+    session: Session, parent_id: str, *, root: Optional[Path] = None
+) -> Optional[Path]:
+    """Логический путь проекта-контейнера по его id (#163/#126).
+
+    Предпочитает РЕАЛЬНЫЙ ``Project.local_path`` контейнера (#1/#12): модуль
+    ляжет в ``<реальный_контейнер>/modules/<slug>``, а не в фантомную
+    type-группу. Рекурсивно поднимается по цепочке родителей (#17,
+    cycle-safe). None — если контейнер не найден (висячий parent_id, #16).
+    """
+    def _resolver(pid: str):
+        return _view_container(session, pid)
+
+    container = _resolver(parent_id)
+    if container is None:
+        return None
+    # Вложенный контейнер (контейнер сам — модуль): рекурсивно резолвим.
+    nested = resolve_container_logical(container, _resolver, root=root)
+    return container_own_logical(
+        container, root=root, nested_container_logical=nested
+    )
+
+
+def _project_logical_for(
+    session: Session,
+    project: Project,
+    *,
+    parent_id: Optional[str],
+    root: Optional[Path] = None,
+) -> Path:
+    """Module-aware логический путь проекта при заданном ``parent_id``.
+
+    Для модуля — ``<container_logical>/modules/<slug>``; для standalone —
+    type-группа/архив-путь. Используется при re-parent и module-aware delete.
+    """
+    root = root or get_projects_root()
+    pt = session.get(ProjectType, project.type_id)
+    container_logical: Optional[Path] = None
+    if parent_id is not None:
+        container_logical = _container_logical_for(session, parent_id, root=root)
+    view = type(
+        "P",
+        (),
+        {
+            "slug": project.slug,
+            "type_slug": pt.slug if pt else "business-product",
+            "archived": project.archived_at is not None,
+            "archived_group": project.archived_group,
+            "parent_id": parent_id,
+        },
+    )()
+    return get_logical_path(view, root=root, container_logical=container_logical)
+
+
+def _reparent_relocate_junction(
+    session: Session,
+    project: Project,
+    *,
+    old_parent_id: Optional[str],
+    new_parent_id: Optional[str],
+    root: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Перенести junction модуля при смене parent (#2/#8/#14).
+
+    Junction-aware: НЕ двигаем storage, только пересоздаём junction в новой
+    логической локации (modules/ нового контейнера или type-группа при
+    standalone) и снимаем старый junction (modules/ прежнего контейнера или
+    прежняя type-группа). Обновляем ``project.local_path``.
+
+    SAFETY: реальные директории не удаляем — снятие только через
+    `remove_junction` (is_junction-проверка внутри). Если storage модуля
+    отсутствует (проект ещё не разложен) — ничего не делаем (нечего двигать).
+    """
+    root = root or get_projects_root()
+    result: dict[str, Any] = {
+        "junction_created": False,
+        "old_junction_removed": None,
+        "new_local_path": None,
+        "warning": None,
+    }
+    storage = get_storage_path(project.slug, root=root)
+    if not storage.exists():
+        # Нечего переносить — проект не разложен; обновим только local_path-цель.
+        new_logical = _project_logical_for(
+            session, project, parent_id=new_parent_id, root=root
+        )
+        project.local_path = str(new_logical)
+        result["new_local_path"] = str(new_logical)
+        result["warning"] = (
+            "storage модуля отсутствует — junction не пересоздан "
+            "(запусти `atlas projects layout init` если нужна физика)."
+        )
+        return result
+
+    old_logical = _project_logical_for(
+        session, project, parent_id=old_parent_id, root=root
+    )
+    new_logical = _project_logical_for(
+        session, project, parent_id=new_parent_id, root=root
+    )
+
+    # Снять старый junction (только если это наш junction на наш storage).
+    if old_logical.resolve() != new_logical.resolve():
+        try:
+            if is_junction(old_logical):
+                tgt = junction_target(old_logical)
+                if tgt is not None and tgt.resolve() == storage.resolve():
+                    remove_junction(old_logical)
+                    result["old_junction_removed"] = str(old_logical)
+        except (SafetyError, JunctionError, OSError) as exc:
+            result["warning"] = f"не удалось снять старый junction: {exc}"
+
+    # Создать junction в новой логической локации (если ещё не там).
+    try:
+        if new_logical.resolve() != storage.resolve():
+            if is_junction(new_logical):
+                tgt = junction_target(new_logical)
+                if tgt is None or tgt.resolve() != storage.resolve():
+                    remove_junction(new_logical)
+                    new_logical.parent.mkdir(parents=True, exist_ok=True)
+                    create_junction(new_logical, storage)
+                    result["junction_created"] = True
+            elif new_logical.exists():
+                # Реальная директория на новом logical — не трогаем (safety).
+                result["warning"] = (
+                    f"на новом logical {new_logical} реальная директория — "
+                    f"junction не создан (ручное вмешательство)."
+                )
+            else:
+                new_logical.parent.mkdir(parents=True, exist_ok=True)
+                create_junction(new_logical, storage)
+                result["junction_created"] = True
+    except (SafetyError, JunctionError, OSError) as exc:
+        result["warning"] = f"не удалось создать новый junction: {exc}"
+
+    project.local_path = str(new_logical)
+    result["new_local_path"] = str(new_logical)
+
+    # #127: новый контейнер должен игнорировать modules/ в своём git.
+    if new_parent_id is not None:
+        new_container_logical = _container_logical_for(
+            session, new_parent_id, root=root
+        )
+        if new_container_logical is not None:
+            try:
+                _ensure_gitignore_modules(new_container_logical)
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+
+    return result
+
+
+def _require_container_laid_out(
+    session: Session,
+    parent_id: str,
+    container_logical: Optional[Path],
+    *,
+    root: Optional[Path] = None,
+) -> None:
+    """Гарантировать, что контейнер физически разложен (#6/#12).
+
+    Модуль можно безопасно положить под контейнер только если контейнер уже
+    мигрирован в `_storage/<container>/` (его storage существует ИЛИ его
+    container_logical — существующий junction). Иначе создание junction модуля
+    породит фантомную реальную папку контейнера вне storage. Поднимает CliError
+    с подсказкой `atlas projects layout init <container>`.
+    """
+    container = session.get(Project, parent_id)
+    if container is None:
+        # Висячий parent_id (#16): контейнер удалён.
+        raise CliError(
+            "container_not_found",
+            f"Контейнер parent_id='{parent_id}' не найден в БД "
+            f"(висячий parent_id). Создание модуля невозможно.",
+        )
+    storage = get_storage_path(container.slug, root=root)
+    container_migrated = storage.exists()
+    # Контейнерная логическая папка существует (junction ИЛИ реальная папка
+    # контейнера). Ключевой инвариант #6: фантом создаётся ТОЛЬКО когда
+    # container_logical НЕ существует и мы делаем mkdir его modules/. Если
+    # папка контейнера уже есть — модуль ляжет внутрь неё, расщепления нет.
+    container_logical_present = (
+        container_logical is not None
+        and (container_logical.exists() or os.path.islink(str(container_logical)))
+    )
+    if not (container_migrated or container_logical_present):
+        raise CliError(
+            "container_not_laid_out",
+            f"Контейнер '{container.slug}' ещё не разложен физически "
+            f"(нет ни _storage/{container.slug}/, ни его папки "
+            f"{container_logical}). Сначала выполните "
+            f"`atlas projects layout init {container.slug}`, затем повторите "
+            f"создание модуля. (Иначе модуль уехал бы в фантомную папку.)",
+        )
+
+
+def _maybe_local_git_init(storage_path: Path) -> bool:
+    """Поднять ЛОКАЛЬНЫЙ git-репо модуля в его storage (#9/#13/#127).
+
+    Идемпотентно: если `.git/` уже существует — noop (False). Без remote/push.
+    Best-effort: если git недоступен или init упал — возвращает False (не
+    роняем add). Возвращает True только если репозиторий реально создан.
+    """
+    try:
+        if not storage_path.exists():
+            return False
+        if (storage_path / ".git").exists():
+            return False
+        result = subprocess.run(
+            ["git", "init"],
+            cwd=str(storage_path),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _ensure_gitignore_modules(local_path: Path) -> bool:
+    """Идемпотентно добавить ``modules/`` в `.gitignore` контейнера (#127).
+
+    Контейнер-monorepo трекает всё КРОМЕ modules/ (каждый модуль — свой git-репо
+    со своим backup). Возвращает True, если файл был создан/дополнен, False —
+    если ``modules/`` уже игнорируется.
+    """
+    gitignore = local_path / ".gitignore"
+    marker = "modules/"
+    # #10: эквивалентные по смыслу записи считаем уже игнорирующими modules/,
+    # чтобы не дописывать дубль-блок при повторных прогонах.
+    equivalent_markers = {"modules/", "/modules/", "modules", "modules/*"}
+    if gitignore.exists():
+        try:
+            existing = gitignore.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+        # Уже есть эквивалентная запись → noop.
+        lines = [ln.strip() for ln in existing.splitlines()]
+        if any(ln in equivalent_markers for ln in lines):
+            return False
+        suffix = "" if existing.endswith("\n") or existing == "" else "\n"
+        block = f"{suffix}\n# === atlas: модули контейнера живут в своих git-репо ===\n{marker}\n"
+        gitignore.write_text(existing + block, encoding="utf-8")
+        return True
+
+    local_path.mkdir(parents=True, exist_ok=True)
+    gitignore.write_text(
+        "# === atlas: модули контейнера живут в своих git-репо ===\n"
+        f"{marker}\n",
+        encoding="utf-8",
+    )
+    return True
 
 
 def _generate_unique_prefix(
@@ -865,8 +1154,16 @@ def add_cmd(
             prefix_auto = True
 
         # ----- resolve local_path (W45-32m: relative→absolute, auto-derive) -----
+        # Module-aware (#163/#126): если задан --parent, логический путь модуля =
+        # <container_logical>/modules/<slug>, а не type-группа. Резолвим
+        # контейнерный логический путь через parent_id (parent_proj уже найден).
         from atlas.pm.layout import get_logical_path
         root = get_projects_root()
+
+        container_logical: Optional[Path] = None
+        if parent_id is not None:
+            container_logical = _container_logical_for(session, parent_id, root=root)
+
         if local_path:
             lp = Path(local_path)
             if not lp.is_absolute():
@@ -881,10 +1178,13 @@ def add_cmd(
                     "type_slug": mode.type_slug,
                     "archived": False,
                     "archived_group": None,
+                    "parent_id": parent_id,
                 },
             )()
             try:
-                logical = get_logical_path(fake_proj, root=root)
+                logical = get_logical_path(
+                    fake_proj, root=root, container_logical=container_logical
+                )
                 resolved_local_path = str(logical)
             except Exception:
                 resolved_local_path = None
@@ -977,6 +1277,11 @@ def add_cmd(
             "canonical_files": [],
             "git": None,
             "provisioned": None,
+            # #5: self-describing — scripted-consumer видит модуль ли это.
+            "parent": parent_proj.slug if parent_id is not None else None,
+            "is_module": parent_id is not None,
+            # #5: стабильная JSON-форма — ключ всегда есть (null когда N/A).
+            "container_gitignore_updated": None,
         }
 
         if slug_auto:
@@ -986,9 +1291,20 @@ def add_cmd(
 
         # ----- setup_layout: _storage + junction -----
         if setup_layout:
+            # #6/#12 SAFETY: модуль можно физически разложить только если
+            # контейнер уже мигрирован в _storage (его junction/реальная папка
+            # существует). Иначе _setup_storage_and_junction молча создаст
+            # ФАНТОМНУЮ реальную папку <type-группа>/<container>/modules/ вне
+            # storage контейнера, расщепив его содержимое. Отвергаем заранее.
+            if parent_id is not None:
+                _require_container_laid_out(
+                    session, parent_id, container_logical, root=root
+                )
             try:
                 _, storage_path, junction_created = _setup_storage_and_junction(
                     final_slug, mode.type_slug,
+                    parent_id=parent_id,
+                    container_logical=container_logical,
                 )
                 created_payload["storage_path"] = str(storage_path)
                 created_payload["junction_created"] = junction_created
@@ -997,8 +1313,45 @@ def add_cmd(
                     emit_message(
                         f"Junction: {resolved_local_path} → {storage_path}"
                     )
+                # #127: модуль появился у контейнера → его .gitignore трекает
+                # всё КРОМЕ modules/ (каждый модуль — свой git-репо). Идемпотентно.
+                if parent_id is not None and container_logical is not None:
+                    try:
+                        if _ensure_gitignore_modules(container_logical):
+                            created_payload["container_gitignore_updated"] = str(
+                                container_logical / ".gitignore"
+                            )
+                            emit_message(
+                                f"Container .gitignore += modules/ "
+                                f"({container_logical / '.gitignore'})"
+                            )
+                    except Exception as exc:  # noqa: BLE001 — best-effort
+                        emit_message(
+                            f"⚠ container .gitignore update failed: {exc}",
+                            level="warn",
+                        )
             except Exception as exc:
                 emit_message(f"⚠ setup_layout failed: {exc}", level="warn")
+
+            # #9/#13: модуль = свой git-репо (#127). Контейнер игнорирует
+            # modules/, поэтому каждый модуль обязан иметь СОБСТВЕННЫЙ репозиторий
+            # в _storage/<module>/. Поднимаем ЛОКАЛЬНЫЙ git init без ручной работы
+            # (без GitLab/push — это делает явный --init-git). Идемпотентно: если
+            # .git уже есть или git недоступен — тихо пропускаем.
+            if (
+                parent_id is not None
+                and not init_git
+                and created_payload.get("storage_path")
+            ):
+                module_git = _maybe_local_git_init(
+                    Path(created_payload["storage_path"])
+                )
+                created_payload["module_git_initialized"] = module_git
+                if module_git:
+                    emit_message(
+                        f"✓ Module git initialized (local): "
+                        f"{created_payload['storage_path']}"
+                    )
 
         # ----- canonical files -----
         if canonical and resolved_local_path:
@@ -1806,12 +2159,20 @@ def update_cmd(
             project.prefix = prefix
 
         # ----- parent / no-parent -----
+        # #2/#8/#14: фиксируем смену parent_id, чтобы после commit перенести
+        # физический junction в modules/ нового контейнера (или в type-группу
+        # при --no-parent) и снять старый junction. local_path тоже обновляем.
+        reparent: Optional[dict[str, Any]] = None
         if no_parent:
             if project.parent_id is not None:
                 old_parent = session.get(Project, project.parent_id)
                 diffs["parent"] = {
                     "old": old_parent.slug if old_parent else project.parent_id,
                     "new": None,
+                }
+                reparent = {
+                    "old_parent_id": project.parent_id,
+                    "new_parent_id": None,
                 }
                 project.parent_id = None
         elif parent is not None:
@@ -1827,6 +2188,10 @@ def update_cmd(
                 diffs["parent"] = {
                     "old": old_parent.slug if old_parent else None,
                     "new": new_parent.slug,
+                }
+                reparent = {
+                    "old_parent_id": project.parent_id,
+                    "new_parent_id": new_parent.id,
                 }
                 project.parent_id = new_parent.id
 
@@ -1846,6 +2211,20 @@ def update_cmd(
         )
         session.commit()
 
+        # #2/#8/#14: re-parent изменил иерархию в БД → синхронизируем физику
+        # (junction-aware: переносим junction модуля в modules/ нового контейнера
+        # или в type-группу при --no-parent; снимаем старый junction; обновляем
+        # local_path). Best-effort: ошибки физики не валят DB-апдейт.
+        reparent_result: Optional[dict[str, Any]] = None
+        if reparent is not None:
+            reparent_result = _reparent_relocate_junction(
+                session,
+                project,
+                old_parent_id=reparent["old_parent_id"],
+                new_parent_id=reparent["new_parent_id"],
+            )
+            session.commit()
+
         # diffs может содержать не-JSON значения (datetime) → str-нормализуем для вывода.
         diffs_out = {
             field: {"old": str(diff["old"]), "new": str(diff["new"])}
@@ -1863,7 +2242,12 @@ def update_cmd(
                 )
 
         emit_data(
-            {"slug": project.slug, "updated": True, "diffs": diffs_out},
+            {
+                "slug": project.slug,
+                "updated": True,
+                "diffs": diffs_out,
+                "reparent": reparent_result,
+            },
             text_renderer=_render,
         )
 
@@ -2032,30 +2416,22 @@ def delete_cmd(
                 raise typer.Exit(code=1)
 
             # Snapshot нужных полей до session.delete: после удаления
-            # detached object потеряет доступ к атрибутам.
-            pt = session.get(ProjectType, project.type_id)
-            type_slug = pt.slug if pt is not None else None
-            archived_flag = project.archived_at is not None
-            archived_group = getattr(project, "archived_group", None)
+            # detached object потеряет доступ к атрибутам. type_slug/archived
+            # больше не нужны явно — _project_logical_for считает их сам, пока
+            # project ещё в сессии.
+            parent_id = getattr(project, "parent_id", None)
             git_remote_url = getattr(project, "git_remote_url", None) or getattr(
                 project, "git_repo_url", None
             )
 
             root = get_projects_root()
             storage = get_storage_path(slug_for_msg, root=root)
+            # #3: module-aware. Для модуля реальный junction живёт в
+            # <container>/modules/<slug> — считаем logical с учётом parent,
+            # ПОКА project ещё в сессии (нужен type_id/parent_id для резолва).
             try:
-                logical = get_logical_path(
-                    type(
-                        "P",
-                        (),
-                        {
-                            "slug": slug_for_msg,
-                            "type_slug": type_slug,
-                            "archived": archived_flag,
-                            "archived_group": archived_group,
-                        },
-                    )(),
-                    root=root,
+                logical = _project_logical_for(
+                    session, project, parent_id=parent_id, root=root
                 )
             except Exception:
                 logical = None
@@ -2608,7 +2984,13 @@ def archive_cmd(
         moved_to: Optional[str] = None
         warning: Optional[str] = None
 
-        if not keep_path and project.local_path:
+        # #4: модуль остаётся физически под контейнером (modules/<slug>) даже в
+        # архиве — get_logical_path для archived-модуля держит его под
+        # container_logical. Поэтому НЕ двигаем junction в _Archive/<group>,
+        # меняем только статус в БД.
+        is_module = project.parent_id is not None
+
+        if not keep_path and not is_module and project.local_path:
             src = Path(project.local_path)
 
             # W45-32e: junction-aware archive. Если src — junction (на
@@ -2784,7 +3166,11 @@ def unarchive_cmd(
         moved_to: Optional[str] = None
         warning: Optional[str] = None
 
-        if not keep_path and project.local_path:
+        # #4: модуль остаётся под контейнером (modules/<slug>) и при unarchive —
+        # junction никуда не двигался при archive, двигать обратно нечего.
+        is_module = project.parent_id is not None
+
+        if not keep_path and not is_module and project.local_path:
             src = Path(project.local_path)
             dst = group_path(root, pt.slug, project.slug)
             try:
@@ -3026,7 +3412,12 @@ def move_cmd(
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(code=1)
 
-        physical_move = old_group != new_group
+        # #7: модуль живёт в <container>/modules/<slug> НЕЗАВИСИМО от type.
+        # Смена типа не должна выносить junction в type-группу — иначе
+        # рассинхрон БД (parent_id остаётся) ↔ ФС. Для модуля физику не трогаем.
+        is_module = project.parent_id is not None
+
+        physical_move = (old_group != new_group) and not is_module
         moved_from: Optional[str] = None
         moved_to: Optional[str] = None
 

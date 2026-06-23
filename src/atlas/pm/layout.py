@@ -32,7 +32,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 from atlas.pm.junctions import (
     JunctionError,
@@ -58,6 +58,10 @@ from atlas.pm.paths import (
 
 STORAGE_DIR_NAME = "_storage"
 
+# Имя под-папки контейнера, куда кладутся junction'ы модулей:
+# `<container_logical>/modules/<module_slug>/` (см. эпик #126/#163/#127).
+MODULES_DIR_NAME = "modules"
+
 
 # --------------------------------------------------------------------------- #
 # Project protocol — duck-type интерфейс                                      #
@@ -70,6 +74,9 @@ class _ProjectLike(Protocol):
     archived: bool
     archived_group: Optional[str]
     local_path: Optional[str]
+    # Опционально: модули контейнера несут parent_id (FK на проект-контейнер).
+    # standalone/контейнер → None. duck-typed: getattr-доступ с дефолтом.
+    parent_id: Optional[str]
 
 
 # --------------------------------------------------------------------------- #
@@ -86,12 +93,27 @@ def get_storage_path(slug: str, *, root: Optional[Path] = None) -> Path:
     return root / STORAGE_DIR_NAME / slug
 
 
-def get_logical_path(project: _ProjectLike, *, root: Optional[Path] = None) -> Path:
+def get_logical_path(
+    project: _ProjectLike,
+    *,
+    root: Optional[Path] = None,
+    container_logical: Optional[Path] = None,
+) -> Path:
     """Логический путь, по которому проект «видит» пользователь.
 
-    Active: ``<root>/<Clients|Products|Tests|_Inbox>/<slug>``.
-    Archived: ``<root>/_Archive/<archived_group>/<slug>`` (или fallback на
-    группу из type_slug).
+    Standalone/контейнер:
+    - Active: ``<root>/<Clients|Products|Tests|_Inbox>/<slug>``.
+    - Archived: ``<root>/_Archive/<archived_group>/<slug>`` (или fallback на
+      группу из type_slug).
+
+    Модуль контейнера (``project.parent_id`` задан) И передан
+    ``container_logical`` (логический путь контейнера):
+    - ``<container_logical>/modules/<slug>``.
+
+    Если у проекта есть ``parent_id``, но ``container_logical`` НЕ передан —
+    откатываемся к type-группе (вызывающая сторона не предоставила резолвер
+    контейнера; standalone-поведение не ломается). Резолв контейнера по
+    parent_id делает caller (CLI знает сессию) — см. `resolve_container_logical`.
 
     NOTE: используется slug проекта в качестве display_name. В будущем можно
     подменить на TitleCase-with-dashes — единственное, что тогда меняется,
@@ -102,6 +124,12 @@ def get_logical_path(project: _ProjectLike, *, root: Optional[Path] = None) -> P
     archived_group = getattr(project, "archived_group", None)
     type_slug = getattr(project, "type_slug")
     slug = getattr(project, "slug")
+    parent_id = getattr(project, "parent_id", None)
+
+    # Модуль контейнера: junction в <container_logical>/modules/<slug>.
+    # Работает и для archived-модулей — они всё равно «висят» под контейнером.
+    if parent_id and container_logical is not None:
+        return Path(container_logical) / MODULES_DIR_NAME / slug
 
     if archived:
         group = archived_group if archived_group else type_slug_to_group(type_slug)
@@ -110,6 +138,76 @@ def get_logical_path(project: _ProjectLike, *, root: Optional[Path] = None) -> P
     group = type_slug_to_group(type_slug)
     folder = GROUP_FOLDER_NAMES[group]
     return root / folder / slug
+
+
+def container_own_logical(
+    container: _ProjectLike,
+    *,
+    root: Optional[Path] = None,
+    nested_container_logical: Optional[Path] = None,
+) -> Path:
+    """Фактический логический путь самого контейнера.
+
+    ПРИОРИТЕТ (#1/#12): если у контейнера задан ``local_path`` — используем его
+    напрямую (контейнер мог быть создан с ``--local-path`` или онбордингом с
+    произвольным путём, и его реальная папка живёт НЕ по type-группе-формуле).
+    Тогда модуль ляжет в ``<реальный_контейнер>/modules/<slug>``, а не в фантомную
+    type-группу. Формула ``get_logical_path`` — только fallback при пустом
+    ``local_path``.
+    """
+    local_path = getattr(container, "local_path", None)
+    if local_path:
+        return Path(local_path)
+    return get_logical_path(
+        container, root=root, container_logical=nested_container_logical
+    )
+
+
+def resolve_container_logical(
+    project: _ProjectLike,
+    resolver: Callable[[str], Optional[_ProjectLike]],
+    *,
+    root: Optional[Path] = None,
+) -> Optional[Path]:
+    """Вычислить логический путь контейнера для модуля.
+
+    ``resolver(parent_id)`` → duck-typed view контейнера (или None, если не
+    найден). Резолв РЕКУРСИВНЫЙ (#17): поднимаемся по цепочке ``parent_id`` до
+    корня (контейнер сам может быть модулем более высокого контейнера, любой
+    глубины) с защитой от циклов через seen-set.
+
+    Для самого контейнера предпочитаем его персистентный ``local_path`` (#1/#12)
+    через `container_own_logical`; формула — fallback.
+
+    Возвращает None, если у проекта нет parent_id или контейнер не найден.
+    """
+    return _resolve_container_logical(project, resolver, root=root, seen=set())
+
+
+def _resolve_container_logical(
+    project: _ProjectLike,
+    resolver: Callable[[str], Optional[_ProjectLike]],
+    *,
+    root: Optional[Path],
+    seen: set[str],
+) -> Optional[Path]:
+    parent_id = getattr(project, "parent_id", None)
+    if not parent_id:
+        return None
+    # Cycle-guard: если уже видели этот parent_id в текущей цепочке — стоп
+    # (защита от битого FK; на уровне CLI циклы блокирует _check_no_cycle_or_die).
+    if parent_id in seen:
+        return None
+    seen.add(parent_id)
+    container = resolver(parent_id)
+    if container is None:
+        return None
+    nested = _resolve_container_logical(
+        container, resolver, root=root, seen=seen
+    )
+    return container_own_logical(
+        container, root=root, nested_container_logical=nested
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -280,6 +378,7 @@ def sync_logical(
     project: _ProjectLike, *,
     root: Optional[Path] = None,
     cleanup_other_groups: bool = True,
+    container_logical: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Привести логическую папку проекта в соответствие с текущим status.
 
@@ -299,7 +398,9 @@ def sync_logical(
     """
     root = root or get_projects_root()
     storage = get_storage_path(project.slug, root=root)
-    logical = get_logical_path(project, root=root)
+    logical = get_logical_path(
+        project, root=root, container_logical=container_logical
+    )
 
     if not storage.exists():
         return {
@@ -346,15 +447,22 @@ def sync_logical(
 
 def verify(
     project: _ProjectLike, *, root: Optional[Path] = None,
+    container_logical: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Проверить целостность layout проекта.
 
     Возвращает ``{ok: bool, checks: list[dict]}``. Каждый check —
     ``{name, ok, issue?, detail?}``.
+
+    Module-aware (#126): ``container_logical`` — логический путь контейнера,
+    нужен чтобы для модуля ожидаемый junction искался в
+    `<container_logical>/modules/<slug>`.
     """
     root = root or get_projects_root()
     storage = get_storage_path(project.slug, root=root)
-    logical = get_logical_path(project, root=root)
+    logical = get_logical_path(
+        project, root=root, container_logical=container_logical
+    )
     checks: list[dict[str, Any]] = []
 
     # Check 1: storage существует и не пуст.
@@ -526,6 +634,60 @@ def _perform_storage_move(
     return {"files_count": 0, "bytes": 0}
 
 
+def stale_junction_candidates(
+    slug: str, *, root: Optional[Path] = None,
+) -> list[Path]:
+    """Все возможные логические локации junction'а проекта ``slug`` (#15).
+
+    Включает:
+    - type-группы: ``<root>/<GROUP_FOLDER>/<slug>``;
+    - архив-подгруппы: ``<root>/_Archive/<sub>/<slug>``;
+    - modules/ контейнеров: ``<root>/<GROUP_FOLDER>/<container>/modules/<slug>``
+      и ``<root>/_Archive/<sub>/<container>/modules/<slug>`` — чтобы
+      орфанные module-junction'ы (после re-parent / module→standalone) тоже
+      попадали в кандидаты на снятие/репорт, а не оседали невидимками.
+
+    Дедуплицировано (одна и та же папка не дублируется).
+    """
+    root = root or get_projects_root()
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        key = str(p)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(p)
+
+    parent_dirs: list[Path] = [root / folder for folder in GROUP_FOLDER_NAMES.values()]
+    archive_root = root / "_Archive"
+    if archive_root.exists():
+        try:
+            for sub in archive_root.iterdir():
+                if sub.is_dir():
+                    parent_dirs.append(sub)
+        except OSError:
+            pass
+
+    for parent in parent_dirs:
+        # Прямой standalone/контейнер junction в группе.
+        _add(parent / slug)
+        # modules/ внутри каждого контейнера-папки этой группы.
+        try:
+            entries = list(parent.iterdir()) if parent.exists() else []
+        except OSError:
+            entries = []
+        for entry in entries:
+            try:
+                mod_dir = entry / MODULES_DIR_NAME
+                if mod_dir.exists() or os.path.islink(str(mod_dir)):
+                    _add(mod_dir / slug)
+            except OSError:
+                continue
+
+    return candidates
+
+
 def _cleanup_stale_junctions(
     project: _ProjectLike, *,
     root: Path,
@@ -537,18 +699,8 @@ def _cleanup_stale_junctions(
     Возвращает список путей удалённых junction'ов (для отчёта).
     """
     removed: list[str] = []
-    candidates: list[Path] = []
     slug = project.slug
-
-    # Active группы.
-    for folder in GROUP_FOLDER_NAMES.values():
-        candidates.append(root / folder / slug)
-    # Archive подгруппы.
-    archive_root = root / "_Archive"
-    if archive_root.exists():
-        for sub in archive_root.iterdir():
-            if sub.is_dir():
-                candidates.append(sub / slug)
+    candidates = stale_junction_candidates(slug, root=root)
 
     for cand in candidates:
         if cand.resolve() == current_logical.resolve():

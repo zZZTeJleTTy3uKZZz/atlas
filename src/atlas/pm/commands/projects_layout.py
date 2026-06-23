@@ -58,7 +58,6 @@ from atlas.pm.models import (
     ProjectType,
 )
 from atlas.pm.paths import (
-    GROUP_FOLDER_NAMES,
     get_projects_root,
 )
 from atlas.pm.slugs import AmbiguousRefError, resolve_project_ref
@@ -138,7 +137,38 @@ def _project_view(session: Session, project: Project) -> SimpleNamespace:
         archived=project.archived_at is not None,
         archived_group=project.archived_group,
         local_path=project.local_path,
+        parent_id=project.parent_id,
     )
+
+
+def _container_logical(session: Session, view, *, root: Path) -> Optional[Path]:
+    """Логический путь контейнера для модуля (#126). None для standalone.
+
+    resolver рекурсивно строит логический путь родителя (поддержка вложенных
+    контейнеров: контейнер сам может быть модулем).
+    """
+    def _resolver(parent_id: str):
+        return _view_by_id(session, parent_id)
+
+    return layout_mod.resolve_container_logical(view, _resolver, root=root)
+
+
+def _view_by_id(session: Session, project_id: str):
+    """duck-typed view контейнера по id (для resolve_container_logical)."""
+    proj = session.get(Project, project_id)
+    if proj is None:
+        return None
+    return _project_view(session, proj)
+
+
+def _logical_for(session: Session, view, *, root: Path) -> Path:
+    """Module-aware логический путь проекта (#126).
+
+    Для модуля (parent_id задан) — `<container_logical>/modules/<slug>`;
+    для standalone/контейнера — прежний type-группа путь.
+    """
+    container_logical = _container_logical(session, view, root=root)
+    return get_logical_path(view, root=root, container_logical=container_logical)
 
 
 def _resolve_or_die(session: Session, ref: str) -> Project:
@@ -227,7 +257,7 @@ def init_cmd(
             )
             raise typer.Exit(code=1)
 
-        logical = get_logical_path(view, root=root)
+        logical = _logical_for(session, view, root=root)
 
         # ---- DRY-RUN ----
         if dry_run:
@@ -379,7 +409,7 @@ def sync_cmd(
         view = _project_view(session, project)
 
         storage = get_storage_path(view.slug, root=root)
-        expected_logical = get_logical_path(view, root=root)
+        expected_logical = _logical_for(session, view, root=root)
         current = Path(view.local_path) if view.local_path else None
 
         if not storage.exists():
@@ -568,25 +598,21 @@ def sync_cmd(
 # --------------------------------------------------------------------------- #
 
 
-def _check_duplicate_junctions(view, *, root: Path, storage: Path) -> list[dict[str, Any]]:
+def _check_duplicate_junctions(
+    view, *, root: Path, storage: Path, expected: Optional[Path] = None,
+) -> list[dict[str, Any]]:
     """Поискать «лишние» junction'ы в других группах, указывающие на наш storage.
 
-    Возвращает список problem-dict'ов (если есть).
+    ``expected`` — module-aware ожидаемый логический путь (если не передан,
+    считаем по type-группе как fallback). Возвращает список problem-dict'ов.
     """
     problems: list[dict[str, Any]] = []
-    candidates: list[Path] = []
-    for folder in GROUP_FOLDER_NAMES.values():
-        candidates.append(root / folder / view.slug)
-    archive_root = root / "_Archive"
-    if archive_root.exists():
-        try:
-            for sub in archive_root.iterdir():
-                if sub.is_dir():
-                    candidates.append(sub / view.slug)
-        except OSError:
-            pass
+    # #15: кандидаты включают и <container>/modules/<slug> — орфанные
+    # module-junction'ы тоже репортятся как дубли.
+    candidates = layout_mod.stale_junction_candidates(view.slug, root=root)
 
-    expected = get_logical_path(view, root=root)
+    if expected is None:
+        expected = get_logical_path(view, root=root)
     seen_paths: set[Path] = set()
     for cand in candidates:
         if cand in seen_paths:
@@ -617,14 +643,22 @@ def _check_duplicate_junctions(view, *, root: Path, storage: Path) -> list[dict[
     return problems
 
 
-def _verify_one(view, *, root: Path, quick: bool = False) -> dict[str, Any]:
-    """Расширенная verify: layout.verify + duplicate-checks."""
-    base = layout_mod.verify(view, root=root)
+def _verify_one(
+    view, *, root: Path, quick: bool = False,
+    container_logical: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Расширенная verify: layout.verify + duplicate-checks (module-aware #126)."""
+    base = layout_mod.verify(view, root=root, container_logical=container_logical)
     checks = list(base.get("checks", []))
     if not quick:
         storage = get_storage_path(view.slug, root=root)
         if storage.exists():
-            extra = _check_duplicate_junctions(view, root=root, storage=storage)
+            expected = get_logical_path(
+                view, root=root, container_logical=container_logical
+            )
+            extra = _check_duplicate_junctions(
+                view, root=root, storage=storage, expected=expected,
+            )
             checks.extend(extra)
     ok = all(c.get("ok", False) for c in checks)
     return {
@@ -667,7 +701,11 @@ def verify_cmd(
 
         for view in views:
             try:
-                result = _verify_one(view, root=root, quick=quick)
+                container_logical = _container_logical(session, view, root=root)
+                result = _verify_one(
+                    view, root=root, quick=quick,
+                    container_logical=container_logical,
+                )
             except ValueError as exc:
                 rows.append({
                     "slug": view.slug,
@@ -893,7 +931,7 @@ def migrate_all_cmd(
                     continue
 
                 # ---- Apply ----
-                logical = get_logical_path(view, root=root)
+                logical = _logical_for(session, view, root=root)
                 try:
                     layout_mod._perform_storage_move(
                         local_path, storage, copy_first=copy_first,
@@ -1035,7 +1073,7 @@ def list_storage_cmd() -> None:
             view = _project_view(session, project)
             storage = get_storage_path(view.slug, root=root)
             try:
-                logical = get_logical_path(view, root=root)
+                logical = _logical_for(session, view, root=root)
             except ValueError:
                 logical = None
             size_mb = _dir_size_mb(storage)

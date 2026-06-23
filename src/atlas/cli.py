@@ -6,6 +6,9 @@ backup / sync. Notion-legacy команды убраны (синк идёт че
 """
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from clikit import build_root_app
 
 from .commands.action_log import app as action_log_app
@@ -27,9 +30,14 @@ from .commands.sync import sync_app
 from .commands.tags import app as tags_app
 from .commands.types import app as types_app
 
+try:
+    _ATLAS_VERSION = _pkg_version("atlas")
+except PackageNotFoundError:  # pragma: no cover — пакет не установлен (редкий случай)
+    _ATLAS_VERSION = "0.0.0"
+
 app = build_root_app(
     "atlas",
-    version="0.1.0",
+    version=_ATLAS_VERSION,
     help="Atlas — PM портфеля проектов + синхронизация с хабом (--json по умолчанию).",
 )
 

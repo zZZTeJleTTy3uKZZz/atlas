@@ -42,7 +42,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.junctions import JunctionError, SafetyError
 from atlas.pm import layout as layout_mod
@@ -297,7 +297,7 @@ def init_cmd(
         new_local = str(logical) if not no_junction else str(storage)
         old_local = project.local_path
         project.local_path = new_local
-        project.last_touched_at = msk_now()
+        project.last_touched_at = local_now()
 
         details = {
             "kind": "init",
@@ -488,7 +488,7 @@ def sync_cmd(
         old_local = project.local_path
         new_local = str(expected_logical)
         project.local_path = new_local
-        project.last_touched_at = msk_now()
+        project.last_touched_at = local_now()
 
         _log_action(
             session,
@@ -859,7 +859,7 @@ def migrate_all_cmd(
                             continue
 
                 project.local_path = str(logical)
-                project.last_touched_at = msk_now()
+                project.last_touched_at = local_now()
                 _log_action(
                     session,
                     action="project_layout_init",

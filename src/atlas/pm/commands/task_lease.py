@@ -14,7 +14,7 @@ from rich.console import Console
 from sqlalchemy import select
 
 from atlas.pm import lease as L
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.commands.pm_tasks import _resolve_task_or_die, pm_tasks_app
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import Task
@@ -216,7 +216,7 @@ def stale_cmd(
     """Протухшие lease: отчёт (по умолчанию) или освобождение (--reap)."""
     engine = make_engine(resolve_db_url())
     with make_session(engine) as session:
-        now = msk_now()
+        now = local_now()
         if reap:
             freed = L.expire_stale_leases(session, now=now)
             session.commit()

@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.orm.exc import StaleDataError
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
     ActionLog,
@@ -398,7 +398,7 @@ def add_cmd(
                 source_slug = src.slug
                 if origin is None:
                     final_origin = "injected"
-                injected_at = msk_now()
+                injected_at = local_now()
                 if injected_by is not None:
                     injector = _resolve_assignee_or_die(session, injected_by)
 
@@ -936,7 +936,7 @@ def update_cmd(
             diffs["status"] = {"old": old_status, "new": status}
             task.status = status
 
-            now = msk_now()
+            now = local_now()
             if status == "in_progress" and task.started_at is None:
                 task.started_at = now
                 diffs["started_at"] = {"old": None, "new": now}
@@ -1061,7 +1061,7 @@ def delete_cmd(
             )
             return
 
-        task.archived_at = msk_now()
+        task.archived_at = local_now()
         _log_action(
             session,
             action="task_archived",

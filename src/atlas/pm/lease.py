@@ -33,7 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.models import ActionLog, Participant, Task
 
 DEFAULT_TTL = timedelta(hours=2)
@@ -202,7 +202,7 @@ def claim_task(
     """
     task_id = task.id
     for _ in range(MAX_CLAIM_RETRIES):
-        cur_now = now or msk_now()
+        cur_now = now or local_now()
         if not _lease_is_free(task, actor.id, cur_now):
             raise LeaseHeldError(
                 _holder_slug(session, task.lease_owner), task.lease_expires_at
@@ -262,7 +262,7 @@ def renew_lease(
     """Продлить lease (heartbeat); только держатель. Чужой/нет → LeaseNotOwnedError."""
     if task.lease_owner != actor.id:
         raise LeaseNotOwnedError(_holder_slug(session, task.lease_owner))
-    cur_now = now or msk_now()
+    cur_now = now or local_now()
     task.lease_expires_at = cur_now + ttl
     session.flush()
     _log_lease(session, "lease_renewed", task, actor, expires_at=task.lease_expires_at)
@@ -281,7 +281,7 @@ def take_task(
     """Принудительно отобрать задачу (даже занятую другим). Пишет task_taken."""
     task_id = task.id
     for _ in range(MAX_CLAIM_RETRIES):
-        cur_now = now or msk_now()
+        cur_now = now or local_now()
         prev = task.lease_owner if task.lease_owner != actor.id else None
         task.lease_owner = actor.id
         task.lease_session_id = session_id
@@ -315,7 +315,7 @@ def expire_stale_leases(
     Детерминированно по lease_expires_at (а не эвристикой по updated_at, как
     `bd stale`). Возвращает освобождённые задачи; логирует lease_expired.
     """
-    cur_now = now or msk_now()
+    cur_now = now or local_now()
     stale = (
         session.execute(
             select(Task).where(

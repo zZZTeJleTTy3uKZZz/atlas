@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import func, select
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 
 
 # --------------------------------------------------------------------------- #
@@ -49,7 +49,7 @@ def _make_project(session, seed_refs, *, slug: str, archived: bool = False):
         status_id=seed_refs["status"].id,
         priority="P1",
         one_line_summary="...",
-        archived_at=msk_now() if archived else None,
+        archived_at=local_now() if archived else None,
     )
     session.add(proj)
     session.commit()

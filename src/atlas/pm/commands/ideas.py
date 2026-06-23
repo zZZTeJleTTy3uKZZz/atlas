@@ -33,7 +33,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.ideas import (
     ensure_ideas_root,
@@ -504,7 +504,7 @@ def promote_cmd(
         if priority is not None:
             proj.priority = priority
         proj.local_path = str(logical)
-        proj.last_touched_at = msk_now()
+        proj.last_touched_at = local_now()
 
         _log_action(
             session,
@@ -641,7 +641,7 @@ def demote_cmd(
         # 3. Update DB.
         proj.entity_kind = "idea"
         proj.local_path = str(new_md_path)
-        proj.last_touched_at = msk_now()
+        proj.last_touched_at = local_now()
 
         _log_action(
             session,
@@ -705,7 +705,7 @@ def update_cmd(
             console.print("[dim]Нечего обновлять.[/dim]")
             return
 
-        proj.last_touched_at = msk_now()
+        proj.last_touched_at = local_now()
         _log_action(
             session,
             action="idea_updated",

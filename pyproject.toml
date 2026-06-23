@@ -16,7 +16,7 @@ dependencies = [
     "python-frontmatter>=1.1",
     "python-slugify>=8.0.4",
     # S-kits (PyPI; dist-name s-*, импорт-пакеты clikit/librarykit/adapterkit)
-    "s-clikit>=0.1.3",
+    "s-clikit>=0.1.4",
     "s-librarykit>=0.1.3",
     "s-adapterkit>=0.1.2",
 ]

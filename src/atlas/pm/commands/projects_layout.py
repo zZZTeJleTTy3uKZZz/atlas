@@ -31,14 +31,13 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table, is_json
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -61,7 +60,6 @@ from atlas.pm.models import (
 from atlas.pm.paths import (
     GROUP_FOLDER_NAMES,
     get_projects_root,
-    type_slug_to_group,
 )
 from atlas.pm.slugs import AmbiguousRefError, resolve_project_ref
 from atlas.pm.tags import filter_projects_by_tags
@@ -161,6 +159,7 @@ def _resolve_or_die(session: Session, ref: str) -> Project:
 
 
 @layout_app.command("init")
+@command
 def init_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     copy_first: bool = typer.Option(
@@ -233,15 +232,22 @@ def init_cmd(
         # ---- DRY-RUN ----
         if dry_run:
             plan = plan_migrate_to_storage(view, root=root)
-            console.print(f"[bold]Plan для '{view.slug}':[/bold]")
-            for step in plan:
-                action = step.get("action")
-                src = step.get("src") or "—"
-                dst = step.get("dst") or "—"
-                note = step.get("note") or ""
-                console.print(f"  • {action}: {src} → {dst}  [dim]{note}[/dim]")
-            console.print(
-                "\n[yellow]Dry-run. Реальные операции не выполнялись.[/yellow]"
+
+            def _render_plan(d: dict[str, Any]) -> None:
+                console.print(f"[bold]Plan для '{d['slug']}':[/bold]")
+                for step in d["plan"]:
+                    action = step.get("action")
+                    src = step.get("src") or "—"
+                    dst = step.get("dst") or "—"
+                    note = step.get("note") or ""
+                    console.print(f"  • {action}: {src} → {dst}  [dim]{note}[/dim]")
+                console.print(
+                    "\n[yellow]Dry-run. Реальные операции не выполнялись.[/yellow]"
+                )
+
+            emit_data(
+                {"slug": view.slug, "dry_run": True, "plan": plan},
+                text_renderer=_render_plan,
             )
             return
 
@@ -318,14 +324,28 @@ def init_cmd(
         )
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{ref}' migrated to _storage/[/green]"
+    def _render_init(d: dict[str, Any]) -> None:
+        console.print(
+            f"[green]✓ Project '{ref}' migrated to _storage/[/green]"
+        )
+        console.print(f"  Storage:  [bold]{d['storage']}[/bold]")
+        if not d["no_junction"]:
+            console.print(f"  Junction: [bold]{d['logical']}[/bold] → {d['storage']}")
+        else:
+            console.print("  [dim](--no-junction: junction не создан)[/dim]")
+
+    emit_data(
+        {
+            "ok": True,
+            "slug": view.slug,
+            "storage": str(storage),
+            "logical": str(logical),
+            "no_junction": no_junction,
+            "junction_created": junction_created,
+            "files_count": files_count,
+        },
+        text_renderer=_render_init,
     )
-    console.print(f"  Storage:  [bold]{storage}[/bold]")
-    if not no_junction:
-        console.print(f"  Junction: [bold]{logical}[/bold] → {storage}")
-    else:
-        console.print("  [dim](--no-junction: junction не создан)[/dim]")
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +354,7 @@ def init_cmd(
 
 
 @layout_app.command("sync")
+@command
 def sync_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     dry_run: bool = typer.Option(
@@ -424,17 +445,40 @@ def sync_cmd(
                 action_kind = "create"
 
         if dry_run:
-            console.print(f"[bold]Sync plan для '{view.slug}':[/bold]")
-            for line in plan_lines:
-                console.print(f"  • {line}")
-            console.print(
-                "\n[yellow]Dry-run. Реальные операции не выполнялись.[/yellow]"
+            def _render_plan(d: dict[str, Any]) -> None:
+                console.print(f"[bold]Sync plan для '{d['slug']}':[/bold]")
+                for line in d["plan"]:
+                    console.print(f"  • {line}")
+                console.print(
+                    "\n[yellow]Dry-run. Реальные операции не выполнялись.[/yellow]"
+                )
+
+            emit_data(
+                {
+                    "slug": view.slug,
+                    "dry_run": True,
+                    "action": action_kind,
+                    "plan": plan_lines,
+                    "expected_logical": str(expected_logical),
+                    "storage": str(storage),
+                },
+                text_renderer=_render_plan,
             )
             return
 
         if action_kind == "noop":
-            console.print(
-                f"[green]✓ Project '{view.slug}' уже в синке: {expected_logical}[/green]"
+            emit_data(
+                {
+                    "ok": True,
+                    "slug": view.slug,
+                    "action": "noop",
+                    "logical": str(expected_logical),
+                    "storage": str(storage),
+                },
+                text_renderer=lambda d: console.print(
+                    f"[green]✓ Project '{d['slug']}' уже в синке: "
+                    f"{d['logical']}[/green]"
+                ),
             )
             return
 
@@ -461,9 +505,10 @@ def sync_cmd(
                         f"[red]Не удалось перенести {real_dir} → {bk}: {exc}[/red]"
                     )
                     raise typer.Exit(code=1)
-                console.print(
-                    f"  [yellow]backup → {bk}[/yellow]"
-                )
+                if not is_json():
+                    console.print(
+                        f"  [yellow]backup → {bk}[/yellow]"
+                    )
         # Snять старый junction.
         if current is not None and current != expected_logical and _is_junction(current):
             try:
@@ -503,8 +548,18 @@ def sync_cmd(
         )
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{ref}' synced[/green]: junction в [bold]{expected_logical}[/bold] → {storage}"
+    emit_data(
+        {
+            "ok": True,
+            "slug": view.slug,
+            "action": action_kind,
+            "logical": str(expected_logical),
+            "storage": str(storage),
+        },
+        text_renderer=lambda d: console.print(
+            f"[green]✓ Project '{ref}' synced[/green]: junction в "
+            f"[bold]{d['logical']}[/bold] → {d['storage']}"
+        ),
     )
 
 
@@ -581,6 +636,7 @@ def _verify_one(view, *, root: Path, quick: bool = False) -> dict[str, Any]:
 
 
 @layout_app.command("verify")
+@command
 def verify_cmd(
     ref: Optional[str] = typer.Argument(
         None, help="slug | UUID; если не указан — проверить все проекты.",
@@ -636,28 +692,37 @@ def verify_cmd(
                 "storage": result.get("storage"),
             })
 
+    emit_table(
+        rows,
+        title=f"Layout verify ({len(rows)})",
+        columns=[
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {
+                "key": "ok",
+                "header": "ok",
+                "justify": "center",
+                "format": lambda v: "[green]OK[/green]" if v else "[red]FAIL[/red]",
+            },
+            {
+                "key": "issues",
+                "header": "issues",
+                "style": "dim",
+                "format": lambda v: "; ".join(v) if v else "—",
+            },
+        ],
+        empty_message="[yellow]В БД нет проектов для проверки.[/yellow]",
+    )
     if not rows:
-        console.print("[yellow]В БД нет проектов для проверки.[/yellow]")
         return
 
-    table = Table(title=f"Layout verify ({len(rows)})")
-    table.add_column("slug", style="cyan", no_wrap=True)
-    table.add_column("ok", justify="center")
-    table.add_column("issues", style="dim")
-    for row in rows:
-        ok_mark = "[green]OK[/green]" if row["ok"] else "[red]FAIL[/red]"
-        issues_text = "—"
-        if row["issues"]:
-            issues_text = "; ".join(row["issues"])
-        table.add_row(row["slug"], ok_mark, issues_text)
-    console.print(table)
-
     if not overall_ok:
-        console.print(
-            "\n[red]Найдены проблемы. Используйте `sync` или починку вручную.[/red]"
-        )
+        if not is_json():
+            console.print(
+                "\n[red]Найдены проблемы. Используйте `sync` или починку вручную.[/red]"
+            )
         raise typer.Exit(code=1)
-    console.print("\n[green]Всё в порядке.[/green]")
+    if not is_json():
+        console.print("\n[green]Всё в порядке.[/green]")
 
 
 # --------------------------------------------------------------------------- #
@@ -666,6 +731,7 @@ def verify_cmd(
 
 
 @layout_app.command("migrate-all")
+@command
 def migrate_all_cmd(
     type_filter: Optional[str] = typer.Option(
         None, "--type", help="Фильтр: project_type slug.",
@@ -761,16 +827,18 @@ def migrate_all_cmd(
             projects = [p for p in projects if p.slug not in excluded_set]
 
         if not projects:
-            console.print("[yellow]Подходящих проектов нет.[/yellow]")
+            note = ""
             if excluded_set:
-                console.print(
-                    f"  [dim](исключены: {', '.join(sorted(excluded_set))})[/dim]"
-                )
+                note = f" (исключены: {', '.join(sorted(excluded_set))})"
+            emit_table(
+                [],
+                empty_message=f"[yellow]Подходящих проектов нет.{note}[/yellow]",
+            )
             return
 
         summary = {"migrated": 0, "skipped": 0, "failed": 0, "planned": 0}
         rows: list[dict[str, Any]] = []
-        if excluded_set:
+        if excluded_set and not is_json():
             console.print(
                 f"[dim]Excluded {len(excluded_set)}: "
                 f"{', '.join(sorted(excluded_set))}[/dim]"
@@ -879,33 +947,53 @@ def migrate_all_cmd(
         if not effective_dry_run:
             session.commit()
 
-    table = Table(title=f"migrate-all ({len(rows)})")
-    table.add_column("slug", style="cyan", no_wrap=True)
-    table.add_column("type", style="magenta")
-    table.add_column("result", style="bold")
-    table.add_column("note", style="dim")
-    for row in rows:
-        result_color = {
+    def _result_color(status: str) -> str:
+        return {
             "migrated": "[green]migrated[/green]",
             "planned": "[yellow]planned[/yellow]",
             "skipped": "[dim]skipped[/dim]",
             "failed": "[red]failed[/red]",
-        }.get(row["status"], row["status"])
-        table.add_row(row["slug"], row["type"], result_color, row["note"])
-    console.print(table)
+        }.get(status, status)
 
-    console.print(
-        f"\nSummary:\n"
-        f"  migrated: {summary['migrated']}\n"
-        f"  planned:  {summary['planned']}\n"
-        f"  skipped:  {summary['skipped']}\n"
-        f"  failed:   {summary['failed']}"
+    emit_table(
+        rows,
+        title=f"migrate-all ({len(rows)})",
+        columns=[
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {"key": "type", "header": "type", "style": "magenta"},
+            {
+                "key": "status",
+                "header": "result",
+                "style": "bold",
+                "format": _result_color,
+            },
+            {"key": "note", "header": "note", "style": "dim"},
+        ],
     )
 
-    if effective_dry_run:
+    def _render_summary(d: dict[str, Any]) -> None:
         console.print(
-            "\n[yellow]Dry-run (передайте `--confirm` для применения).[/yellow]"
+            f"\nSummary:\n"
+            f"  migrated: {d['migrated']}\n"
+            f"  planned:  {d['planned']}\n"
+            f"  skipped:  {d['skipped']}\n"
+            f"  failed:   {d['failed']}"
         )
+        if d["dry_run"]:
+            console.print(
+                "\n[yellow]Dry-run (передайте `--confirm` для применения).[/yellow]"
+            )
+
+    emit_data(
+        {
+            "migrated": summary["migrated"],
+            "planned": summary["planned"],
+            "skipped": summary["skipped"],
+            "failed": summary["failed"],
+            "dry_run": effective_dry_run,
+        },
+        text_renderer=_render_summary,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -931,6 +1019,7 @@ def _dir_size_mb(path: Path) -> Optional[float]:
 
 
 @layout_app.command("list-storage")
+@command
 def list_storage_cmd() -> None:
     """Overview всех `_storage/<slug>/` (с физикой и логикой)."""
     url = _db_url()
@@ -959,25 +1048,21 @@ def list_storage_cmd() -> None:
                 "type": pt.slug if pt else "—",
             })
 
-    if not rows:
-        console.print("[yellow]В БД нет проектов.[/yellow]")
-        return
-
-    table = Table(title=f"list-storage ({len(rows)})")
-    table.add_column("slug", style="cyan", no_wrap=True)
-    table.add_column("physical", style="dim")
-    table.add_column("size MB", justify="right")
-    table.add_column("logical", style="dim")
-    table.add_column("status", style="green")
-    table.add_column("type", style="magenta")
-    for row in rows:
-        size_str = f"{row['size_mb']:.1f}" if row["size_mb"] is not None else "—"
-        table.add_row(
-            row["slug"],
-            row["physical"],
-            size_str,
-            row["logical"],
-            row["status"],
-            row["type"],
-        )
-    console.print(table)
+    emit_table(
+        rows,
+        title=f"list-storage ({len(rows)})",
+        columns=[
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {"key": "physical", "header": "physical", "style": "dim"},
+            {
+                "key": "size_mb",
+                "header": "size MB",
+                "justify": "right",
+                "format": lambda v: f"{v:.1f}" if v is not None else "—",
+            },
+            {"key": "logical", "header": "logical", "style": "dim"},
+            {"key": "status", "header": "status", "style": "green"},
+            {"key": "type", "header": "type", "style": "magenta"},
+        ],
+        empty_message="[yellow]В БД нет проектов.[/yellow]",
+    )

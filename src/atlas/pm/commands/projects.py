@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_message, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -47,7 +47,6 @@ from atlas.pm.models import (
     Project,
     ProjectParticipant,
     ProjectStatus,
-    ProjectTag,
     ProjectType,
     Tag,
 )
@@ -499,9 +498,9 @@ def init_cmd(
 ) -> None:
     """Инициализировать PM-БД: apply migrations + seed справочников."""
     url = db_url or _db_url()
-    console.print(f"[bold]Database:[/bold] {url}")
+    emit_message(f"Database: {url}")
 
-    console.print("[cyan]1. Применяю миграции Alembic...[/cyan]")
+    emit_message("1. Применяю миграции Alembic...")
     env = os.environ.copy()
     env["ATLAS_DB_URL"] = url
     project_root = _find_project_root()
@@ -516,26 +515,43 @@ def init_cmd(
         console.print("[red]Ошибка миграций:[/red]")
         console.print(result.stderr)
         raise typer.Exit(code=1)
-    console.print("[green]   ✓ миграции применены[/green]")
+    emit_message("✓ миграции применены")
 
-    console.print(
-        "[cyan]2. Заселяю справочники (project_types, project_statuses, participants, tags)...[/cyan]"
+    emit_message(
+        "2. Заселяю справочники (project_types, project_statuses, participants, tags)..."
     )
     engine = make_engine(url)
     with make_session(engine) as session:
         counts = seed_all(session)
     tags_counts = counts.get("tags", {"created": 0, "skipped": 0})
-    console.print(
-        f"[green]   ✓ project_types={counts['project_types']}, "
-        f"project_statuses={counts['project_statuses']}, "
-        f"participants={counts['participants']}[/green]"
-    )
-    console.print(
-        f"[green]   ✓ Tags: created {tags_counts['created']}, "
-        f"skipped {tags_counts['skipped']}[/green]"
-    )
 
-    console.print("[bold green]Готово.[/bold green] PM-БД инициализирована.")
+    def _render(d: dict[str, Any]) -> None:
+        c = d["counts"]
+        tc = d["tags"]
+        console.print(
+            f"[green]   ✓ project_types={c['project_types']}, "
+            f"project_statuses={c['project_statuses']}, "
+            f"participants={c['participants']}[/green]"
+        )
+        console.print(
+            f"[green]   ✓ Tags: created {tc['created']}, "
+            f"skipped {tc['skipped']}[/green]"
+        )
+        console.print("[bold green]Готово.[/bold green] PM-БД инициализирована.")
+
+    emit_data(
+        {
+            "database": url,
+            "initialized": True,
+            "counts": {
+                "project_types": counts["project_types"],
+                "project_statuses": counts["project_statuses"],
+                "participants": counts["participants"],
+            },
+            "tags": {"created": tags_counts["created"], "skipped": tags_counts["skipped"]},
+        },
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -812,20 +828,33 @@ def add_cmd(
         )
         session.commit()
 
-        if slug_auto:
-            console.print(f"[dim]slug auto-generated: {final_slug}[/dim]")
-        if prefix_auto:
-            console.print(f"[dim]prefix auto-generated: {final_prefix}[/dim]")
+        # Итоговый результат команды (json-консистентно) собираем в payload;
+        # промежуточные шаги (layout/canonical/git/provision) — emit_message
+        # (в json-режиме идут в stderr, не засоряя JSON-результат в stdout).
+        created_payload: dict[str, Any] = {
+            "slug": final_slug,
+            "prefix": final_prefix,
+            "name": name,
+            "type": mode.type_slug,
+            "priority": priority,
+            "status": status_slug,
+            "owner": mode.owner_slug,
+            "lead": mode.lead_slug,
+            "visibility": mode.visibility,
+            "local_path": resolved_local_path,
+            "slug_auto": slug_auto,
+            "prefix_auto": prefix_auto,
+            "storage_path": None,
+            "junction_created": False,
+            "canonical_files": [],
+            "git": None,
+            "provisioned": None,
+        }
 
-        console.print(f"[green]✓ Project '{final_slug}' created[/green]")
-        console.print(f"  Name:     {name}")
-        console.print(f"  Type:     {mode.type_slug}")
-        console.print(f"  Prefix:   {final_prefix}")
-        console.print(f"  Priority: {priority}")
-        console.print(f"  Status:   {status_slug}")
-        console.print(f"  Владелец: {mode.owner_slug}  ·  lead: {mode.lead_slug}  ·  {mode.visibility}")
-        if resolved_local_path:
-            console.print(f"  Path:     {resolved_local_path}")
+        if slug_auto:
+            emit_message(f"slug auto-generated: {final_slug}")
+        if prefix_auto:
+            emit_message(f"prefix auto-generated: {final_prefix}")
 
         # ----- setup_layout: _storage + junction -----
         if setup_layout:
@@ -833,15 +862,15 @@ def add_cmd(
                 _, storage_path, junction_created = _setup_storage_and_junction(
                     final_slug, mode.type_slug,
                 )
-                console.print(f"  Storage:  {storage_path}")
+                created_payload["storage_path"] = str(storage_path)
+                created_payload["junction_created"] = junction_created
+                emit_message(f"Storage: {storage_path}")
                 if junction_created:
-                    console.print(
-                        f"  Junction: {resolved_local_path} → {storage_path}"
+                    emit_message(
+                        f"Junction: {resolved_local_path} → {storage_path}"
                     )
             except Exception as exc:
-                console.print(
-                    f"  [yellow]⚠ setup_layout failed: {exc}[/yellow]"
-                )
+                emit_message(f"⚠ setup_layout failed: {exc}", level="warn")
 
         # ----- canonical files -----
         if canonical and resolved_local_path:
@@ -861,14 +890,11 @@ def add_cmd(
                     tag_slugs=tag_slugs_for_log,
                     logical_rel=logical_rel,
                 )
+                created_payload["canonical_files"] = created_files
                 if created_files:
-                    console.print(
-                        f"  Files:    {', '.join(created_files)}"
-                    )
+                    emit_message(f"Files: {', '.join(created_files)}")
             except Exception as exc:
-                console.print(
-                    f"  [yellow]⚠ canonical files failed: {exc}[/yellow]"
-                )
+                emit_message(f"⚠ canonical files failed: {exc}", level="warn")
 
         # ----- init_git -----
         if init_git:
@@ -891,17 +917,21 @@ def add_cmd(
                     log_action_fn=_log_action,
                 )
                 session.commit()
-                console.print(
-                    f"  [green]✓ Git initialized[/green]"
+                created_payload["git"] = {
+                    "url": result["url"],
+                    "branch": result["branch"],
+                    "group_path": result["group_path"],
+                }
+                emit_message(
+                    f"✓ Git initialized: {result['url']} "
+                    f"(branch={result['branch']}, group={result['group_path']})"
                 )
-                console.print(f"    URL:    {result['url']}")
-                console.print(f"    Branch: {result['branch']}")
-                console.print(f"    Group:  {result['group_path']}")
             except RuntimeError as exc:
-                console.print(f"  [red]✗ Git init failed: {exc}[/red]")
-                console.print(
-                    f"  [dim]Проект создан в БД и канонизирован, но без git. "
-                    f"Можно повторить позже: `atlas projects git init {final_slug}`.[/dim]"
+                emit_message(
+                    f"✗ Git init failed: {exc}. Проект создан в БД и "
+                    f"канонизирован, но без git. Повтор: "
+                    f"`atlas projects git init {final_slug}`.",
+                    level="warn",
                 )
 
         # ----- авто-раскладка в ядро+Notion (этап 2): если синк включён -----
@@ -929,14 +959,40 @@ def add_cmd(
                     if res.get("notion_page_id"):
                         p2.notion_project_id = res["notion_page_id"]
                     s2.commit()
-                console.print(
-                    f"  [green]✓ Разложен в ядро+Notion[/green] "
-                    f"(backend={res.get('backend_id')})"
+                created_payload["provisioned"] = {
+                    "backend_id": res.get("backend_id"),
+                    "notion_page_id": res.get("notion_page_id"),
+                }
+                emit_message(
+                    f"✓ Разложен в ядро+Notion (backend={res.get('backend_id')})"
                 )
             except Exception as exc:  # noqa: BLE001 — best-effort, не валим create
-                console.print(
-                    f"  [yellow]⚠ Локально создан; раскладка в ядро не удалась: {exc}.[/yellow]"
+                emit_message(
+                    f"⚠ Локально создан; раскладка в ядро не удалась: {exc}.",
+                    level="warn",
                 )
+
+        def _render(d: dict[str, Any]) -> None:
+            console.print(f"[green]✓ Project '{d['slug']}' created[/green]")
+            console.print(f"  Name:     {d['name']}")
+            console.print(f"  Type:     {d['type']}")
+            console.print(f"  Prefix:   {d['prefix']}")
+            console.print(f"  Priority: {d['priority']}")
+            console.print(f"  Status:   {d['status']}")
+            console.print(
+                f"  Владелец: {d['owner']}  ·  lead: {d['lead']}  ·  "
+                f"{d['visibility']}"
+            )
+            if d["local_path"]:
+                console.print(f"  Path:     {d['local_path']}")
+            if d["storage_path"]:
+                console.print(f"  Storage:  {d['storage_path']}")
+            if d["canonical_files"]:
+                console.print(f"  Files:    {', '.join(d['canonical_files'])}")
+            if d["git"]:
+                console.print(f"  Git:      {d['git']['url']}")
+
+        emit_data(created_payload, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -978,7 +1034,13 @@ def make_personal_cmd(
         ident = _backend_ident(project)
         session.commit()
     if not resolve_api_key(cfg):
-        console.print("[yellow]⚠ Atlas обновлён; api_key не задан — ядро не тронуто.[/yellow]")
+        emit_data(
+            {"ref": ref, "atlas_updated": True, "core_patched": False,
+             "reason": "api_key не задан"},
+            text_renderer=lambda d: console.print(
+                "[yellow]⚠ Atlas обновлён; api_key не задан — ядро не тронуто.[/yellow]"
+            ),
+        )
         return
     hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
@@ -986,9 +1048,21 @@ def make_personal_cmd(
             ident, visibility="personal",
             owner_slug=("me" if owner == "dmitry" else owner), lead_slug=owner,
         ))
-        console.print(f"[green]✓ '{ref}' переведён в личный (ядро+Atlas).[/green]")
+        emit_data(
+            {"ref": ref, "atlas_updated": True, "core_patched": True,
+             "visibility": "personal"},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ '{d['ref']}' переведён в личный (ядро+Atlas).[/green]"
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[yellow]⚠ Atlas обновлён; ядро PATCH не удалось: {exc}.[/yellow]")
+        emit_data(
+            {"ref": ref, "atlas_updated": True, "core_patched": False,
+             "error": str(exc)},
+            text_renderer=lambda d: console.print(
+                f"[yellow]⚠ Atlas обновлён; ядро PATCH не удалось: {d['error']}.[/yellow]"
+            ),
+        )
 
 
 @projects_app.command("link")
@@ -1008,9 +1082,20 @@ def link_cmd(
     hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
         asyncio.run(hub.link_project(ident, portal_slug=portal, external_id=external))
-        console.print(f"[green]✓ '{ref}' ↔ {portal} ({external}).[/green]")
+        emit_data(
+            {"ref": ref, "portal": portal, "external": external, "linked": True},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ '{d['ref']}' ↔ {d['portal']} ({d['external']}).[/green]"
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]✗ link не удался: {exc}[/red]")
+        emit_data(
+            {"ref": ref, "portal": portal, "external": external, "linked": False,
+             "error": str(exc)},
+            text_renderer=lambda d: console.print(
+                f"[red]✗ link не удался: {d['error']}[/red]"
+            ),
+        )
 
 
 @projects_app.command("import-b24")
@@ -1047,7 +1132,15 @@ def import_b24_cmd(
             select(Project).where(Project.backend_id == res["backend_id"])
         ).scalar_one_or_none()
         if existing is not None:
-            console.print(f"[yellow]Уже в Atlas: '{existing.slug}'.[/yellow]")
+            existing_slug = existing.slug
+            emit_data(
+                {"group_id": group_id, "slug": existing_slug,
+                 "backend_id": res["backend_id"], "imported": False,
+                 "already_exists": True},
+                text_renderer=lambda d: console.print(
+                    f"[yellow]Уже в Atlas: '{d['slug']}'.[/yellow]"
+                ),
+            )
             return
         pt = session.execute(
             select(ProjectType).where(ProjectType.slug == "client-project")
@@ -1080,9 +1173,13 @@ def import_b24_cmd(
                     details={"group_id": group_id, "backend_id": res["backend_id"]})
         result_slug = proj.slug
         session.commit()
-    console.print(
-        f"[green]✓ Б24-группа #{group_id} импортирована → Atlas '{result_slug}' "
-        f"(backend={res['backend_id']}).[/green]"
+    emit_data(
+        {"group_id": group_id, "slug": result_slug,
+         "backend_id": res["backend_id"], "imported": True},
+        text_renderer=lambda d: console.print(
+            f"[green]✓ Б24-группа #{d['group_id']} импортирована → Atlas "
+            f"'{d['slug']}' (backend={d['backend_id']}).[/green]"
+        ),
     )
 
 
@@ -1102,9 +1199,19 @@ def unlink_cmd(
     hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
         asyncio.run(hub.unlink_project(ident, portal_slug=portal))
-        console.print(f"[green]✓ '{ref}' отвязан от {portal}.[/green]")
+        emit_data(
+            {"ref": ref, "portal": portal, "unlinked": True},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ '{d['ref']}' отвязан от {d['portal']}.[/green]"
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]✗ unlink не удался: {exc}[/red]")
+        emit_data(
+            {"ref": ref, "portal": portal, "unlinked": False, "error": str(exc)},
+            text_renderer=lambda d: console.print(
+                f"[red]✗ unlink не удался: {d['error']}[/red]"
+            ),
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1133,7 +1240,17 @@ def list_cmd(
         help="Только самостоятельные проекты (без родителя, parent IS NULL).",
     ),
 ) -> None:
-    """Список проектов (табличный вывод)."""
+    """Список проектов (--json по умолчанию; --text — таблица)."""
+    _PROJECT_LIST_COLUMNS = [
+        {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+        {"key": "prefix", "header": "prefix", "style": "dim"},
+        {"key": "name", "header": "name"},
+        {"key": "type", "header": "type", "style": "magenta"},
+        {"key": "status", "header": "status", "style": "green"},
+        {"key": "priority", "header": "P", "justify": "center", "style": "bold"},
+        {"key": "last_touched", "header": "last touched", "style": "dim"},
+    ]
+
     if parent is not None and standalone:
         console.print(
             "[red]--parent и --standalone взаимоисключающи.[/red]"
@@ -1158,7 +1275,12 @@ def list_cmd(
             )
             tag_project_ids = {p.id for p in matching}
         if not tag_project_ids:
-            console.print("[yellow]Проектов не найдено.[/yellow]")
+            emit_table(
+                [],
+                columns=_PROJECT_LIST_COLUMNS,
+                title="Projects (0)",
+                empty_message="Проектов не найдено.",
+            )
             return
 
     with make_session(engine) as session:
@@ -1193,36 +1315,28 @@ def list_cmd(
 
         rows = session.execute(stmt).all()
 
-    if not rows:
-        console.print("[yellow]Проектов не найдено.[/yellow]")
-        return
-
-    table = Table(title=f"Projects ({len(rows)})")
-    table.add_column("slug", style="cyan", no_wrap=True)
-    table.add_column("prefix", style="dim")
-    table.add_column("name")
-    table.add_column("type", style="magenta")
-    table.add_column("status", style="green")
-    table.add_column("P", justify="center", style="bold")
-    table.add_column("last touched", style="dim")
-
-    for row in rows:
-        last_touched = (
-            row.last_touched_at.strftime("%Y-%m-%d") if row.last_touched_at else "—"
-        )
-        name_display = row.name
-        if row.archived_at is not None:
-            name_display = f"[strike]{row.name}[/strike] [dim](archived)[/dim]"
-        table.add_row(
-            row.slug,
-            row.prefix or "—",
-            name_display,
-            row.type_slug,
-            row.status_slug,
-            row.priority,
-            last_touched,
-        )
-    console.print(table)
+    data = [
+        {
+            "slug": row.slug,
+            "prefix": row.prefix,
+            "name": row.name,
+            "type": row.type_slug,
+            "status": row.status_slug,
+            "priority": row.priority,
+            "last_touched": (
+                row.last_touched_at.strftime("%Y-%m-%d")
+                if row.last_touched_at else None
+            ),
+            "archived": row.archived_at is not None,
+        }
+        for row in rows
+    ]
+    emit_table(
+        data,
+        columns=_PROJECT_LIST_COLUMNS,
+        title=f"Projects ({len(data)})",
+        empty_message="Проектов не найдено.",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1231,14 +1345,11 @@ def list_cmd(
 
 
 @projects_app.command("get")
+@command
 def get_cmd(
     ref: str = typer.Argument(..., help="slug | full UUID | short UUID prefix (≥ 7 chars)"),
-    as_json: bool = typer.Option(
-        False, "--json",
-        help="Вывести карточку как JSON (включая parent и modules).",
-    ),
 ) -> None:
-    """Показать карточку проекта."""
+    """Показать карточку проекта (--json по умолчанию; --text — карточка)."""
     url = _db_url()
     engine = make_engine(url)
 
@@ -1298,113 +1409,127 @@ def get_cmd(
             .limit(5)
         ).scalars().all()
 
-    # ----- JSON-режим: чистый дамп без rich-разметки -----
-    if as_json:
-        payload = {
-            "id": project.id,
-            "slug": project.slug,
-            "prefix": project.prefix,
-            "name": project.name,
-            "type": pt.slug if pt else None,
-            "status": ps.slug if ps else None,
-            "priority": project.priority,
-            "description": project.description,
-            "one_line_summary": project.one_line_summary,
-            "local_path": project.local_path,
-            "archived_at": (
-                project.archived_at.isoformat() if project.archived_at else None
-            ),
-            "parent": parent_info,
-            "modules": modules_info,
-            "participants": [
-                {"name": p.name, "slug": p.slug, "role": link.role_in_project}
-                for link, p in link_rows
-            ],
-            "tags": [
-                {"slug": t.slug, "category": t.category, "name": t.name}
-                for t in project_tags
-            ],
-        }
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return
+    payload: dict[str, Any] = {
+        "id": project.id,
+        "slug": project.slug,
+        "prefix": project.prefix,
+        "name": project.name,
+        "type": pt.slug if pt else None,
+        "type_name": pt.name if pt else None,
+        "status": ps.slug if ps else None,
+        "status_name": ps.name if ps else None,
+        "priority": project.priority,
+        "description": project.description,
+        "one_line_summary": project.one_line_summary,
+        "estimated_deadline": (
+            project.estimated_deadline.strftime("%Y-%m-%d")
+            if project.estimated_deadline else None
+        ),
+        "git_repo_url": project.git_repo_url,
+        "local_path": project.local_path,
+        "created_at": (
+            project.created_at.isoformat() if project.created_at else None
+        ),
+        "updated_at": (
+            project.updated_at.isoformat() if project.updated_at else None
+        ),
+        "last_touched_at": (
+            project.last_touched_at.isoformat() if project.last_touched_at else None
+        ),
+        "archived_at": (
+            project.archived_at.isoformat() if project.archived_at else None
+        ),
+        "parent": parent_info,
+        "modules": modules_info,
+        "participants": [
+            {
+                "name": p.name,
+                "slug": p.slug,
+                "role": link.role_in_project,
+                "allocated_weekly_hours": link.allocated_weekly_hours,
+            }
+            for link, p in link_rows
+        ],
+        "tags": [
+            {
+                "slug": t.slug,
+                "category": t.category,
+                "name": t.name,
+                "color": t.color,
+            }
+            for t in project_tags
+        ],
+        "recent_activity": [
+            {
+                "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+                "action": entry.action,
+            }
+            for entry in log_rows
+        ],
+    }
 
-    # вывод
-    archived_marker = ""
-    if project.archived_at is not None:
-        archived_marker = (
-            f"  [bold red]ARCHIVED[/bold red] "
-            f"({project.archived_at.strftime('%Y-%m-%d')})"
-        )
-    console.print(
-        f"[bold cyan]{project.slug}[/bold cyan]  — {project.name}{archived_marker}"
-    )
-    console.print(f"  ID:        {project.id}")
-    console.print(f"  Prefix:    {project.prefix or '—'}")
-    if pt:
-        console.print(f"  Type:      {pt.slug} ({pt.name})")
-    if ps:
-        console.print(f"  Status:    {ps.slug} ({ps.name})")
-    console.print(f"  Priority:  {project.priority}")
-    if project.description:
-        console.print(f"  Description: {project.description}")
-    if project.one_line_summary:
-        console.print(f"  One-line:  {project.one_line_summary}")
-    if project.estimated_deadline:
-        console.print(f"  Deadline:  {project.estimated_deadline.strftime('%Y-%m-%d')}")
-    if project.git_repo_url:
-        console.print(f"  Git:       {project.git_repo_url}")
-    if project.local_path:
-        console.print(f"  Path:      {project.local_path}")
-    if parent_info is not None:
-        console.print(
-            f"  Parent:    {parent_info['slug']} ({parent_info['name']})"
-        )
-    console.print(f"  Created:   {project.created_at}")
-    console.print(f"  Updated:   {project.updated_at}")
-    if project.last_touched_at:
-        console.print(f"  Touched:   {project.last_touched_at}")
+    def _render(d: dict[str, Any]) -> None:
+        archived_marker = ""
+        if d["archived_at"]:
+            archived_marker = f"  ARCHIVED ({d['archived_at'][:10]})"
+        print(f"{d['slug']}  — {d['name']}{archived_marker}")
+        print(f"  ID:        {d['id']}")
+        print(f"  Prefix:    {d['prefix'] or '—'}")
+        if d["type"]:
+            print(f"  Type:      {d['type']} ({d['type_name']})")
+        if d["status"]:
+            print(f"  Status:    {d['status']} ({d['status_name']})")
+        print(f"  Priority:  {d['priority']}")
+        if d["description"]:
+            print(f"  Description: {d['description']}")
+        if d["one_line_summary"]:
+            print(f"  One-line:  {d['one_line_summary']}")
+        if d["estimated_deadline"]:
+            print(f"  Deadline:  {d['estimated_deadline']}")
+        if d["git_repo_url"]:
+            print(f"  Git:       {d['git_repo_url']}")
+        if d["local_path"]:
+            print(f"  Path:      {d['local_path']}")
+        if d["parent"] is not None:
+            print(f"  Parent:    {d['parent']['slug']} ({d['parent']['name']})")
+        print(f"  Created:   {d['created_at']}")
+        print(f"  Updated:   {d['updated_at']}")
+        if d["last_touched_at"]:
+            print(f"  Touched:   {d['last_touched_at']}")
 
-    if modules_info:
-        console.print(f"\n[bold]Modules ({len(modules_info)}):[/bold]")
-        for m in modules_info:
-            console.print(f"  • {m['slug']} — {m['name']} [magenta]{m['type']}[/magenta]")
+        if d["modules"]:
+            print(f"\nModules ({len(d['modules'])}):")
+            for m in d["modules"]:
+                print(f"  • {m['slug']} — {m['name']} {m['type']}")
 
-    if link_rows:
-        console.print("\n[bold]Participants:[/bold]")
-        for link, participant in link_rows:
-            hours = (
-                f", {link.allocated_weekly_hours}h/нед"
-                if link.allocated_weekly_hours else ""
-            )
-            console.print(
-                f"  • {participant.name} — {link.role_in_project}{hours}"
-            )
-    else:
-        console.print("\n[dim]Participants: —[/dim]")
+        if d["participants"]:
+            print("\nParticipants:")
+            for p in d["participants"]:
+                hours = (
+                    f", {p['allocated_weekly_hours']}h/нед"
+                    if p["allocated_weekly_hours"] else ""
+                )
+                print(f"  • {p['name']} — {p['role']}{hours}")
+        else:
+            print("\nParticipants: —")
 
-    if project_tags:
-        console.print("\n[bold]Tags:[/bold]")
-        tags_table = Table(show_header=True, header_style="bold")
-        tags_table.add_column("Category", style="magenta")
-        tags_table.add_column("Slug", style="cyan")
-        tags_table.add_column("Name")
-        tags_table.add_column("Color", style="dim")
-        for tag in project_tags:
-            tags_table.add_row(
-                tag.category,
-                tag.slug,
-                tag.name,
-                tag.color or "—",
-            )
-        console.print(tags_table)
-    else:
-        console.print("\n[dim]Tags: —[/dim]")
+        if d["tags"]:
+            print("\nTags:")
+            for tag in d["tags"]:
+                print(
+                    f"  • {tag['category']} / {tag['slug']} — "
+                    f"{tag['name']} ({tag['color'] or '—'})"
+                )
+        else:
+            print("\nTags: —")
 
-    if log_rows:
-        console.print("\n[bold]Recent activity:[/bold]")
-        for entry in log_rows:
-            ts = entry.timestamp.strftime("%Y-%m-%d %H:%M")
-            console.print(f"  • {ts} — {entry.action}")
+        if d["recent_activity"]:
+            print("\nRecent activity:")
+            for entry in d["recent_activity"]:
+                ts = entry["timestamp"][:16].replace("T", " ") if entry["timestamp"] else "—"
+                print(f"  • {ts} — {entry['action']}")
+
+    emit_data(payload, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -1569,7 +1694,10 @@ def update_cmd(
                 project.parent_id = new_parent.id
 
         if not diffs:
-            console.print("[yellow]Нечего обновлять.[/yellow]")
+            emit_data(
+                {"slug": project.slug, "updated": False, "diffs": {}},
+                text_renderer=lambda d: console.print("[yellow]Нечего обновлять.[/yellow]"),
+            )
             return
 
         project.last_touched_at = local_now()
@@ -1581,14 +1709,26 @@ def update_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project '{project.slug}' updated[/green] "
-            f"({len(diffs)} field(s))"
-        )
-        for field, diff in diffs.items():
+        # diffs может содержать не-JSON значения (datetime) → str-нормализуем для вывода.
+        diffs_out = {
+            field: {"old": str(diff["old"]), "new": str(diff["new"])}
+            for field, diff in diffs.items()
+        }
+
+        def _render(d: dict[str, Any]) -> None:
             console.print(
-                f"  {field}: [dim]{diff['old']}[/dim] → [bold]{diff['new']}[/bold]"
+                f"[green]✓ Project '{d['slug']}' updated[/green] "
+                f"({len(d['diffs'])} field(s))"
             )
+            for field, diff in d["diffs"].items():
+                console.print(
+                    f"  {field}: [dim]{diff['old']}[/dim] → [bold]{diff['new']}[/bold]"
+                )
+
+        emit_data(
+            {"slug": project.slug, "updated": True, "diffs": diffs_out},
+            text_renderer=_render,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1795,9 +1935,17 @@ def delete_cmd(
             )
             session.delete(project)
             session.commit()
-            console.print(
-                f"[red]✗ Project '{slug_for_msg}' удалён из БД.[/red]"
-            )
+            emit_message(f"✗ Project '{slug_for_msg}' удалён из БД.", level="warn")
+
+            result_payload: dict[str, Any] = {
+                "slug": slug_for_msg,
+                "mode": "hard",
+                "deleted": True,
+                "keep_files": keep_files,
+                "junction_removed": False,
+                "storage_backup": None,
+                "gitlab_deleted": None,
+            }
 
             if not keep_files:
                 if logical is not None:
@@ -1807,37 +1955,39 @@ def delete_cmd(
                         storage=storage,
                         root=root,
                     )
+                    result_payload["junction_removed"] = report["junction_removed"]
+                    result_payload["storage_backup"] = (
+                        str(report["storage_backup"])
+                        if report["storage_backup"] else None
+                    )
                     if report["junction_removed"]:
-                        console.print(f"  [green]✓ junction snят: {logical}[/green]")
+                        emit_message(f"✓ junction snят: {logical}")
                     if report["storage_backup"]:
-                        console.print(
-                            f"  [green]✓ storage перенесён: "
-                            f"{report['storage_backup']}[/green]"
+                        emit_message(
+                            f"✓ storage перенесён: {report['storage_backup']}"
                         )
                     if (
                         not report["junction_removed"]
                         and report["storage_backup"] is None
                     ):
-                        console.print(
-                            "  [dim](ни junction, ни _storage/ не найдены — "
-                            "ничего физически не было)[/dim]"
+                        emit_message(
+                            "ни junction, ни _storage/ не найдены — "
+                            "ничего физически не было"
                         )
                 else:
-                    console.print(
-                        "  [yellow]⚠ logical_path не вычислился — "
-                        "физика не тронута[/yellow]"
+                    emit_message(
+                        "⚠ logical_path не вычислился — физика не тронута",
+                        level="warn",
                     )
             else:
-                console.print(
-                    "  [dim](--keep-files: junction и _storage/ оставлены)[/dim]"
-                )
+                emit_message("--keep-files: junction и _storage/ оставлены")
 
             if with_gitlab:
                 full_path = _gitlab_full_path_from_remote_url(git_remote_url or "")
                 if not full_path:
-                    console.print(
-                        "  [yellow]⚠ git_remote_url отсутствует — "
-                        "GitLab repo не удаляется[/yellow]"
+                    emit_message(
+                        "⚠ git_remote_url отсутствует — GitLab repo не удаляется",
+                        level="warn",
                     )
                 else:
                     confirmed_gl = typer.confirm(
@@ -1846,19 +1996,35 @@ def delete_cmd(
                     )
                     if confirmed_gl:
                         if _hard_delete_gitlab(full_path):
-                            console.print(
-                                f"  [green]✓ GitLab repo '{full_path}' "
-                                f"queued for deletion[/green]"
+                            result_payload["gitlab_deleted"] = True
+                            emit_message(
+                                f"✓ GitLab repo '{full_path}' queued for deletion"
                             )
                     else:
-                        console.print(
-                            "  [yellow]GitLab repo оставлен (отменено)[/yellow]"
+                        result_payload["gitlab_deleted"] = False
+                        emit_message(
+                            "GitLab repo оставлен (отменено)", level="warn"
                         )
+
+            emit_data(
+                result_payload,
+                text_renderer=lambda d: console.print(
+                    f"[red]✗ Project '{d['slug']}' удалён из БД.[/red]"
+                ),
+            )
             return
 
         if project.archived_at is not None:
-            console.print(
-                f"[yellow]Project '{slug_for_msg}' уже archived ({project.archived_at}).[/yellow]"
+            emit_data(
+                {
+                    "slug": slug_for_msg,
+                    "mode": "soft",
+                    "archived": True,
+                    "already_archived": True,
+                },
+                text_renderer=lambda d: console.print(
+                    f"[yellow]Project '{d['slug']}' уже archived.[/yellow]"
+                ),
             )
             return
 
@@ -1870,7 +2036,17 @@ def delete_cmd(
             details={"slug": slug_for_msg, "at": project.archived_at.isoformat()},
         )
         session.commit()
-        console.print(f"[green]✓ Project '{slug_for_msg}' archived[/green]")
+        emit_data(
+            {
+                "slug": slug_for_msg,
+                "mode": "soft",
+                "archived": True,
+                "already_archived": False,
+            },
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project '{d['slug']}' archived[/green]"
+            ),
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1912,9 +2088,12 @@ def add_tags_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project '{project.slug}': attached {added} "
-            f"tag(s) ({', '.join(slugs)})[/green]"
+        emit_data(
+            {"slug": project.slug, "attached": added, "tags": slugs},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project '{d['slug']}': attached {d['attached']} "
+                f"tag(s) ({', '.join(d['tags'])})[/green]"
+            ),
         )
 
 
@@ -1952,9 +2131,12 @@ def remove_tags_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project '{project.slug}': detached {removed} "
-            f"tag(s) ({', '.join(slugs)})[/green]"
+        emit_data(
+            {"slug": project.slug, "detached": removed, "tags": slugs},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project '{d['slug']}': detached {d['detached']} "
+                f"tag(s) ({', '.join(d['tags'])})[/green]"
+            ),
         )
 
 
@@ -2034,9 +2216,12 @@ def member_add_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project '{project.slug}': участник "
-            f"'{participant.slug}' с ролью '{role}'.[/green]"
+        emit_data(
+            {"slug": project.slug, "participant": participant.slug, "role": role},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project '{d['slug']}': участник "
+                f"'{d['participant']}' с ролью '{d['role']}'.[/green]"
+            ),
         )
 
 
@@ -2050,23 +2235,30 @@ def member_list_cmd(
 
     with make_session(engine) as session:
         project = _resolve_project_or_die(session, ref)
+        slug_for_msg = project.slug
         link_rows = session.execute(
             select(ProjectParticipant, Participant)
             .join(Participant, ProjectParticipant.participant_id == Participant.id)
             .where(ProjectParticipant.project_id == project.id)
         ).all()
 
-    if not link_rows:
-        console.print(f"[dim]Project '{project.slug}': участников нет.[/dim]")
-        return
-
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Slug", style="cyan")
-    table.add_column("Name")
-    table.add_column("Role", style="magenta")
-    for link, participant in link_rows:
-        table.add_row(participant.slug, participant.name, link.role_in_project)
-    console.print(table)
+    data = [
+        {
+            "slug": participant.slug,
+            "name": participant.name,
+            "role": link.role_in_project,
+        }
+        for link, participant in link_rows
+    ]
+    emit_table(
+        data,
+        columns=[
+            {"key": "slug", "header": "Slug", "style": "cyan"},
+            {"key": "name", "header": "Name"},
+            {"key": "role", "header": "Role", "style": "magenta"},
+        ],
+        empty_message=f"Project '{slug_for_msg}': участников нет.",
+    )
 
 
 @projects_app.command("member-remove")
@@ -2087,9 +2279,16 @@ def member_remove_cmd(
 
         link = session.get(ProjectParticipant, (project.id, participant.id))
         if link is None:
-            console.print(
-                f"[yellow]Участник '{participant.slug}' не состоит в проекте "
-                f"'{project.slug}' — нечего снимать.[/yellow]"
+            emit_data(
+                {
+                    "slug": project.slug,
+                    "participant": participant.slug,
+                    "removed": False,
+                },
+                text_renderer=lambda d: console.print(
+                    f"[yellow]Участник '{d['participant']}' не состоит в проекте "
+                    f"'{d['slug']}' — нечего снимать.[/yellow]"
+                ),
             )
             return
 
@@ -2102,9 +2301,12 @@ def member_remove_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project '{project.slug}': участник "
-            f"'{participant.slug}' снят.[/green]"
+        emit_data(
+            {"slug": project.slug, "participant": participant.slug, "removed": True},
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project '{d['slug']}': участник "
+                f"'{d['participant']}' снят.[/green]"
+            ),
         )
 
 
@@ -2351,19 +2553,37 @@ def archive_cmd(
             entity_id=project.id,
             details=details,
         )
+        archived_slug = project.slug
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{project.slug}' archived with status '{status}'[/green]"
+    def _render(d: dict[str, Any]) -> None:
+        console.print(
+            f"[green]✓ Project '{d['slug']}' archived with status "
+            f"'{d['status']}'[/green]"
+        )
+        if d["moved_from"] and d["moved_to"]:
+            console.print(
+                f"  Moved: [dim]{d['moved_from']}[/dim] → [bold]{d['moved_to']}[/bold]"
+            )
+        elif d["keep_path"]:
+            console.print("  [dim](--keep-path: физический mv пропущен)[/dim]")
+        elif d["old_local_path"]:
+            console.print(f"  [dim](src не существовал: {d['old_local_path']})[/dim]")
+        else:
+            console.print("  [dim](local_path не задан — только БД update)[/dim]")
+
+    emit_data(
+        {
+            "slug": archived_slug,
+            "status": status,
+            "archived_group": group,
+            "moved_from": moved_from,
+            "moved_to": moved_to,
+            "keep_path": keep_path,
+            "old_local_path": old_local_path,
+        },
+        text_renderer=_render,
     )
-    if moved_from and moved_to:
-        console.print(f"  Moved: [dim]{moved_from}[/dim] → [bold]{moved_to}[/bold]")
-    elif keep_path:
-        console.print("  [dim](--keep-path: физический mv пропущен)[/dim]")
-    elif old_local_path:
-        console.print(f"  [dim](src не существовал: {old_local_path})[/dim]")
-    else:
-        console.print("  [dim](local_path не задан — только БД update)[/dim]")
 
 
 # --------------------------------------------------------------------------- #
@@ -2470,13 +2690,27 @@ def unarchive_cmd(
             entity_id=project.id,
             details=details,
         )
+        unarchived_slug = project.slug
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{project.slug}' unarchived to '{status}'[/green]"
+    def _render(d: dict[str, Any]) -> None:
+        console.print(
+            f"[green]✓ Project '{d['slug']}' unarchived to '{d['status']}'[/green]"
+        )
+        if d["moved_from"] and d["moved_to"]:
+            console.print(
+                f"  Moved: [dim]{d['moved_from']}[/dim] → [bold]{d['moved_to']}[/bold]"
+            )
+
+    emit_data(
+        {
+            "slug": unarchived_slug,
+            "status": status,
+            "moved_from": moved_from,
+            "moved_to": moved_to,
+        },
+        text_renderer=_render,
     )
-    if moved_from and moved_to:
-        console.print(f"  Moved: [dim]{moved_from}[/dim] → [bold]{moved_to}[/bold]")
 
 
 # --------------------------------------------------------------------------- #
@@ -2567,18 +2801,35 @@ def renew_cmd(
             entity_id=project.id,
             details=details,
         )
+        renewed_slug = project.slug
+        renewal_count = project.renewal_count
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{project.slug}' renewed "
-        f"(renewal #{project.renewal_count})[/green]"
-    )
-    if moved_from and moved_to:
-        console.print(f"  Moved: [dim]{moved_from}[/dim] → [bold]{moved_to}[/bold]")
-    if old_status_slug and old_status_slug != "active":
+    def _render(d: dict[str, Any]) -> None:
         console.print(
-            f"  Status: [dim]{old_status_slug}[/dim] → [bold]active[/bold]"
+            f"[green]✓ Project '{d['slug']}' renewed "
+            f"(renewal #{d['renewal_count']})[/green]"
         )
+        if d["moved_from"] and d["moved_to"]:
+            console.print(
+                f"  Moved: [dim]{d['moved_from']}[/dim] → [bold]{d['moved_to']}[/bold]"
+            )
+        if d["previous_status"] and d["previous_status"] != "active":
+            console.print(
+                f"  Status: [dim]{d['previous_status']}[/dim] → [bold]active[/bold]"
+            )
+
+    emit_data(
+        {
+            "slug": renewed_slug,
+            "renewal_count": renewal_count,
+            "moved_from": moved_from,
+            "moved_to": moved_to,
+            "previous_status": old_status_slug,
+            "new_status": "active",
+        },
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -2674,18 +2925,38 @@ def move_cmd(
             entity_id=project.id,
             details=details,
         )
+        moved_slug = project.slug
+        old_type_slug = old_type.slug
+        new_type_slug = new_type.slug
         session.commit()
 
-    console.print(
-        f"[green]✓ Project '{project.slug}' type changed: "
-        f"[dim]{old_type.slug}[/dim] → [bold]{new_type.slug}[/bold][/green]"
-    )
-    if moved_from and moved_to:
-        console.print(f"  Moved: [dim]{moved_from}[/dim] → [bold]{moved_to}[/bold]")
-    elif not physical_move:
+    def _render(d: dict[str, Any]) -> None:
         console.print(
-            f"  [dim](обе группы = '{new_group}' — физика не меняется)[/dim]"
+            f"[green]✓ Project '{d['slug']}' type changed: "
+            f"[dim]{d['old_type']}[/dim] → [bold]{d['new_type']}[/bold][/green]"
         )
+        if d["moved_from"] and d["moved_to"]:
+            console.print(
+                f"  Moved: [dim]{d['moved_from']}[/dim] → [bold]{d['moved_to']}[/bold]"
+            )
+        elif not d["physical_move"]:
+            console.print(
+                f"  [dim](обе группы = '{d['new_group']}' — физика не меняется)[/dim]"
+            )
+
+    emit_data(
+        {
+            "slug": moved_slug,
+            "old_type": old_type_slug,
+            "new_type": new_type_slug,
+            "old_group": old_group,
+            "new_group": new_group,
+            "moved_from": moved_from,
+            "moved_to": moved_to,
+            "physical_move": physical_move,
+        },
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -2793,39 +3064,50 @@ def reorganize_cmd(
         for a in actions:
             counts[a.get("action", "warn")] = counts.get(a.get("action", "warn"), 0) + 1
 
-        # Вывод таблицы
-        if actions:
-            table = Table(title=f"Reorganize plan ({len(actions)} projects)")
-            table.add_column("slug", style="cyan")
-            table.add_column("current_path", style="dim")
-            table.add_column("expected_path", style="bold")
-            table.add_column("action", style="magenta")
-            for a in actions:
-                if a.get("action") == "skip":
-                    cur = "—"
-                    exp = "—"
-                else:
-                    cur = a.get("current") or "—"
-                    exp = a.get("expected") or "—"
-                act = a.get("action", "?")
-                if a.get("reason"):
-                    act = f"{act} ({a['reason']})"
-                table.add_row(a["slug"], cur, exp, act)
-            console.print(table)
+        # Вывод плана (результат) — json-консистентно через emit_table.
+        plan_rows = [
+            {
+                "slug": a["slug"],
+                "current_path": (
+                    None if a.get("action") == "skip" else a.get("current")
+                ),
+                "expected_path": (
+                    None if a.get("action") == "skip" else a.get("expected")
+                ),
+                "action": a.get("action", "?"),
+                "reason": a.get("reason"),
+            }
+            for a in actions
+        ]
+        emit_table(
+            plan_rows,
+            columns=[
+                {"key": "slug", "header": "slug", "style": "cyan"},
+                {"key": "current_path", "header": "current_path", "style": "dim"},
+                {"key": "expected_path", "header": "expected_path", "style": "bold"},
+                {
+                    "key": "action",
+                    "header": "action",
+                    "style": "magenta",
+                    "format": lambda v: v or "?",
+                },
+                {"key": "reason", "header": "reason", "style": "dim"},
+            ],
+            title=f"Reorganize plan ({len(actions)} projects)",
+            empty_message="Нет проектов для реорганизации.",
+        )
 
-        console.print(
-            f"\nScanned {len(actions)} projects:\n"
-            f"  ✓ In sync:      {counts['ok']}\n"
-            f"  ⚠ DB drift:     {counts['db-fix']} (will update path in DB)\n"
-            f"  🔀 Physical:    {counts['move']} (will move folder)\n"
-            f"  • Skipped:      {counts['skip']} (no local_path)\n"
-            f"  ⚠ Broken:       {counts['warn']}"
+        emit_message(
+            f"Scanned {len(actions)} projects: "
+            f"in_sync={counts['ok']}, db_drift={counts['db-fix']}, "
+            f"physical={counts['move']}, skipped={counts['skip']}, "
+            f"broken={counts['warn']}",
+            ok=counts["ok"], db_fix=counts["db-fix"], move=counts["move"],
+            skip=counts["skip"], warn=counts["warn"],
         )
 
         if dry_run:
-            console.print(
-                "\n[yellow]Dry run. Use --apply to execute.[/yellow]"
-            )
+            emit_message("Dry run. Use --apply to execute.", level="warn")
             return
 
         # --apply: выполняем изменения.
@@ -2877,9 +3159,15 @@ def reorganize_cmd(
 
         if any_changed:
             session.commit()
-            console.print("[green]✓ Applied.[/green]")
+            emit_data(
+                {"applied": True, "counts": counts},
+                text_renderer=lambda d: console.print("[green]✓ Applied.[/green]"),
+            )
         else:
-            console.print("[dim]Нечего применять.[/dim]")
+            emit_data(
+                {"applied": False, "counts": counts},
+                text_renderer=lambda d: console.print("[dim]Нечего применять.[/dim]"),
+            )
 
 
 # --------------------------------------------------------------------------- #

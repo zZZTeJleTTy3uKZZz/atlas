@@ -186,7 +186,7 @@ class TestGetHierarchy:
 
     def test_get_json_module_has_parent(self, runner, app, seeded_engine):
         self._setup(runner, app)
-        result = runner.invoke(app, ["get", "moda", "--json"])
+        result = runner.invoke(app, ["get", "moda"])
         assert result.exit_code == 0, _combined(result)
         data = json.loads(result.stdout)
         assert data["parent"] is not None
@@ -194,7 +194,7 @@ class TestGetHierarchy:
 
     def test_get_json_container_has_modules(self, runner, app, seeded_engine):
         self._setup(runner, app)
-        result = runner.invoke(app, ["get", "cont", "--json"])
+        result = runner.invoke(app, ["get", "cont"])
         assert result.exit_code == 0, _combined(result)
         data = json.loads(result.stdout)
         slugs = {m["slug"] for m in data["modules"]}
@@ -204,7 +204,7 @@ class TestGetHierarchy:
 
     def test_get_json_standalone_no_parent_no_modules(self, runner, app, seeded_engine):
         _add_project(runner, app, "--name", "Одинокий", "--slug", "solo")
-        result = runner.invoke(app, ["get", "solo", "--json"])
+        result = runner.invoke(app, ["get", "solo"])
         assert result.exit_code == 0, _combined(result)
         data = json.loads(result.stdout)
         assert data["parent"] is None

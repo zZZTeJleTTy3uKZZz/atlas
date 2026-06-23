@@ -12,12 +12,11 @@ CRUD по участникам PM-БД (NP-005).
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -32,7 +31,6 @@ from atlas.pm.models import (
 from atlas.pm.slugs import (
     AmbiguousRefError,
     SlugGenerationError,
-    UUID_FULL_LEN,
     UUID_SHORT_MIN,
     _is_full_uuid,
     _looks_like_uuid_prefix,
@@ -157,6 +155,7 @@ def _validate_metadata_json(value: str) -> str:
 
 
 @app.command("add")
+@command
 def add_cmd(
     name: str = typer.Option(..., "--name", help="Человекочитаемое имя"),
     kind: str = typer.Option(..., "--kind", help="human | ai_agent | contractor"),
@@ -230,11 +229,26 @@ def add_cmd(
         )
         session.commit()
 
-        if slug_auto:
-            console.print(f"[dim]slug auto-generated: {final_slug}[/dim]")
-        console.print(
-            f"[green]✓ Participant '{final_slug}' created[/green] · "
-            f"{name} · {kind}"
+        def _render(d: dict) -> None:
+            if d["slug_auto"]:
+                console.print(f"[dim]slug auto-generated: {d['slug']}[/dim]")
+            console.print(
+                f"[green]✓ Participant '{d['slug']}' created[/green] · "
+                f"{d['name']} · {d['kind']}"
+            )
+
+        emit_data(
+            {
+                "id": participant.id,
+                "slug": final_slug,
+                "name": name,
+                "kind": kind,
+                "role": role,
+                "email": email,
+                "is_active": True,
+                "slug_auto": slug_auto,
+            },
+            text_renderer=_render,
         )
 
 
@@ -244,6 +258,7 @@ def add_cmd(
 
 
 @app.command("list")
+@command
 def list_cmd(
     kind: Optional[str] = typer.Option(None, "--kind"),
     inactive: bool = typer.Option(
@@ -266,27 +281,30 @@ def list_cmd(
             stmt = stmt.where(Participant.is_active == True)  # noqa: E712
         rows = session.execute(stmt).scalars().all()
 
-    if not rows:
-        console.print("[yellow]Участников не найдено.[/yellow]")
-        return
-
-    table = Table(title=f"Participants ({len(rows)})")
-    table.add_column("Slug", style="cyan", no_wrap=True)
-    table.add_column("Name")
-    table.add_column("Kind", style="magenta")
-    table.add_column("Role", style="dim")
-    table.add_column("Email", style="dim")
-    table.add_column("Active", justify="center")
-
-    for p in rows:
-        active = "✓" if p.is_active else "—"
-        table.add_row(
-            p.slug, p.name, p.kind,
-            p.role_default or "—",
-            p.email or "—",
-            active,
-        )
-    console.print(table)
+    data = [
+        {
+            "slug": p.slug,
+            "name": p.name,
+            "kind": p.kind,
+            "role": p.role_default,
+            "email": p.email,
+            "is_active": bool(p.is_active),
+        }
+        for p in rows
+    ]
+    emit_table(
+        data,
+        columns=[
+            {"key": "slug", "header": "Slug", "style": "cyan", "no_wrap": True},
+            {"key": "name", "header": "Name"},
+            {"key": "kind", "header": "Kind", "style": "magenta"},
+            {"key": "role", "header": "Role", "style": "dim"},
+            {"key": "email", "header": "Email", "style": "dim"},
+            {"key": "is_active", "header": "Active", "justify": "center"},
+        ],
+        title=f"Participants ({len(data)})",
+        empty_message="[yellow]Участников не найдено.[/yellow]",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -295,6 +313,7 @@ def list_cmd(
 
 
 @app.command("get")
+@command
 def get_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
 ) -> None:
@@ -312,35 +331,67 @@ def get_cmd(
             .where(ProjectParticipant.participant_id == p.id)
         ).all()
 
-    console.print(f"[bold cyan]{p.slug}[/bold cyan] — {p.name}")
-    console.print(f"  ID:        {p.id}")
-    console.print(f"  Kind:      {p.kind}")
-    if p.role_default:
-        console.print(f"  Role:      {p.role_default}")
-    if p.email:
-        console.print(f"  Email:     {p.email}")
-    console.print(f"  Active:    {'yes' if p.is_active else 'no'}")
-    if p.metadata_json:
-        try:
-            meta = json.loads(p.metadata_json)
-            console.print(f"  Metadata:  {json.dumps(meta, ensure_ascii=False)}")
-        except json.JSONDecodeError:
-            console.print(f"  Metadata:  {p.metadata_json}")
-    console.print(f"  Created:   {p.created_at}")
+        meta_obj: Any = None
+        if p.metadata_json:
+            try:
+                meta_obj = json.loads(p.metadata_json)
+            except json.JSONDecodeError:
+                meta_obj = p.metadata_json
 
-    if link_rows:
-        console.print("\n[bold]Projects:[/bold]")
-        for link, proj in link_rows:
-            hours = (
-                f", {link.allocated_weekly_hours}h/нед"
-                if link.allocated_weekly_hours else ""
-            )
-            console.print(
-                f"  • {proj.slug} ({proj.name}) — "
-                f"{link.role_in_project}{hours}"
-            )
-    else:
-        console.print("\n[dim]Projects: —[/dim]")
+        data = {
+            "id": p.id,
+            "slug": p.slug,
+            "name": p.name,
+            "kind": p.kind,
+            "role": p.role_default,
+            "email": p.email,
+            "is_active": bool(p.is_active),
+            "metadata": meta_obj,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "projects": [
+                {
+                    "slug": proj.slug,
+                    "name": proj.name,
+                    "role_in_project": link.role_in_project,
+                    "allocated_weekly_hours": link.allocated_weekly_hours,
+                }
+                for link, proj in link_rows
+            ],
+        }
+
+    def _render(d: dict) -> None:
+        console.print(f"[bold cyan]{d['slug']}[/bold cyan] — {d['name']}")
+        console.print(f"  ID:        {d['id']}")
+        console.print(f"  Kind:      {d['kind']}")
+        if d["role"]:
+            console.print(f"  Role:      {d['role']}")
+        if d["email"]:
+            console.print(f"  Email:     {d['email']}")
+        console.print(f"  Active:    {'yes' if d['is_active'] else 'no'}")
+        if d["metadata"] is not None:
+            if isinstance(d["metadata"], str):
+                console.print(f"  Metadata:  {d['metadata']}")
+            else:
+                console.print(
+                    f"  Metadata:  {json.dumps(d['metadata'], ensure_ascii=False)}"
+                )
+        console.print(f"  Created:   {d['created_at']}")
+
+        if d["projects"]:
+            console.print("\n[bold]Projects:[/bold]")
+            for proj in d["projects"]:
+                hours = (
+                    f", {proj['allocated_weekly_hours']}h/нед"
+                    if proj["allocated_weekly_hours"] else ""
+                )
+                console.print(
+                    f"  • {proj['slug']} ({proj['name']}) — "
+                    f"{proj['role_in_project']}{hours}"
+                )
+        else:
+            console.print("\n[dim]Projects: —[/dim]")
+
+    emit_data(data, text_renderer=_render)
 
 
 # --------------------------------------------------------------------------- #
@@ -349,6 +400,7 @@ def get_cmd(
 
 
 @app.command("update")
+@command
 def update_cmd(
     ref: str = typer.Argument(..., help="slug | UUID"),
     name: Optional[str] = typer.Option(None, "--name"),
@@ -406,7 +458,10 @@ def update_cmd(
                 p.is_active = active
 
         if not diffs:
-            console.print("[yellow]Нечего обновлять.[/yellow]")
+            emit_data(
+                {"slug": p.slug, "updated": False, "diffs": {}},
+                text_renderer=lambda d: console.print("[yellow]Нечего обновлять.[/yellow]"),
+            )
             return
 
         _log_action(
@@ -417,14 +472,20 @@ def update_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Participant '{p.slug}' updated[/green] "
-            f"({len(diffs)} field(s))"
-        )
-        for field, diff in diffs.items():
+        def _render(d: dict) -> None:
             console.print(
-                f"  {field}: [dim]{diff['old']}[/dim] → [bold]{diff['new']}[/bold]"
+                f"[green]✓ Participant '{d['slug']}' updated[/green] "
+                f"({len(d['diffs'])} field(s))"
             )
+            for field, diff in d["diffs"].items():
+                console.print(
+                    f"  {field}: [dim]{diff['old']}[/dim] → [bold]{diff['new']}[/bold]"
+                )
+
+        emit_data(
+            {"slug": p.slug, "updated": True, "diffs": diffs},
+            text_renderer=_render,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -433,6 +494,7 @@ def update_cmd(
 
 
 @app.command("delete")
+@command
 def delete_cmd(
     ref: str = typer.Argument(..., help="slug | UUID"),
     force: bool = typer.Option(
@@ -465,8 +527,12 @@ def delete_cmd(
 
         if soft:
             if not p.is_active:
-                console.print(
-                    f"[yellow]Participant '{slug_for_msg}' уже неактивен.[/yellow]"
+                emit_data(
+                    {"slug": slug_for_msg, "deleted": False, "mode": "soft",
+                     "already_inactive": True},
+                    text_renderer=lambda d: console.print(
+                        f"[yellow]Participant '{d['slug']}' уже неактивен.[/yellow]"
+                    ),
                 )
                 return
             p.is_active = False
@@ -477,8 +543,11 @@ def delete_cmd(
                 details={"slug": slug_for_msg},
             )
             session.commit()
-            console.print(
-                f"[green]✓ Participant '{slug_for_msg}' deactivated[/green]"
+            emit_data(
+                {"slug": slug_for_msg, "deleted": True, "mode": "soft"},
+                text_renderer=lambda d: console.print(
+                    f"[green]✓ Participant '{d['slug']}' deactivated[/green]"
+                ),
             )
             return
 
@@ -528,11 +597,25 @@ def delete_cmd(
         session.delete(p)
         session.commit()
 
-        cascade_msg = ""
-        if force and (n_links > 0 or n_tasks > 0):
-            cascade_msg = (
-                f" (cascade: {n_links} link(s), {n_tasks} task(s) unassigned)"
+        def _render(d: dict) -> None:
+            cascade_msg = ""
+            if d["cascade"]:
+                cascade_msg = (
+                    f" (cascade: {d['links_removed']} link(s), "
+                    f"{d['tasks_unassigned']} task(s) unassigned)"
+                )
+            console.print(
+                f"[red]✗ Participant '{d['slug']}' deleted[/red]{cascade_msg}"
             )
-        console.print(
-            f"[red]✗ Participant '{slug_for_msg}' deleted[/red]{cascade_msg}"
+
+        emit_data(
+            {
+                "slug": slug_for_msg,
+                "deleted": True,
+                "mode": "hard",
+                "cascade": bool(force and (n_links > 0 or n_tasks > 0)),
+                "links_removed": n_links if force else 0,
+                "tasks_unassigned": n_tasks if force else 0,
+            },
+            text_renderer=_render,
         )

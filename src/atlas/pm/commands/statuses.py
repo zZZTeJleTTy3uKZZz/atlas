@@ -11,8 +11,8 @@ import re
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -76,6 +76,7 @@ def _validate_slug(slug: str) -> None:
 
 
 @app.command("add")
+@command
 def add_cmd(
     slug: str = typer.Option(..., "--slug", help="Уникальный slug"),
     name: str = typer.Option(..., "--name"),
@@ -120,9 +121,17 @@ def add_cmd(
         )
         session.commit()
 
-        console.print(
-            f"[green]✓ Project status '{slug}' created[/green] · "
-            f"{name} (#{order_idx})"
+        emit_data(
+            {
+                "slug": slug,
+                "name": name,
+                "order_idx": order_idx,
+                "description": description,
+            },
+            text_renderer=lambda d: console.print(
+                f"[green]✓ Project status '{d['slug']}' created[/green] · "
+                f"{d['name']} (#{d['order_idx']})"
+            ),
         )
 
 
@@ -132,6 +141,7 @@ def add_cmd(
 
 
 @app.command("list")
+@command
 def list_cmd() -> None:
     """Список lifecycle-статусов (сортирован по order_idx)."""
     url = _db_url()
@@ -141,17 +151,24 @@ def list_cmd() -> None:
             select(ProjectStatus).order_by(ProjectStatus.order_idx)
         ).scalars().all()
 
-    if not rows:
-        console.print("[yellow]Статусов не найдено.[/yellow]")
-        return
-
-    table = Table(title=f"Project Statuses ({len(rows)})")
-    table.add_column("Slug", style="cyan")
-    table.add_column("Name")
-    table.add_column("Description", overflow="fold")
-    table.add_column("Order", justify="right", style="dim")
-    for s in rows:
-        table.add_row(
-            s.slug, s.name, s.description or "", str(s.order_idx),
-        )
-    console.print(table)
+    data = [
+        {
+            "slug": s.slug,
+            "name": s.name,
+            "description": s.description,
+            "order_idx": s.order_idx,
+        }
+        for s in rows
+    ]
+    emit_table(
+        data,
+        columns=[
+            {"key": "slug", "header": "Slug", "style": "cyan"},
+            {"key": "name", "header": "Name"},
+            {"key": "description", "header": "Description",
+             "format": lambda v: v or ""},
+            {"key": "order_idx", "header": "Order", "justify": "right", "style": "dim"},
+        ],
+        title=f"Project Statuses ({len(data)})",
+        empty_message="[yellow]Статусов не найдено.[/yellow]",
+    )

@@ -20,19 +20,17 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from clikit import command, emit_data, emit_table
 from rich.console import Console
-from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
     ActionLog,
     Participant,
     Project,
     ProjectStatus,
-    ProjectTag,
     ProjectType,
     Tag,
 )
@@ -157,6 +155,7 @@ def _resolve_inbox_type(session: Session) -> ProjectType:
 
 
 @inbox_app.command("add")
+@command
 def add_cmd(
     name: str = typer.Option(..., "--name", help="Название inbox-материала"),
     slug: Optional[str] = typer.Option(None, "--slug"),
@@ -261,10 +260,22 @@ def add_cmd(
         )
         session.commit()
 
-    console.print(f"[green]✓ Inbox '{final_slug}' created[/green]")
-    console.print(f"  Name:     {name}")
-    console.print(f"  Priority: {priority}")
-    console.print(f"  Path:     {item_path}")
+    def _render(d: dict[str, Any]) -> None:
+        console.print(f"[green]✓ Inbox '{d['slug']}' created[/green]")
+        console.print(f"  Name:     {d['name']}")
+        console.print(f"  Priority: {d['priority']}")
+        console.print(f"  Path:     {d['path']}")
+
+    emit_data(
+        {
+            "slug": final_slug,
+            "name": name,
+            "priority": priority,
+            "status": status_slug,
+            "path": str(item_path),
+        },
+        text_renderer=_render,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -273,6 +284,7 @@ def add_cmd(
 
 
 @inbox_app.command("list")
+@command
 def list_cmd(
     status_slug: Optional[str] = typer.Option(None, "--status"),
     tags: Optional[list[str]] = typer.Option(None, "--tag", "-t"),
@@ -300,26 +312,29 @@ def list_cmd(
             )}
             items = [p for p in items if p.id in allowed_set]
 
-        if not items:
-            console.print("[dim]Inbox пуст.[/dim]")
-            return
-
-        table = Table(title=f"Inbox ({len(items)})")
-        table.add_column("Slug")
-        table.add_column("Name")
-        table.add_column("Status")
-        table.add_column("P")
-        table.add_column("Path")
+        data: list[dict[str, Any]] = []
         for p in items:
             ps = session.get(ProjectStatus, p.status_id)
-            table.add_row(
-                p.slug,
-                p.name,
-                ps.slug if ps else "?",
-                p.priority,
-                p.local_path or "—",
-            )
-        console.print(table)
+            data.append({
+                "slug": p.slug,
+                "name": p.name,
+                "status": ps.slug if ps else "?",
+                "priority": p.priority,
+                "path": p.local_path,
+            })
+
+        emit_table(
+            data,
+            columns=[
+                ("slug", "Slug"),
+                ("name", "Name"),
+                ("status", "Status"),
+                ("priority", "P"),
+                ("path", "Path"),
+            ],
+            title=f"Inbox ({len(data)})",
+            empty_message="[dim]Inbox пуст.[/dim]",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -328,6 +343,7 @@ def list_cmd(
 
 
 @inbox_app.command("show")
+@command
 def show_cmd(ref: str = typer.Argument(...)) -> None:
     """Карточка inbox-записи."""
     engine = make_engine(_db_url())
@@ -336,27 +352,61 @@ def show_cmd(ref: str = typer.Argument(...)) -> None:
         ps = session.get(ProjectStatus, proj.status_id)
         tags = list_project_tags(session, proj.id)
 
-        console.print(f"[bold]{proj.slug}[/bold]  — {proj.name}")
-        console.print(f"  Kind:     inbox")
-        console.print(f"  Status:   {ps.slug if ps else '—'}")
-        console.print(f"  Priority: {proj.priority}")
-        console.print(f"  Created:  {proj.created_at:%Y-%m-%d}")
-        console.print(f"  Path:     {proj.local_path}")
-        if tags:
-            console.print(f"  Tags:     {', '.join(t.slug for t in tags)}")
+        # ----- содержимое директории / файла -----
+        contents: Optional[list[str]] = None
+        contents_more = 0
+        single_file: Optional[dict[str, Any]] = None
+        if proj.local_path and Path(proj.local_path).exists():
+            path = Path(proj.local_path)
+            if path.is_dir():
+                children = list(path.iterdir())
+                contents = [c.name for c in children[:20]]
+                contents_more = max(0, len(children) - 20)
+            else:
+                single_file = {
+                    "name": path.name,
+                    "size": path.stat().st_size,
+                }
 
-    if proj.local_path and Path(proj.local_path).exists():
-        path = Path(proj.local_path)
-        console.print(f"\n[bold]--- {path.name}/ contents ---[/bold]")
-        if path.is_dir():
-            children = list(path.iterdir())
-            if children:
-                for c in children[:20]:
-                    console.print(f"  • {c.name}")
-                if len(children) > 20:
-                    console.print(f"  ... ({len(children) - 20} more)")
+        data = {
+            "slug": proj.slug,
+            "name": proj.name,
+            "kind": "inbox",
+            "status": ps.slug if ps else None,
+            "priority": proj.priority,
+            "created": f"{proj.created_at:%Y-%m-%d}",
+            "path": proj.local_path,
+            "tags": [t.slug for t in tags],
+            "contents": contents,
+            "contents_more": contents_more,
+            "single_file": single_file,
+        }
+
+    def _render(d: dict[str, Any]) -> None:
+        console.print(f"[bold]{d['slug']}[/bold]  — {d['name']}")
+        console.print(f"  Kind:     inbox")
+        console.print(f"  Status:   {d['status'] or '—'}")
+        console.print(f"  Priority: {d['priority']}")
+        console.print(f"  Created:  {d['created']}")
+        console.print(f"  Path:     {d['path']}")
+        if d["tags"]:
+            console.print(f"  Tags:     {', '.join(d['tags'])}")
+
+        path_name = Path(d["path"]).name if d["path"] else ""
+        if d["contents"] is not None:
+            console.print(f"\n[bold]--- {path_name}/ contents ---[/bold]")
+            if d["contents"]:
+                for name in d["contents"]:
+                    console.print(f"  • {name}")
+                if d["contents_more"]:
+                    console.print(f"  ... ({d['contents_more']} more)")
             else:
                 console.print("  [dim](пусто)[/dim]")
-        else:
-            console.print(f"  (one file: {path.name}, "
-                          f"{path.stat().st_size} bytes)")
+        elif d["single_file"] is not None:
+            console.print(f"\n[bold]--- {path_name}/ contents ---[/bold]")
+            console.print(
+                f"  (one file: {d['single_file']['name']}, "
+                f"{d['single_file']['size']} bytes)"
+            )
+
+    emit_data(data, text_renderer=_render)

@@ -11,11 +11,12 @@ import pytest
 from sqlalchemy import select
 
 from atlas.pm import lease as L
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session
 from atlas.pm.models import (
     ActionLog,
     Base,
+    Outbox,
     Participant,
     Project,
     ProjectStatus,
@@ -110,7 +111,7 @@ def test_lease_is_free_transitions(engine):
         t = _make_task(s)
         a = _actor(s, "claude-code")
         b = _actor(s, "dmitry")
-        now = msk_now()
+        now = local_now()
         assert L._lease_is_free(t, a.id, now) is True
         L.claim_task(s, t, a, ttl=timedelta(hours=1), now=now)
         s.commit()
@@ -129,7 +130,7 @@ def test_claim_happy(engine):
     with make_session(engine) as s:
         t = _make_task(s)
         a = _actor(s, "claude-code")
-        now = msk_now()
+        now = local_now()
         res = L.claim_task(
             s, t, a, session_id="sess-1", origin="atlas",
             ttl=timedelta(hours=2), now=now,
@@ -163,7 +164,7 @@ def test_claim_idempotent_same_actor(engine):
     with make_session(engine) as s:
         t = _make_task(s)
         a = _actor(s, "claude-code")
-        now = msk_now()
+        now = local_now()
         L.claim_task(s, t, a, ttl=timedelta(hours=2), now=now)
         s.commit()
         first_claimed = t.claimed_at
@@ -180,7 +181,7 @@ def test_claim_expired_lease_reclaim_by_other(engine):
         t = _make_task(s)
         a = _actor(s, "claude-code")
         b = _actor(s, "dmitry")
-        t0 = msk_now()
+        t0 = local_now()
         L.claim_task(s, t, a, ttl=timedelta(minutes=10), now=t0)
         s.commit()
         res = L.claim_task(s, t, b, now=t0 + timedelta(minutes=20))  # A протух
@@ -240,7 +241,7 @@ def test_renew_extends(engine):
     with make_session(engine) as s:
         t = _make_task(s)
         a = _actor(s, "claude-code")
-        t0 = msk_now()
+        t0 = local_now()
         L.claim_task(s, t, a, ttl=timedelta(minutes=10), now=t0)
         s.commit()
         L.renew_lease(s, t, a, ttl=timedelta(hours=1), now=t0 + timedelta(minutes=5))
@@ -285,6 +286,16 @@ def test_take_force_steals(engine):
 # --------------------------------------------------------------------------- #
 
 
+def test_claim_does_not_enqueue_outbox(engine):
+    """Инвариант: claim — локальная координация, в ядро (outbox) не уходит."""
+    with make_session(engine) as s:
+        t = _make_task(s)
+        a = _actor(s, "claude-code")
+        L.claim_task(s, t, a)
+        s.commit()
+        assert s.execute(select(Outbox)).scalars().all() == []
+
+
 def test_optimistic_lock_on_plain_update(engine):
     """version_id_col защищает ЛЮБОЙ апдейт задачи, не только lease."""
     from sqlalchemy.orm.exc import StaleDataError
@@ -306,7 +317,7 @@ def test_expire_stale_frees_only_expired(engine):
     with make_session(engine) as s:
         t = _make_task(s)
         a = _actor(s, "claude-code")
-        t0 = msk_now()
+        t0 = local_now()
         L.claim_task(s, t, a, ttl=timedelta(minutes=10), now=t0)
         s.commit()
         # свежий lease не трогается

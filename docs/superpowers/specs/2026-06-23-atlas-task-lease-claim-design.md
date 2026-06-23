@@ -1,7 +1,7 @@
 # Дизайн: Task Lease/Claim — блокировка задач для мультиагентности (Волна 8)
 
 **Дата**: 2026-06-23
-**Статус**: дизайн согласован, готов к плану реализации
+**Статус**: РЕАЛИЗОВАНО (Волна 8), кроме §6-LWW — отложено. Lease/claim + optimistic-lock + TTL-reaper готовы и протестированы. §6 (LWW-по-`occurred_at` в синке) откачено как небезопасное (сравнение с `updated_at`, который бампается claim/version, может молча отбрасывать обновления хаба) — переносится в отдельную задачу sync-conflict-resolution с watermark последнего синка. Бонусом: часовой пояс вынесен в конфиг, `msk_now`→`local_now`. Детали — в BACKLOG.md «Статус реализации Волны 8».
 **Бэклог**: [BACKLOG.md](../../../_project/docs/SCALING_PRODUCT/products/new/NP-005_Personal_PM_Infrastructure/BACKLOG.md) → ВОЛНА 8 (W8-01…16)
 **Провенанс**: намайнено из [gastownhall/beads](https://github.com/gastownhall/beads), gap-анализ против Atlas.
 

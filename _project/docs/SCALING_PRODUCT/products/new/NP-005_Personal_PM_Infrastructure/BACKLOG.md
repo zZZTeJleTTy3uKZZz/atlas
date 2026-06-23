@@ -741,7 +741,17 @@ atlas ideas update <slug> --status cancelled
 - [ ] **W8-15** Прокинуть `occurred_at`/`updated_at` в payload pull-канала (если ядро его шлёт; иначе использовать `updated_at` из payload).
 - [ ] **W8-16** TDD: входящее устаревшее событие не затирает свежую локальную правку задачи.
 
-**Выход Волны 8**: задачу нельзя взять дважды; протухший lease авто-освобождается; любой апдейт защищён optimistic-lock; lease не протекает в ядро; устаревший pull не затирает локальное. Atlas готов к Волне 9 (пул AI-ролей).
+**Выход Волны 8**: задачу нельзя взять дважды; протухший lease авто-освобождается; любой апдейт защищён optimistic-lock; lease не протекает в ядро. Atlas готов к Волне 9 (пул AI-ролей).
+
+### Статус реализации (2026-06-23) — ветка `docs/beads-mining-wave8-9`
+
+- ✅ **W8-01…05** Миграция `a7b8c9d0e1f2` (6 колонок lease + `lock_version`), `version_id_col` на `Task` (optimistic-lock на ВСЕ апдейты), `_commit_or_optimistic_die`.
+- ✅ **W8-03/04/10** `pm/lease.py` — `claim/release/renew/take/expire_stale_leases` (CAS + retry на `StaleDataError`, идемпотентность, TTL).
+- ✅ **W8-06/07/11/12** CLI `atlas task claim/release/renew/take/stale` + lease в `get`/`list` + ленивый reaper + `ActionLog`-события.
+- ✅ **W8-05 (доп)** auto-release lease при `update --status done|cancelled`.
+- ✅ **W8-08** Инвариант: lease-поля НЕ в `_task_payload` (тест).
+- ✅ **Бонус (по запросу)** Часовой пояс PM-БД вынесен в конфиг (`AtlasConfig.timezone` / env `ATLAS_TIMEZONE`, дефолт MSK); `_time.msk_now` → `local_now` (переименовано во всех вызовах).
+- ⏸ **W8-14/15/16 — ОТЛОЖЕНО.** LWW-по-`occurred_at` в `apply.py` откачено: сравнение входящего `occurred_at` с локальным `updated_at` НЕБЕЗОПАСНО — `updated_at` бампается и не-контентными правками (claim/version), из-за чего легитимные обновления хаба могут молча отбрасываться. Нужен **watermark последнего синка per-task** (а не `updated_at`) и подтверждённый контракт ядра на `occurred_at`. Переносится в отдельную задачу sync-conflict-resolution (совместно с ядром). Тесты: 137 (lease+sync+time), полный suite зелёный.
 
 ---
 

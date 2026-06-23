@@ -25,6 +25,7 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm.exc import StaleDataError
 
 from atlas.pm._time import msk_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
@@ -111,6 +112,22 @@ def _log_action(
         details_json=json.dumps(details, ensure_ascii=False, default=str),
     )
     session.add(entry)
+
+
+def _commit_or_optimistic_die(session: Session) -> None:
+    """commit с optimistic-lock guard (version_id_col на Task).
+
+    Конкурентная правка → StaleDataError → понятное сообщение + Exit(1).
+    """
+    try:
+        session.commit()
+    except StaleDataError:
+        session.rollback()
+        console.print(
+            "[red]✗ Задача изменена параллельно (version conflict) — "
+            "перечитайте (atlas task get) и повторите.[/red]"
+        )
+        raise typer.Exit(code=1)
 
 
 def _slug_exists_fn(session: Session):
@@ -935,6 +952,19 @@ def update_cmd(
                     diffs["completed_at"] = {"old": task.completed_at, "new": None}
                     task.completed_at = None
 
+            # Завершение/отмена — авто-снятие lease (Волна 8): задача больше не
+            # в работе, держатель освобождается, чтобы не висела заблокированной.
+            if status in ("done", "cancelled") and task.lease_owner is not None:
+                diffs["lease_released"] = {
+                    "old": _slug_for_assignee(session, task.lease_owner),
+                    "new": None,
+                }
+                task.lease_owner = None
+                task.lease_session_id = None
+                task.lease_origin = None
+                task.claimed_at = None
+                task.lease_expires_at = None
+
         if not diffs:
             console.print("[yellow]Нечего обновлять.[/yellow]")
             return
@@ -952,7 +982,7 @@ def update_cmd(
                 _outbox.enqueue(session, "update", "task", task, project=_proj, portal_id=_sync_portal_id())
         except Exception:
             pass
-        session.commit()
+        _commit_or_optimistic_die(session)
 
         console.print(
             f"[green]✓ Task #{task.number} '{task.slug}' updated[/green] "
@@ -1017,7 +1047,7 @@ def delete_cmd(
                 details={"slug": slug_for_msg, "number": number_for_msg},
             )
             session.delete(task)
-            session.commit()
+            _commit_or_optimistic_die(session)
             console.print(
                 f"[red]✗ Task #{number_for_msg} '{slug_for_msg}' "
                 f"физически удалён.[/red]"
@@ -1049,7 +1079,7 @@ def delete_cmd(
                 _outbox.enqueue(session, "delete", "task", task, project=_proj, portal_id=_sync_portal_id())
         except Exception:
             pass
-        session.commit()
+        _commit_or_optimistic_die(session)
         console.print(
             f"[green]✓ Task #{number_for_msg} archived[/green]"
         )

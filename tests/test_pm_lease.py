@@ -285,6 +285,23 @@ def test_take_force_steals(engine):
 # --------------------------------------------------------------------------- #
 
 
+def test_optimistic_lock_on_plain_update(engine):
+    """version_id_col защищает ЛЮБОЙ апдейт задачи, не только lease."""
+    from sqlalchemy.orm.exc import StaleDataError
+
+    with make_session(engine) as s0:
+        t = _make_task(s0)
+        tid = t.id
+    with make_session(engine) as s1, make_session(engine) as s2:
+        t1 = s1.get(Task, tid)
+        t2 = s2.get(Task, tid)
+        t1.title = "changed-by-1"
+        s1.commit()
+        t2.title = "changed-by-2"
+        with pytest.raises(StaleDataError):
+            s2.commit()
+
+
 def test_expire_stale_frees_only_expired(engine):
     with make_session(engine) as s:
         t = _make_task(s)

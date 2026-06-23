@@ -134,6 +134,15 @@ def test_bad_ttl_exits_nonzero(runner, app, task_ref):
     assert r.exit_code != 0
 
 
+def test_update_done_releases_lease(runner, app, task_ref):
+    runner.invoke(app, ["claim", task_ref, "--actor", "claude-code"])
+    r = runner.invoke(app, ["update", task_ref, "--status", "done"])
+    assert r.exit_code == 0, r.stdout
+    g = json.loads(runner.invoke(app, ["get", task_ref]).stdout)
+    assert g["status"] == "done"
+    assert g["lease_owner"] is None
+
+
 def test_get_shows_lease(runner, app, task_ref):
     runner.invoke(app, ["claim", task_ref, "--actor", "claude-code", "--from", "atlas"])
     r = runner.invoke(app, ["get", task_ref])

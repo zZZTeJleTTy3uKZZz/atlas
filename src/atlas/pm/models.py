@@ -303,6 +303,23 @@ class Task(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # --- Lease/Claim: блокировка задачи для мультиагентности (Волна 8) -----
+    # lease_* — ЛОКАЛЬНАЯ координация агентов: кто/откуда/когда взял задачу.
+    # НЕ синкается в ядро (см. sync/mapper._task_payload). lock_version —
+    # optimistic-lock через version_id_col (__mapper_args__ ниже): бампается и
+    # проверяется на каждом ORM-flush задачи.
+    lease_owner: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("participants.id"), nullable=True
+    )
+    lease_session_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    lease_origin: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lock_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+
+    __mapper_args__ = {"version_id_col": lock_version}
 
     __table_args__ = (
         CheckConstraint(
@@ -326,6 +343,8 @@ class Task(Base):
         Index("idx_tasks_status", "status"),
         Index("idx_tasks_due", "due_date"),
         Index("idx_tasks_source_project", "source_project_id"),
+        Index("idx_tasks_lease", "lease_owner", "lease_expires_at"),
+        Index("idx_tasks_lease_expires", "lease_expires_at"),
     )
 
 

@@ -25,7 +25,7 @@ from contextlib import contextmanager
 
 import typer
 from clikit import async_command, emit_data
-from clikit.errors import CliError
+from librarykit.errors import CliError
 
 from atlas.appconfig import AtlasConfig, load_config
 from atlas.pm.db import make_engine, resolve_db_url

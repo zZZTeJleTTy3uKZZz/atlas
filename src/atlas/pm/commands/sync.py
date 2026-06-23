@@ -59,7 +59,7 @@ async def watch_cmd(
     import asyncio
     import datetime as _dt
 
-    from clikit import AppPaths
+    from librarykit.config_util import AppPaths
 
     cfg = load_config()
     client = BackendClient(cfg.base_url, cfg.api_key)

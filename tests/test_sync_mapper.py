@@ -1,7 +1,7 @@
 """F3c: mapper.to_event — ORM-сущность → EventIn-dict."""
 from types import SimpleNamespace
 
-from atlas.pm.sync import mapper
+from atlas.sync import mapper
 
 
 def test_task_event_uses_local_id_when_no_backend():

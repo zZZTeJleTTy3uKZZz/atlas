@@ -1,4 +1,4 @@
-"""Pure-logic тесты для analytics-модуля atlas.pm.stats (эпик Dashboard).
+"""Pure-logic тесты для analytics-модуля atlas.stats (эпик Dashboard).
 
 Стиль — in-memory SQLite + seed_all + ручная вставка Project/Task/Epic.
 Покрываем:
@@ -9,7 +9,7 @@
 - git_stats: число коммитов/last push/каденс из git, subprocess замокан (#131).
 
 ВАЖНО: git_stats — единственное место с subprocess, и он МОКАЕТСЯ
-(monkeypatch на atlas.pm.stats.run). Никаких реальных git-команд.
+(monkeypatch на atlas.stats.run). Никаких реальных git-команд.
 """
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from atlas.pm.db import make_engine, make_session
-from atlas.pm.models import (
+from atlas.db import make_engine, make_session
+from atlas.models import (
     Base,
     Counterparty,
     Epic,
@@ -28,7 +28,7 @@ from atlas.pm.models import (
     ProjectType,
     Task,
 )
-from atlas.pm.seeds import seed_all
+from atlas.seeds import seed_all
 
 
 # --------------------------------------------------------------------------- #
@@ -95,7 +95,7 @@ def _project(s, slug, *, type_slug="cp", status_slug="act", owner=None, customer
 
 class TestProjectCounts:
     def test_total_counts_non_archived(self, session):
-        from atlas.pm.stats import project_counts
+        from atlas.stats import project_counts
 
         _project(session, "p-one")
         _project(session, "p-two")
@@ -109,7 +109,7 @@ class TestProjectCounts:
         assert result["archived"] == 1
 
     def test_breakdown_by_type(self, session):
-        from atlas.pm.stats import project_counts
+        from atlas.stats import project_counts
 
         _project(session, "p-cp", type_slug="cp")
         _project(session, "p-cp2", type_slug="cp")
@@ -122,7 +122,7 @@ class TestProjectCounts:
         assert by_type["kit"] == 1
 
     def test_breakdown_by_status(self, session):
-        from atlas.pm.stats import project_counts
+        from atlas.stats import project_counts
 
         _project(session, "p-a", status_slug="active")
         _project(session, "p-b", status_slug="active")
@@ -135,7 +135,7 @@ class TestProjectCounts:
         assert by_status["paused"] == 1
 
     def test_breakdown_by_counterparty(self, session):
-        from atlas.pm.stats import project_counts
+        from atlas.stats import project_counts
 
         cp1 = session.execute(
             select(Counterparty).where(Counterparty.slug == "cifro-pro")
@@ -164,7 +164,7 @@ class TestProjectCounts:
 
 class TestParsePeriod:
     def test_relative_days(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         start, end = parse_period("7d", now=now)
@@ -172,14 +172,14 @@ class TestParsePeriod:
         assert start == now - timedelta(days=7)
 
     def test_relative_30d(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         start, end = parse_period("30d", now=now)
         assert start == now - timedelta(days=30)
 
     def test_month(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         start, end = parse_period("month", now=now)
@@ -187,7 +187,7 @@ class TestParsePeriod:
         assert end == now
 
     def test_year(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         start, end = parse_period("year", now=now)
@@ -195,7 +195,7 @@ class TestParsePeriod:
         assert end == now
 
     def test_explicit_range(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         start, end = parse_period("2026-01-01..2026-03-01")
         assert start == datetime(2026, 1, 1)
@@ -205,7 +205,7 @@ class TestParsePeriod:
 
     def test_explicit_range_end_day_inclusive(self):
         """Событие в конечный день диапазона входит в окно (off-by-one fix)."""
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         start, end = parse_period("2026-01-01..2026-03-01")
         event = datetime(2026, 3, 1, 14, 0, 0)
@@ -213,19 +213,19 @@ class TestParsePeriod:
 
     def test_explicit_range_with_time_kept_as_is(self):
         """Если правая граница задана со временем — конец дня НЕ навешиваем."""
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         _, end = parse_period("2026-01-01..2026-03-01T08:30:00")
         assert end == datetime(2026, 3, 1, 8, 30, 0)
 
     def test_invalid_raises(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         with pytest.raises(ValueError):
             parse_period("garbage")
 
     def test_invalid_range_raises(self):
-        from atlas.pm.stats import parse_period
+        from atlas.stats import parse_period
 
         with pytest.raises(ValueError):
             parse_period("2026-13-01..2026-99-01")
@@ -238,7 +238,7 @@ class TestParsePeriod:
 
 class TestActivityWindow:
     def test_active_projects_in_window(self, session):
-        from atlas.pm.stats import activity_window
+        from atlas.stats import activity_window
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         # внутри окна (last_touched 3 дня назад)
@@ -254,7 +254,7 @@ class TestActivityWindow:
         assert "p-old" not in slugs
 
     def test_tasks_in_window_by_completed_at(self, session):
-        from atlas.pm.stats import activity_window
+        from atlas.stats import activity_window
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         p = _project(session, "p-tasks", last_touched=now)
@@ -272,7 +272,7 @@ class TestActivityWindow:
         assert result["tasks_completed"] == 1
 
     def test_filter_by_type(self, session):
-        from atlas.pm.stats import activity_window
+        from atlas.stats import activity_window
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         _project(session, "p-cp", type_slug="cp", last_touched=now - timedelta(days=1))
@@ -285,8 +285,8 @@ class TestActivityWindow:
         assert slugs == {"p-kit"}
 
     def test_filter_by_tag(self, session):
-        from atlas.pm.models import ProjectTag, Tag
-        from atlas.pm.stats import activity_window
+        from atlas.models import ProjectTag, Tag
+        from atlas.stats import activity_window
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         p_tagged = _project(session, "p-tagged", last_touched=now - timedelta(days=1))
@@ -303,7 +303,7 @@ class TestActivityWindow:
         assert slugs == {"p-tagged"}
 
     def test_archived_project_excluded(self, session):
-        from atlas.pm.stats import activity_window
+        from atlas.stats import activity_window
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         arch = _project(session, "p-arch", last_touched=now - timedelta(days=1))
@@ -317,8 +317,8 @@ class TestActivityWindow:
         assert result["projects_active"] == 0
 
     def test_archived_task_excluded_from_counts(self, session):
-        from atlas.pm.models import Task
-        from atlas.pm.stats import activity_window
+        from atlas.models import Task
+        from atlas.stats import activity_window
 
         now = datetime(2026, 6, 23, 12, 0, 0)
         p = _project(session, "p-arch-task", last_touched=now)
@@ -341,7 +341,7 @@ class TestActivityWindow:
 
 class TestProvenanceStats:
     def test_top_sources_and_sinks(self, session):
-        from atlas.pm.stats import provenance_stats
+        from atlas.stats import provenance_stats
 
         src = _project(session, "src-proj")
         sink = _project(session, "sink-proj")
@@ -366,7 +366,7 @@ class TestProvenanceStats:
         assert sinks["sink-proj"] == 2
 
     def test_realized_share(self, session):
-        from atlas.pm.stats import provenance_stats
+        from atlas.stats import provenance_stats
 
         src = _project(session, "src-p")
         sink = _project(session, "sink-p")
@@ -391,7 +391,7 @@ class TestProvenanceStats:
         assert result["realized_share"] == pytest.approx(0.5)
 
     def test_empty_provenance(self, session):
-        from atlas.pm.stats import provenance_stats
+        from atlas.stats import provenance_stats
 
         _project(session, "lonely")
         session.flush()
@@ -410,10 +410,10 @@ class TestProvenanceStats:
         """
         from sqlalchemy import event
 
-        from atlas.pm.db import make_engine, make_session
-        from atlas.pm.models import Base, Task
-        from atlas.pm.seeds import seed_all
-        from atlas.pm.stats import provenance_stats
+        from atlas.db import make_engine, make_session
+        from atlas.models import Base, Task
+        from atlas.seeds import seed_all
+        from atlas.stats import provenance_stats
 
         engine = make_engine("sqlite:///:memory:")
 
@@ -440,8 +440,8 @@ class TestProvenanceStats:
             assert sum(r["count"] for r in result["top_sinks"]) == 1
 
     def test_archived_injected_task_excluded(self, session):
-        from atlas.pm.models import Task
-        from atlas.pm.stats import provenance_stats
+        from atlas.models import Task
+        from atlas.stats import provenance_stats
 
         src = _project(session, "src-arch")
         sink = _project(session, "sink-arch")
@@ -467,12 +467,12 @@ class TestProvenanceStats:
 
 class TestGitStats:
     def test_returns_none_when_no_path(self):
-        from atlas.pm.stats import git_stats
+        from atlas.stats import git_stats
 
         assert git_stats(None) is None
 
     def test_returns_error_when_not_git_repo(self, tmp_path, monkeypatch):
-        from atlas.pm import stats
+        from atlas import stats
 
         # git rev-parse → ненулевой rc (не репозиторий)
         monkeypatch.setattr(stats, "run", lambda cmd, cwd=None: (128, "", "not a git repo"))
@@ -481,7 +481,7 @@ class TestGitStats:
         assert result.get("is_git") is False
 
     def test_commit_count_and_cadence(self, tmp_path, monkeypatch):
-        from atlas.pm import stats
+        from atlas import stats
 
         # Очередь ответов на git-команды (по порядку вызовов в git_stats).
         responses = {
@@ -514,7 +514,7 @@ class TestGitStats:
         assert result["span_days"] == pytest.approx(10.0, rel=0.01)
 
     def test_last_commit_at_exposed(self, tmp_path, monkeypatch):
-        from atlas.pm import stats
+        from atlas import stats
 
         def fake_run(cmd, cwd=None):
             joined = " ".join(cmd)
@@ -535,7 +535,7 @@ class TestGitStats:
 
     def test_last_pushed_at_passed_through(self, tmp_path, monkeypatch):
         """#131: last_pushed_at прокидывается из Project, git его не знает."""
-        from atlas.pm import stats
+        from atlas import stats
 
         def fake_run(cmd, cwd=None):
             joined = " ".join(cmd)
@@ -557,7 +557,7 @@ class TestGitStats:
 
     def test_span_not_negative_on_nonmonotonic_dates(self, tmp_path, monkeypatch):
         """span_days зажимается в 0 при last < first (rebase/cherry-pick)."""
-        from atlas.pm import stats
+        from atlas import stats
 
         def fake_run(cmd, cwd=None):
             joined = " ".join(cmd)
@@ -579,7 +579,7 @@ class TestGitStats:
 
     def test_not_git_schema_is_complete(self, tmp_path, monkeypatch):
         """«Не репо» отдаёт тот же набор ключей, что и успешная ветка (#14)."""
-        from atlas.pm import stats
+        from atlas import stats
 
         monkeypatch.setattr(stats, "run", lambda cmd, cwd=None: (128, "", ""))
         result = stats.git_stats(str(tmp_path))

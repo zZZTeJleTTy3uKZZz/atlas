@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from atlas.pm.commands.projects import (
+from atlas.commands.projects import (
     ATLAS_PROMPT_BLOCK,
     ATLAS_PROMPT_END,
     ATLAS_PROMPT_START,
@@ -239,9 +239,9 @@ def isolated_projects_root(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def seeded_engine(tmp_path, monkeypatch):
-    from atlas.pm.db import make_engine, make_session
-    from atlas.pm.models import Base
-    from atlas.pm.seeds import seed_all
+    from atlas.db import make_engine, make_session
+    from atlas.models import Base
+    from atlas.seeds import seed_all
 
     db_path = tmp_path / "atlas.db"
     url = f"sqlite:///{db_path}"
@@ -262,7 +262,7 @@ def runner():
 
 @pytest.fixture()
 def app():
-    from atlas.pm.commands.projects import projects_app
+    from atlas.commands.projects import projects_app
 
     return projects_app
 

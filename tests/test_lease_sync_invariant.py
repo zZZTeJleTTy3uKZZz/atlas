@@ -7,8 +7,8 @@ lease_owner/session/origin/claimed_at/lease_expires_at/lock_version — это
 """
 from __future__ import annotations
 
-from atlas.pm.models import Epic, Task
-from atlas.pm.sync.mapper import _epic_payload, _task_payload
+from atlas.models import Epic, Task
+from atlas.sync.mapper import _epic_payload, _task_payload
 
 _LEASE_KEYS = {
     "lease_owner", "lease_session_id", "lease_origin",

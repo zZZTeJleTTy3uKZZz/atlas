@@ -5,10 +5,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import (
+from atlas.models import (
     Base, Outbox, Project, ProjectStatus, ProjectType, SyncPolicy, Task,
 )
-from atlas.pm.sync import outbox
+from atlas.sync import outbox
 
 
 @pytest.fixture

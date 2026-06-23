@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from atlas.pm.sync.backend_client import BackendClient
+from atlas.sync.backend_client import BackendClient
 
 
 async def test_provision_project_posts_and_returns_ids(httpx_mock):

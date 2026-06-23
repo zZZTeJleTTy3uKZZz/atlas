@@ -6,8 +6,8 @@ from sqlalchemy import pool
 from alembic import context
 
 # Импортируем наши модели, чтобы Base.metadata знал обо всех таблицах
-from atlas.pm.db import DEFAULT_DB_PATH
-from atlas.pm.models import Base
+from atlas.db import DEFAULT_DB_PATH
+from atlas.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

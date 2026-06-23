@@ -1,7 +1,7 @@
 """HubService — фасад к backend-хабу: команды зовут сервис, не клиента."""
 import pytest
 
-import atlas.pm.sync.hub_service as hs
+import atlas.sync.hub_service as hs
 
 
 @pytest.mark.asyncio

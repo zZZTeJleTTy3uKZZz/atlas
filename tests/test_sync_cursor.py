@@ -3,8 +3,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import Base
-from atlas.pm.sync import cursor
+from atlas.models import Base
+from atlas.sync import cursor
 
 
 @pytest.fixture

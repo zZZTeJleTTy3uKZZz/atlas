@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from atlas.pm.sync import daemon
+from atlas.sync import daemon
 
 
 def _fake_run(rc=0, out="installed", err=""):

@@ -15,7 +15,7 @@ from librarykit.errors import NotFound, RateLimited, SessionExpired
 from librarykit.retry import RetryPolicy
 from librarykit.transport import HttpClient, HttpxTransport
 
-from atlas.pm.sync.backend_client import BackendClient
+from atlas.sync.backend_client import BackendClient
 
 
 def _no_retry_client(base_url: str, api_key: str) -> HttpClient:

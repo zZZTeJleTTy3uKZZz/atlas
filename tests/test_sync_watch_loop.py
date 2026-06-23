@@ -5,8 +5,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import Base
-from atlas.pm.sync import pull
+from atlas.models import Base
+from atlas.sync import pull
 
 
 @pytest.fixture

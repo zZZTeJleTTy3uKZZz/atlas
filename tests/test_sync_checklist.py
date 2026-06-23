@@ -15,10 +15,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import (
+from atlas.models import (
     Base, ChecklistItem, Project, ProjectStatus, ProjectType, Task,
 )
-from atlas.pm.sync import apply, mapper
+from atlas.sync import apply, mapper
 
 
 # --------------------------------------------------------------------------- #
@@ -213,7 +213,7 @@ def test_apply_delete_checklist_item(session):
 
 def test_apply_does_not_enqueue_outbox(session):
     """Анти-петля: apply (PULL из ядра) НЕ кладёт ничего в Outbox."""
-    from atlas.pm.models import Outbox
+    from atlas.models import Outbox
     p = _project(session)
     _task(session, p, backend_id="task-be-1")
     ev = {

@@ -248,6 +248,53 @@ class TestIdeasPromote:
         new_backlog = backlog.read_text(encoding="utf-8")
         assert "### #promotee" not in new_backlog
 
+    def test_promote_canonical_injects_block_into_existing_agents(
+        self, runner, ideas_app, seeded_engine, projects_root
+    ):
+        """promote --canonical по папке с УЖЕ существующим AGENTS.md дополняет
+
+        его Atlas-блоком (паритет с `project add`), а не пропускает (#211)."""
+        from atlas.pm.commands.projects import (
+            ATLAS_PROMPT_END,
+            ATLAS_PROMPT_START,
+        )
+
+        runner.invoke(
+            ideas_app,
+            ["add", "--name", "PreAgents", "--slug", "preagents",
+             "--type", "business-product"],
+        )
+
+        # Предсоздаём storage-папку с готовым AGENTS.md (его _create_canonical_files
+        # пропустит из-за path.exists()) и c CLAUDE.md.
+        storage = projects_root / "_storage" / "preagents"
+        storage.mkdir(parents=True, exist_ok=True)
+        agents = storage / "AGENTS.md"
+        agents.write_text(
+            "# Pre-existing AGENTS\n\nВАЖНЫЙ КОНТЕНТ ПОЛЬЗОВАТЕЛЯ\n",
+            encoding="utf-8",
+        )
+        claude = storage / "CLAUDE.md"
+        claude.write_text("# CLAUDE\n\nправила.\n", encoding="utf-8")
+
+        result = runner.invoke(
+            ideas_app,
+            ["promote", "preagents", "--canonical", "--no-init-git"],
+        )
+        assert result.exit_code == 0, _combined(result)
+
+        atext = agents.read_text(encoding="utf-8")
+        assert atext.count(ATLAS_PROMPT_START) == 1
+        assert atext.count(ATLAS_PROMPT_END) == 1
+        assert "навык `atlas`" in atext
+        # пользовательский контент сохранён
+        assert "ВАЖНЫЙ КОНТЕНТ ПОЛЬЗОВАТЕЛЯ" in atext
+
+        ctext = claude.read_text(encoding="utf-8")
+        assert ctext.count(ATLAS_PROMPT_START) == 1
+        assert "навык `atlas`" in ctext
+        assert "правила." in ctext
+
 
 # --------------------------------------------------------------------------- #
 # update                                                                      #

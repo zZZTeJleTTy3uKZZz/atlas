@@ -484,6 +484,7 @@ def promote_cmd(
     """Идея → проект: entity_kind, layout, MD→IDEA.md, extract backlog, опц. git."""
     from atlas.pm.commands.projects import (
         _create_canonical_files,
+        _ensure_atlas_prompt_in_dir,
         _setup_storage_and_junction,
     )
 
@@ -590,6 +591,15 @@ def promote_cmd(
                 )
                 if created:
                     result["canonical_files"] = list(created)
+                # ----- onboarding prompt block (#211) -----
+                # Зеркалим add_cmd: _create_canonical_files пропускает уже
+                # существующие файлы (path.exists() → continue), поэтому блок в
+                # ранее существовавший AGENTS.md и в любой CLAUDE.md нужно вписать
+                # отдельно. Иначе promote по папке с готовым AGENTS.md дал бы
+                # проект БЕЗ Atlas-блока — рассинхрон с `project add`.
+                prompted = _ensure_atlas_prompt_in_dir(storage)
+                if prompted:
+                    result["atlas_prompt_files"] = prompted
             except Exception as exc:
                 result["canonical_error"] = str(exc)
 

@@ -21,6 +21,7 @@ from .pm.commands.pm_tasks import pm_tasks_app
 from .pm.commands import task_lease as _task_lease  # noqa: F401  # регистрирует lease-команды на pm_tasks_app
 from .pm.commands.profile import profile_app
 from .pm.commands.projects import projects_app
+from .pm.commands.stats import dashboard_cmd, stats_app
 from .pm.commands.statuses import app as statuses_app
 from .pm.commands.sync import sync_app
 from .pm.commands.tags import app as tags_app
@@ -49,6 +50,8 @@ app.add_typer(action_log_app, name="action-log")     # аудит (append-only)
 app.add_typer(backup_app, name="backup")             # бэкап портфеля
 app.add_typer(sync_app, name="sync")                 # синхронизация с backend-хабом
 app.add_typer(profile_app, name="profile")           # онбординг Atlas-сторов (профиль = стор)
+app.add_typer(stats_app, name="stats")               # аналитика портфеля (overview/period/provenance/git)
+app.command("dashboard")(dashboard_cmd)              # объединённый обзор (counts+activity+provenance+git)
 
 
 if __name__ == "__main__":

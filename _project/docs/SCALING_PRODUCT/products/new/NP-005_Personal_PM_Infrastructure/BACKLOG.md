@@ -686,6 +686,102 @@ atlas ideas update <slug> --status cancelled
 
 ---
 
+## ВОЛНА 8 — Multi-Agent Concurrency: Lease/Claim блокировка задач (2026-06-23 → ~5-7 дней) [SPEC]
+
+> **Провенанс**: намайнено из репозитория [gastownhall/beads](https://github.com/gastownhall/beads) (issue-tracker, заточенный под рои AI-агентов) 2026-06-23. Запрос Дмитрия: «фича блокировки задач — когда агент берёт задачу в работу, остальные видят, что она занята, и не дублируют/не затирают друг друга». Полный gap-анализ — многоагентный workflow `beads-atlas-mining` (8 отчётов + синтез).
+>
+> **Важное уточнение терминов beads** (чтобы не скопировать не то): в beads `docs/EXCLUSIVE_LOCK.md` (`.beads/.exclusive-lock`, PID+hostname) — это блокировка **файла БД** от Dolt-сервера, к координации агентов отношения почти не имеет → **skip** (у Atlas другой бэкенд). Реальная «блокировка задачи» в beads — это **claim**: `ClaimIssue(id, actor)` ставит `assignee` + `status=in_progress` атомарным compare-and-swap одним SQL-UPDATE с WHERE-guard (`internal/storage/issueops/claim.go`). Проигравший гонку получает `ErrAlreadyClaimed`. **Но у beads НЕТ TTL/lease/heartbeat** — зависшие claim'ы ищутся вручную (`bd stale` по `updated_at`). Atlas берёт идею CAS, но проектирует **настоящий lease с протуханием** — то есть делает лучше первоисточника.
+
+**Цель**: дать Atlas механизм, которого сейчас нет совсем (подтверждено по коду — нет полей lease/claim/lock/version; `pm/commands/pm_tasks.py` при переходе в `in_progress` проверяет только `started_at IS NULL` → два агента переведут одну задачу в работу без конфликта; `assignee_id` перезаписывается вслепую). Это фундамент под будущую мультиагентность (пул AI-ролей — см. V07-04 / V10-01) и под Волну 9 (ready-очередь).
+
+**Ключевое решение** (отличие от beads, НЕ копия): Atlas вводит TTL-lease (`lease_owner` + `lease_expires_at` + `claimed_at`) + optimistic locking через `lock_version`-колонку, потому что Atlas — единственный слой, закрывающий дыру двойного захвата.
+
+**Инвариант синка** (критично): lease-поля и `lock_version` — это **локальная** координация Atlas-портала, в ядро (outbox/`sync/mapper.py`) **НЕ уходят**. Иначе протухание lease на одной машине затрёт состояние на другой через LWW. Lease живёт и умирает локально.
+
+### Раздел 1 — Lease/Claim (ядро волны)
+
+- [ ] **W8-01** Новая Alembic-миграция (`tasks_lease_optimistic_lock`): `ALTER TABLE tasks ADD COLUMN lease_owner VARCHAR(36) NULL` (логический FK на `participants.id`), `lease_expires_at DATETIME NULL`, `claimed_at DATETIME NULL`, `lock_version INTEGER NOT NULL DEFAULT 0`. Partial-индекс `idx_tasks_lease (lease_owner, lease_expires_at)`. Down-миграция дропает 4 колонки. Backfill не нужен (NULL/0).
+- [ ] **W8-02** `src/atlas/pm/models.py::Task`: добавить поля `lease_owner`, `lease_expires_at`, `claimed_at`, `lock_version`. НЕ добавлять в CheckConstraint статусов (lease ортогонален статусу). Добавить индекс в `__table_args__`.
+- [ ] **W8-03** `src/atlas/pm/lease.py` (pure-logic, detached от typer, unit-testable). `claim_task(session, task, actor_id, ttl)` — атомарный compare-and-swap одним UPDATE:
+  ```sql
+  UPDATE tasks SET lease_owner=:actor, lease_expires_at=:now+ttl,
+                   claimed_at=COALESCE(claimed_at,:now), lock_version=lock_version+1
+  WHERE id=:id AND lock_version=:expected_version
+    AND (lease_owner IS NULL OR lease_expires_at < :now OR lease_owner=:actor)
+  ```
+  Проверить `rowcount==1`; иначе перечитать и поднять `LeaseHeldError(holder, expires_at)`. Идемпотентность: повторный claim тем же `actor_id` → success (для retry агента — паттерн beads `ClaimIssueIfOpen`).
+- [ ] **W8-04** `lease.py`: `release_task(session, task, actor_id)` — снять lease, только если держатель == actor (иначе `LeaseNotOwnedError`). `renew_lease(session, task, actor_id, ttl)` — продлить `lease_expires_at` (heartbeat долгой работы). `take_task(session, task, actor_id, force=True)` — принудительный отбор протухшего/чужого lease с обязательной записью в ActionLog.
+- [ ] **W8-05** Optimistic locking на ЛЮБОЙ апдейт: в `pm/commands/pm_tasks.py::update_cmd` инкрементировать `lock_version` при каждой мутации Task; апдейт с `WHERE lock_version=:expected` — при `rowcount==0` поднять `OptimisticLockError` (кто-то изменил параллельно). Защищает не только claim.
+- [ ] **W8-06** CLI (группа `atlas task`, ед. число, `--json` по умолчанию — канон Atlas):
+  - `atlas task claim <ref> [--ttl 2h] [--actor <slug>]` — взять задачу; по умолчанию actor = текущий профиль / `ai_agent`.
+  - `atlas task release <ref> [--actor <slug>]` — отпустить.
+  - `atlas task renew <ref> [--ttl 2h]` — продлить lease (heartbeat).
+  - `atlas task take <ref> --force` — отобрать протухший/чужой lease (с confirm + ActionLog).
+- [ ] **W8-07** Все lease-операции пишут в `ActionLog` (`action=task_claimed|task_released|lease_renewed|task_taken|lease_expired`, `actor_id`, `details_json` с прежним/новым держателем). Переиспользуем существующий append-only слой аудита Atlas (аналог event-лога `claimed` в beads).
+- [ ] **W8-08** Инвариант синка: убедиться, что `sync/mapper.py::_task_payload` НЕ сериализует `lease_owner/lease_expires_at/claimed_at/lock_version`. Тест: `atlas task claim` НЕ создаёт запись в `outbox`.
+- [ ] **W8-09** TDD (RED-GREEN, ожидаемо +25-35 тестов):
+  - гонка двух `claim` на одну задачу → ровно один выигрывает, второй получает `LeaseHeldError`;
+  - claim задачи с протухшим lease (`lease_expires_at < now`) → успех, прежний держатель вытеснен;
+  - идемпотентный повторный claim тем же actor → success без ошибки;
+  - `take --force` отбирает lease + пишет ActionLog;
+  - `release` чужого lease → `LeaseNotOwnedError`;
+  - параллельный `update` при устаревшем `lock_version` → `OptimisticLockError`;
+  - claim НЕ попадает в outbox.
+
+### Раздел 2 — Авто-релиз протухших lease (то, чего нет у beads)
+
+- [ ] **W8-10** `lease.py::expire_stale_leases(session)` — `UPDATE tasks SET lease_owner=NULL, lease_expires_at=NULL WHERE lease_expires_at < now AND lease_owner IS NOT NULL`; вернуть список освобождённых, залогировать `lease_expired` в ActionLog. Детерминированно по `lease_expires_at` (а не эвристикой по `updated_at`, как `bd stale`).
+- [ ] **W8-11** CLI: `atlas task stale [--reap]` — без `--reap` показывает протухшие lease (отчёт); с `--reap` освобождает.
+- [ ] **W8-12** Ленивый reaper: вызывать `expire_stale_leases()` в начале `atlas task claim` и `atlas task list` (без фонового демона — single-file SQLite, дёшево чистить «по дороге»).
+- [ ] **W8-13** TDD: протухший lease освобождается; свежий не трогается; reap логируется.
+
+### Раздел 3 — Conflict-resolution синка (закрыть обещанный F3 §12.1 LWW)
+
+- [ ] **W8-14** `src/atlas/pm/sync/apply.py`: перед `setattr` сравнивать `occurred_at` входящего события с локальным `task.updated_at` — НЕ перезаписывать более свежую локальную правку (реализовать обещанный, но не сделанный LWW-по-`occurred_at`; сейчас apply.py перезаписывает вслепую). Урок из `SyncEngine`/Linear beads (last_sync watermark + idempotency-маркер).
+- [ ] **W8-15** Прокинуть `occurred_at`/`updated_at` в payload pull-канала (если ядро его шлёт; иначе использовать `updated_at` из payload).
+- [ ] **W8-16** TDD: входящее устаревшее событие не затирает свежую локальную правку задачи.
+
+**Выход Волны 8**: задачу нельзя взять дважды; протухший lease авто-освобождается; любой апдейт защищён optimistic-lock; lease не протекает в ядро; устаревший pull не затирает локальное. Atlas готов к Волне 9 (пул AI-ролей).
+
+---
+
+## ВОЛНА 9 — Граф зависимостей задач + ready-очередь для пула AI-ролей (2026-06-30 → ~5-7 дней) [SPEC, зависит от W8]
+
+> **Провенанс**: майнинг beads 2026-06-23 (`docs/DEPENDENCIES.md`, `docs/MOLECULES.md`, `bd ready`). Закрывает открытый вопрос `MODEL.md:637` (таблица зависимостей задач в Atlas не реализована — есть лишь статус `blocked` как ярлык без связи на блокирующую задачу).
+
+**Цель**: дать оркестратору ролей детерминированную очередь «что готово делать прямо сейчас», чтобы AI-роли тянули разные незаблокированные задачи и не простаивали. Это вторая половина anti-collision системы beads: агенты тянут из общей `ready`-очереди и атомарно клеймят (W8) — каждому достаётся своя задача.
+
+**Решение** (adapt, не копия beads): берём подмножество — только рёбра `blocks` + `parent-child` (`epic_id` уже есть), без `conditional-blocks/waits-for/wisp/gate`. Готовность материализуем в колонку `is_blocked` (дешёвый `ready` без рекурсии на каждый запрос — как `issues.is_blocked` в beads).
+
+- [ ] **W9-01** Новая Alembic-миграция (`task_dependencies_is_blocked`): таблица `task_dependencies (task_id, depends_on_id, type CHECK IN('blocks','parent-child'), PK(task_id,depends_on_id,type))` + колонка `tasks.is_blocked INTEGER NOT NULL DEFAULT 0`.
+- [ ] **W9-02** `models.py`: класс `TaskDependency` + `Task.is_blocked`.
+- [ ] **W9-03** `src/atlas/pm/deps.py`: `add_dep` с проверкой цикла (рекурсивный CTE по `blocks`), `remove_dep`, `recompute_is_blocked(session, affected_ids)` — пересчёт только по затронутому подграфу (BFS до fixpoint, как в beads), без бампа `updated_at` (derived state).
+- [ ] **W9-04** Триггер пересчёта: при `close/reopen` задачи и при add/remove зависимости — `recompute_is_blocked` для зависимых.
+- [ ] **W9-05** CLI: `atlas task dep add <ref> <depends-on>`, `atlas task dep rm`, `atlas task dep list`, `atlas task blocked`, `atlas task ready [--unassigned] [--priority P0]`.
+- [ ] **W9-06** `atlas task ready --claim` — атомарно взять первую готовую незанятую задачу (паттерн `ClaimReadyIssue` beads: при проигрыше гонки перейти к следующей). Соединяет Волну 8 (claim) и Волну 9 (ready) в автономный цикл агента.
+- [ ] **W9-07** Решить: синкать ли `task_dependencies` в ядро. По умолчанию НЕТ на v1 (локальный граф координации, как lease).
+- [ ] **W9-08** TDD: цикл отклоняется на запись; закрытие блокера разблокирует зависимую (`is_blocked→0`); `ready` возвращает только незаблокированные; `ready --claim` в гонке не плодит дублей.
+
+**Выход Волны 9**: автономный цикл AI-роли — `atlas task ready --claim → работа → atlas task update --status done → ядро разблокирует зависимые`. Несколько ролей работают параллельно без затирания.
+
+---
+
+## Прочее из beads — отложено / отклонено (решения зафиксированы 2026-06-23)
+
+Чтобы не возвращаться к разбору повторно — вердикты по остальным подсистемам beads:
+
+| Фича beads | Вердикт | Почему |
+|---|---|---|
+| Append-only audit с random-ID (crypto/rand) для параллельных писателей | **later (P3)** | `ActionLog` уже закрывает аудит; autoincrement PK для single-file SQLite на портфеле одного человека — не узкое место. Random-ID рассмотреть, если реально упрёмся в contention. |
+| Execution-hints в JSON-`metadata` задачи (модель/effort/agent_type для субагента) | **later (P3)** | Полезно для роутинга задач по ролям (Волна V10), но не нужно для блокировки. Дёшево добавить позже одной JSON-колонкой. |
+| Event-хуки `on_create/on_update/on_close` (скрипты в `.beads/hooks/`) | **later (P3)** | Удобная точка расширения (напр. уведомление в Telegram при claim, триггер синка), но не относится к блокировке. |
+| Формулы / молекулы (шаблоны процессов, авто-разворачивание под-задач) | **later (P3)** | Интересно для повторяемых процессов, но преждевременно. |
+| Dolt-бэкенд, `refs/dolt/data` sync, cell-merge, federation, merge-slot, advisory-флок на файл БД, `.exclusive-lock` | **skip** | Решения под распределённый VCS-бэкенд и multi-writer dolt-сервер. У Atlas другой бэкенд (single-file SQLite + hub-and-spoke outbox в ядро). SQLite сам даёт атомарность транзакций; координацию агентов на машине решает lease (W8), кросс-машинное — ядро-хаб. |
+| Content-hash ID (sha256), адаптивная длина, nonce-коллизии | **skip** | `Task.id` уже UUID (нет гонки за счётчик); `Task.number` — косметика, его коллизия решается unique-constraint+retry. Контентный хеш нужен в распределённом VCS без центра; у Atlas центр есть (ядро присваивает `backend_id`). |
+| Compaction (AI-суммаризация старых задач), gc, prune, wisps/ephemeral | **skip** | Мотивация (экономия context-window агента) и wisps специфичны для роёв beads. У Atlas есть `archived_at` + backup-движок; объёмы малы. |
+
+---
+
 ## Determination of Done для каждой Волны
 
 ### Spike v0.4 (Волна 2)

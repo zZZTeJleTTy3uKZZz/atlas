@@ -25,9 +25,10 @@ from contextlib import contextmanager
 
 import typer
 from clikit import async_command, emit_data
-from clikit.errors import CliError
+from librarykit.errors import CliError
 
-from atlas.appconfig import AtlasConfig, load_config
+from atlas import keystore
+from atlas.appconfig import AtlasConfig, load_config, resolve_api_key
 from atlas.pm.db import make_engine, resolve_db_url
 from atlas.pm.models import Base
 from atlas.pm.sync.backend_client import BackendClient
@@ -80,7 +81,8 @@ async def register_cmd(
     со slug). Профиль сохраняется в ``profiles/<slug>/`` со своей БД и ключом.
     """
     cfg = load_config()
-    if not cfg.api_key or not cfg.base_url:
+    admin_key = resolve_api_key(cfg)
+    if not admin_key or not cfg.base_url:
         raise CliError(
             "CONFIG",
             "не задан api_key/base_url активного admin-конфига — настрой конфиг "
@@ -88,7 +90,7 @@ async def register_cmd(
         )
 
     member_slug = member or slug
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    client = BackendClient(cfg.base_url, admin_key)
     try:
         result = await client.register_profile(member_slug, slug, name, scope, global_role)
     finally:
@@ -98,10 +100,13 @@ async def register_cmd(
     portal_id = result.get("portal_slug", slug)
 
     # Сохранить локальный профиль + создать его БД ПОД env ATLAS_PROFILE=<slug>.
+    # #201: ключ НЕ кладём в открытый config.toml (api_key=""), а уводим в
+    # keystore (keyring/file-fallback) под тем же профилем.
     with _active_profile(slug):
         AtlasConfig(
-            base_url=cfg.base_url, api_key=api_key, portal_id=portal_id, scope=scope
+            base_url=cfg.base_url, api_key="", portal_id=portal_id, scope=scope
         ).save("atlas")
+        keystore.save_api_key(portal_id, api_key)
         engine = make_engine(resolve_db_url())
         Base.metadata.create_all(engine)
         engine.dispose()

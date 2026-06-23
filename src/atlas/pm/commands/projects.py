@@ -64,7 +64,7 @@ from atlas.pm.paths import (
     group_path,
     type_slug_to_group,
 )
-from atlas.appconfig import load_config, owner_member_slug
+from atlas.appconfig import load_config, owner_member_slug, resolve_api_key
 from atlas.pm.seeds import seed_all
 from atlas.pm.sync.hub_service import HubService
 from atlas.pm.slugs import (
@@ -624,7 +624,7 @@ def add_cmd(
     _validate_priority(priority)
 
     # ----- режим проекта: личный по умолчанию (владелец+lead = ты), флаги переопределяют -----
-    from atlas.appconfig import load_config, owner_member_slug
+    from atlas.appconfig import load_config, owner_member_slug, resolve_api_key
     from atlas.pm.commands._provision import resolve_project_mode
     mode = resolve_project_mode(
         type_flag=type_slug, team=team, owner=owner,
@@ -907,14 +907,14 @@ def add_cmd(
         # ----- авто-раскладка в ядро+Notion (этап 2): если синк включён -----
         # owner-counterparty: личный → 'me' (Дмитрий-person), иначе владелец-компания.
         cfg = load_config()
-        if not no_sync and cfg.api_key:
+        if not no_sync and resolve_api_key(cfg):
             notion_kind = "личный" if mode.visibility == "personal" else "клиентский"
             targets = (
                 ["notion-pragmat", "atlas-dmitry"] if mode.visibility == "personal"
                 else ["b24-exs", "notion-pragmat"]
             )
             core_owner = "me" if mode.owner_slug == "dmitry" else mode.owner_slug
-            hub = HubService(cfg.base_url, cfg.api_key)
+            hub = HubService(cfg.base_url, resolve_api_key(cfg))
             try:
                 res = asyncio.run(hub.provision_project(
                     slug=final_slug, name=name, kind="direction",
@@ -977,10 +977,10 @@ def make_personal_cmd(
             ))
         ident = _backend_ident(project)
         session.commit()
-    if not cfg.api_key:
+    if not resolve_api_key(cfg):
         console.print("[yellow]⚠ Atlas обновлён; api_key не задан — ядро не тронуто.[/yellow]")
         return
-    hub = HubService(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
         asyncio.run(hub.patch_project(
             ident, visibility="personal",
@@ -999,13 +999,13 @@ def link_cmd(
 ) -> None:
     """Привязать проект к сущности портала в ядре (entity_link) — без docker exec."""
     cfg = load_config()
-    if not cfg.api_key:
+    if not resolve_api_key(cfg):
         console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
         raise typer.Exit(code=1)
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         ident = _backend_ident(_resolve_project_or_die(session, ref))
-    hub = HubService(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
         asyncio.run(hub.link_project(ident, portal_slug=portal, external_id=external))
         console.print(f"[green]✓ '{ref}' ↔ {portal} ({external}).[/green]")
@@ -1025,11 +1025,11 @@ def import_b24_cmd(
     Ядро создаёт core_project + связь↔Б24 + Notion-страницу; локально заводит
     Atlas-проект с backend_id (идемпотентно по backend_id)."""
     cfg = load_config()
-    if not cfg.api_key:
+    if not resolve_api_key(cfg):
         console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
         raise typer.Exit(code=1)
     owner = owner_member_slug(cfg.portal_id)
-    hub = HubService(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
         res = asyncio.run(hub.import_from_b24(
             group_id=group_id, notion_kind=notion_kind, lead_slug=owner,
@@ -1093,13 +1093,13 @@ def unlink_cmd(
 ) -> None:
     """Снять связь проекта с порталом в ядре (entity_link)."""
     cfg = load_config()
-    if not cfg.api_key:
+    if not resolve_api_key(cfg):
         console.print("[red]Нужен api_key (ATLAS_API_KEY).[/red]")
         raise typer.Exit(code=1)
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         ident = _backend_ident(_resolve_project_or_die(session, ref))
-    hub = HubService(cfg.base_url, cfg.api_key)
+    hub = HubService(cfg.base_url, resolve_api_key(cfg))
     try:
         asyncio.run(hub.unlink_project(ident, portal_slug=portal))
         console.print(f"[green]✓ '{ref}' отвязан от {portal}.[/green]")

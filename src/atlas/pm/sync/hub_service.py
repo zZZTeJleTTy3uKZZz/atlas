@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from atlas.appconfig import load_config
+from atlas.appconfig import load_config, resolve_api_key
 
 from .backend_client import BackendClient
 
@@ -24,7 +24,7 @@ class HubService:
     @classmethod
     def from_config(cls) -> "HubService":
         cfg = load_config()
-        return cls(cfg.base_url, cfg.api_key)
+        return cls(cfg.base_url, resolve_api_key(cfg))
 
     @property
     def enabled(self) -> bool:

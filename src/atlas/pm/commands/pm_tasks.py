@@ -456,6 +456,7 @@ def add_cmd(
 
 
 _SRC_PROJECT = aliased(Project)
+_LEASE_HOLDER = aliased(Participant)
 
 
 @pm_tasks_app.command("list")
@@ -497,10 +498,13 @@ def list_cmd(
                 Project.slug.label("project_slug"),
                 Participant.slug.label("assignee_slug"),
                 _SRC_PROJECT.slug.label("source_project_slug"),
+                _LEASE_HOLDER.slug.label("lease_owner_slug"),
+                Task.lease_expires_at,
             )
             .join(Project, Task.project_id == Project.id)
             .join(Participant, Task.assignee_id == Participant.id, isouter=True)
             .join(_SRC_PROJECT, Task.source_project_id == _SRC_PROJECT.id, isouter=True)
+            .join(_LEASE_HOLDER, Task.lease_owner == _LEASE_HOLDER.id, isouter=True)
         )
 
         if project is not None:
@@ -544,6 +548,10 @@ def list_cmd(
             "project": r.project_slug,
             "origin": r.origin,
             "source_project": r.source_project_slug,
+            "lease_owner": r.lease_owner_slug,
+            "lease_expires_at": (
+                r.lease_expires_at.isoformat() if r.lease_expires_at else None
+            ),
             "archived": r.archived_at is not None,
         }
         for r in sorted_rows
@@ -565,6 +573,7 @@ def _render_task_list(data: list[dict[str, Any]]) -> None:
     table.add_column("P", justify="center", style="bold")
     table.add_column("Origin", style="yellow")
     table.add_column("Assignee", style="green")
+    table.add_column("Lease", style="red")
     table.add_column("Due", style="dim")
     table.add_column("Project", style="dim")
 
@@ -586,6 +595,7 @@ def _render_task_list(data: list[dict[str, Any]]) -> None:
             row["priority"],
             origin_cell,
             row["assignee"] or "—",
+            row["lease_owner"] or "—",
             row["due_date"] or "—",
             row["project"],
         )
@@ -613,6 +623,11 @@ def get_cmd(
         assignee = (
             session.get(Participant, task.assignee_id) if task.assignee_id else None
         )
+        # ----- lease holder (резолв lease_owner → slug) -----
+        lease_holder = None
+        if task.lease_owner:
+            _lp = session.get(Participant, task.lease_owner)
+            lease_holder = _lp.slug if _lp else task.lease_owner
 
         # ----- epic (резолв epic_id → slug) -----
         epic_slug = None
@@ -683,6 +698,14 @@ def get_cmd(
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "archived_at": task.archived_at.isoformat() if task.archived_at else None,
+        # lease/claim (Волна 8) — кто/откуда/когда держит задачу
+        "lease_owner": lease_holder,
+        "lease_session_id": task.lease_session_id,
+        "lease_origin": task.lease_origin,
+        "claimed_at": task.claimed_at.isoformat() if task.claimed_at else None,
+        "lease_expires_at": (
+            task.lease_expires_at.isoformat() if task.lease_expires_at else None
+        ),
         "recent_activity": recent,
     }
 
@@ -720,6 +743,17 @@ def _render_task_get(d: dict[str, Any]) -> None:
         console.print(f"  Epic:      {d['epic']}")
     if d["quality_tier"]:
         console.print(f"  Quality:   {d['quality_tier']}")
+
+    # Lease/claim — кто/откуда/когда держит задачу (Волна 8).
+    if d.get("lease_owner"):
+        line = f"  Lease:     {d['lease_owner']}"
+        if d.get("lease_session_id"):
+            line += f" · сессия {d['lease_session_id']}"
+        if d.get("lease_origin"):
+            line += f" · откуда {d['lease_origin']}"
+        console.print(line)
+        if d.get("lease_expires_at"):
+            console.print(f"  Lease до:  {d['lease_expires_at']}")
 
     # Provenance — только если задача не нативная или есть источник.
     if d["origin"] != "native" or d["source_project"]:

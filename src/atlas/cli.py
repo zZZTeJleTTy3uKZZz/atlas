@@ -18,6 +18,7 @@ from .pm.commands.inbox import inbox_app
 from .pm.commands.member import member_app
 from .pm.commands.participants import app as participants_app
 from .pm.commands.pm_tasks import pm_tasks_app
+from .pm.commands import task_lease as _task_lease  # noqa: F401  # регистрирует lease-команды на pm_tasks_app
 from .pm.commands.profile import profile_app
 from .pm.commands.projects import projects_app
 from .pm.commands.statuses import app as statuses_app

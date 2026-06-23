@@ -4,7 +4,7 @@ from __future__ import annotations
 import typer
 from clikit import async_command, command, emit_data
 
-from atlas.appconfig import load_config
+from atlas.appconfig import load_config, resolve_api_key
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.sync import daemon as daemon_mod
 from atlas.pm.sync import pull as pull_mod
@@ -23,7 +23,7 @@ def _db_url() -> str:
 async def push_cmd() -> None:
     """Выгрузить pending-операции из локального outbox на хаб."""
     cfg = load_config()
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    client = BackendClient(cfg.base_url, resolve_api_key(cfg))
     engine = make_engine(_db_url())
     try:
         with make_session(engine) as session:
@@ -40,7 +40,7 @@ async def pull_cmd(
 ) -> None:
     """Один цикл входящего синка: применить события с хаба локально."""
     cfg = load_config()
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    client = BackendClient(cfg.base_url, resolve_api_key(cfg))
     engine = make_engine(_db_url())
     try:
         with make_session(engine) as session:
@@ -62,7 +62,7 @@ async def watch_cmd(
     from librarykit.config_util import AppPaths
 
     cfg = load_config()
-    client = BackendClient(cfg.base_url, cfg.api_key)
+    client = BackendClient(cfg.base_url, resolve_api_key(cfg))
     engine = make_engine(_db_url())
     logfile = AppPaths("atlas").cache_dir / "sync-watch.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +116,7 @@ def daemon_status_cmd() -> None:
 def up_cmd() -> None:
     """Подключиться к хабу: поставить и запустить фоновый демон синка."""
     cfg = load_config()
-    if not cfg.api_key or not cfg.base_url:
+    if not resolve_api_key(cfg) or not cfg.base_url:
         emit_data({"ok": False, "error": "не задан api_key/base_url — настрой конфиг"},
                   text_renderer=lambda r: print(f"✗ {r['error']}"))
         raise typer.Exit(1)

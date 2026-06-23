@@ -25,7 +25,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
     ActionLog,

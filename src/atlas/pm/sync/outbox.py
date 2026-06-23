@@ -10,7 +10,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.models import Outbox, Task
 from atlas.pm.sync import mapper, policy
 
@@ -61,7 +61,7 @@ def mark_sent(session: Session, outbox_id: str) -> None:
     ob = session.get(Outbox, outbox_id)
     if ob is not None:
         ob.status = "sent"
-        ob.sent_at = msk_now()
+        ob.sent_at = local_now()
 
 
 def mark_failed(session: Session, outbox_id: str, error: str) -> None:

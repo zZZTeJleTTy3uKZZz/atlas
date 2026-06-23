@@ -61,8 +61,8 @@ def test_task_provenance_roundtrip(session):
     actor = Participant(kind="human", slug="dima", name="Дмитрий")
     session.add(actor)
     session.flush()
-    from atlas.pm._time import msk_now
-    now = msk_now()
+    from atlas.pm._time import local_now
+    now = local_now()
     task = Task(
         project_id=tgt.id, title="Injected", cpp_description="cpp", priority="P1",
         source_project_id=src.id, origin="injected",

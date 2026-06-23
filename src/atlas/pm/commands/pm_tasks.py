@@ -25,8 +25,9 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm.exc import StaleDataError
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import (
     ActionLog,
@@ -111,6 +112,22 @@ def _log_action(
         details_json=json.dumps(details, ensure_ascii=False, default=str),
     )
     session.add(entry)
+
+
+def _commit_or_optimistic_die(session: Session) -> None:
+    """commit с optimistic-lock guard (version_id_col на Task).
+
+    Конкурентная правка → StaleDataError → понятное сообщение + Exit(1).
+    """
+    try:
+        session.commit()
+    except StaleDataError:
+        session.rollback()
+        console.print(
+            "[red]✗ Задача изменена параллельно (version conflict) — "
+            "перечитайте (atlas task get) и повторите.[/red]"
+        )
+        raise typer.Exit(code=1)
 
 
 def _slug_exists_fn(session: Session):
@@ -381,7 +398,7 @@ def add_cmd(
                 source_slug = src.slug
                 if origin is None:
                     final_origin = "injected"
-                injected_at = msk_now()
+                injected_at = local_now()
                 if injected_by is not None:
                     injector = _resolve_assignee_or_die(session, injected_by)
 
@@ -456,6 +473,7 @@ def add_cmd(
 
 
 _SRC_PROJECT = aliased(Project)
+_LEASE_HOLDER = aliased(Participant)
 
 
 @pm_tasks_app.command("list")
@@ -497,10 +515,13 @@ def list_cmd(
                 Project.slug.label("project_slug"),
                 Participant.slug.label("assignee_slug"),
                 _SRC_PROJECT.slug.label("source_project_slug"),
+                _LEASE_HOLDER.slug.label("lease_owner_slug"),
+                Task.lease_expires_at,
             )
             .join(Project, Task.project_id == Project.id)
             .join(Participant, Task.assignee_id == Participant.id, isouter=True)
             .join(_SRC_PROJECT, Task.source_project_id == _SRC_PROJECT.id, isouter=True)
+            .join(_LEASE_HOLDER, Task.lease_owner == _LEASE_HOLDER.id, isouter=True)
         )
 
         if project is not None:
@@ -544,6 +565,10 @@ def list_cmd(
             "project": r.project_slug,
             "origin": r.origin,
             "source_project": r.source_project_slug,
+            "lease_owner": r.lease_owner_slug,
+            "lease_expires_at": (
+                r.lease_expires_at.isoformat() if r.lease_expires_at else None
+            ),
             "archived": r.archived_at is not None,
         }
         for r in sorted_rows
@@ -565,6 +590,7 @@ def _render_task_list(data: list[dict[str, Any]]) -> None:
     table.add_column("P", justify="center", style="bold")
     table.add_column("Origin", style="yellow")
     table.add_column("Assignee", style="green")
+    table.add_column("Lease", style="red")
     table.add_column("Due", style="dim")
     table.add_column("Project", style="dim")
 
@@ -586,6 +612,7 @@ def _render_task_list(data: list[dict[str, Any]]) -> None:
             row["priority"],
             origin_cell,
             row["assignee"] or "—",
+            row["lease_owner"] or "—",
             row["due_date"] or "—",
             row["project"],
         )
@@ -613,6 +640,11 @@ def get_cmd(
         assignee = (
             session.get(Participant, task.assignee_id) if task.assignee_id else None
         )
+        # ----- lease holder (резолв lease_owner → slug) -----
+        lease_holder = None
+        if task.lease_owner:
+            _lp = session.get(Participant, task.lease_owner)
+            lease_holder = _lp.slug if _lp else task.lease_owner
 
         # ----- epic (резолв epic_id → slug) -----
         epic_slug = None
@@ -683,6 +715,14 @@ def get_cmd(
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "archived_at": task.archived_at.isoformat() if task.archived_at else None,
+        # lease/claim (Волна 8) — кто/откуда/когда держит задачу
+        "lease_owner": lease_holder,
+        "lease_session_id": task.lease_session_id,
+        "lease_origin": task.lease_origin,
+        "claimed_at": task.claimed_at.isoformat() if task.claimed_at else None,
+        "lease_expires_at": (
+            task.lease_expires_at.isoformat() if task.lease_expires_at else None
+        ),
         "recent_activity": recent,
     }
 
@@ -720,6 +760,17 @@ def _render_task_get(d: dict[str, Any]) -> None:
         console.print(f"  Epic:      {d['epic']}")
     if d["quality_tier"]:
         console.print(f"  Quality:   {d['quality_tier']}")
+
+    # Lease/claim — кто/откуда/когда держит задачу (Волна 8).
+    if d.get("lease_owner"):
+        line = f"  Lease:     {d['lease_owner']}"
+        if d.get("lease_session_id"):
+            line += f" · сессия {d['lease_session_id']}"
+        if d.get("lease_origin"):
+            line += f" · откуда {d['lease_origin']}"
+        console.print(line)
+        if d.get("lease_expires_at"):
+            console.print(f"  Lease до:  {d['lease_expires_at']}")
 
     # Provenance — только если задача не нативная или есть источник.
     if d["origin"] != "native" or d["source_project"]:
@@ -885,7 +936,7 @@ def update_cmd(
             diffs["status"] = {"old": old_status, "new": status}
             task.status = status
 
-            now = msk_now()
+            now = local_now()
             if status == "in_progress" and task.started_at is None:
                 task.started_at = now
                 diffs["started_at"] = {"old": None, "new": now}
@@ -900,6 +951,19 @@ def update_cmd(
                 if task.completed_at is not None:
                     diffs["completed_at"] = {"old": task.completed_at, "new": None}
                     task.completed_at = None
+
+            # Завершение/отмена — авто-снятие lease (Волна 8): задача больше не
+            # в работе, держатель освобождается, чтобы не висела заблокированной.
+            if status in ("done", "cancelled") and task.lease_owner is not None:
+                diffs["lease_released"] = {
+                    "old": _slug_for_assignee(session, task.lease_owner),
+                    "new": None,
+                }
+                task.lease_owner = None
+                task.lease_session_id = None
+                task.lease_origin = None
+                task.claimed_at = None
+                task.lease_expires_at = None
 
         if not diffs:
             console.print("[yellow]Нечего обновлять.[/yellow]")
@@ -918,7 +982,7 @@ def update_cmd(
                 _outbox.enqueue(session, "update", "task", task, project=_proj, portal_id=_sync_portal_id())
         except Exception:
             pass
-        session.commit()
+        _commit_or_optimistic_die(session)
 
         console.print(
             f"[green]✓ Task #{task.number} '{task.slug}' updated[/green] "
@@ -983,7 +1047,7 @@ def delete_cmd(
                 details={"slug": slug_for_msg, "number": number_for_msg},
             )
             session.delete(task)
-            session.commit()
+            _commit_or_optimistic_die(session)
             console.print(
                 f"[red]✗ Task #{number_for_msg} '{slug_for_msg}' "
                 f"физически удалён.[/red]"
@@ -997,7 +1061,7 @@ def delete_cmd(
             )
             return
 
-        task.archived_at = msk_now()
+        task.archived_at = local_now()
         _log_action(
             session,
             action="task_archived",
@@ -1015,7 +1079,7 @@ def delete_cmd(
                 _outbox.enqueue(session, "delete", "task", task, project=_proj, portal_id=_sync_portal_id())
         except Exception:
             pass
-        session.commit()
+        _commit_or_optimistic_die(session)
         console.print(
             f"[green]✓ Task #{number_for_msg} archived[/green]"
         )

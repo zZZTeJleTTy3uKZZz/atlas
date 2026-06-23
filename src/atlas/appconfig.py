@@ -24,6 +24,10 @@ class AtlasConfig(AppConfig):
     # видимость входящего синка (профиль): all — все задачи (admin);
     # personal — только задачи, где я в составе участников ("мои задачи").
     scope: str = "all"
+    # Часовой пояс PM-БД как фиксированный offset (без DST — канон naive-времени,
+    # см. atlas.pm._time). Формат: "+03:00" / "-05:30" / "+5" / "UTC". Дефолт —
+    # MSK (UTC+3). Переопределяется слоями TOML или env ATLAS_TIMEZONE.
+    timezone: str = "+03:00"
 
 
 def load_config() -> AtlasConfig:

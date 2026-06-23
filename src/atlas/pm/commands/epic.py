@@ -7,7 +7,7 @@ import typer
 from clikit import command, emit_data
 from sqlalchemy import select
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.models import ActionLog, Epic, Participant, Project
 from atlas.pm.slugs import resolve_project_ref, slugify_text
@@ -102,7 +102,7 @@ def add_cmd(
                 source_id = src.id
                 if origin is None:
                     final_origin = "injected"
-                injected_at = msk_now()
+                injected_at = local_now()
                 injector = _resolve_participant(session, injected_by)
                 if injected_by is not None and injector is None:
                     print(f"Участник '{injected_by}' не найден.")

@@ -36,6 +36,15 @@
   - Статусы: `backlog|todo|in_progress|review|done|blocked|cancelled`. `in_progress`→ставит `started_at`; `done`→`completed_at`.
 - `atlas task delete <ref> [--hard]` — soft-archive (по умолчанию) или физическое удаление. Кладёт `delete` в outbox.
 
+### Lease / блокировка задач (Волна 8 — мультиагентность)
+
+- `atlas task claim <ref> [--ttl 2h] [--actor <slug>] [--session <id>] [--from <origin>]` — взять задачу в работу: атомарный lease (optimistic-lock через `lock_version`) + `status=in_progress` + assignee. Занятая другим → «задача занята», exit 1 (двойной захват невозможен).
+- `atlas task release <ref> [--actor]` — отпустить lease (только держатель).
+- `atlas task renew <ref> [--ttl 2h] [--actor]` — продлить lease (heartbeat).
+- `atlas task take <ref> --force [--ttl --actor --session --from]` — принудительно отобрать (даже занятую/протухшую).
+- `atlas task stale [--reap]` — протухшие lease: отчёт; `--reap` — освободить.
+- Идентичность держателя: флаги или env `ATLAS_ACTOR`/`ATLAS_SESSION`/`ATLAS_FROM` (дефолт actor `dmitry`). TTL по умолч. 2ч; протухшие авто-освобождаются (reaper при `claim`/`list`). `update --status done|cancelled` снимает lease. Lease — ЛОКАЛЬНАЯ координация, в ядро НЕ синкается. Любой `task update` под optimistic-lock.
+
 ## Эпики — `atlas epic`
 
 - `atlas epic add --project <ref> --title "<t>" [--slug <s>] [--goal "<g>"]` — создать веху/спринт. Enqueue (entity_kind=epic).

@@ -26,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 
 
 class Base(DeclarativeBase):
@@ -67,7 +67,7 @@ class ProjectType(Base):
         String(50), ForeignKey("sync_policies.slug")
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
 
@@ -82,7 +82,7 @@ class ProjectStatus(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     order_idx: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
 
@@ -160,10 +160,10 @@ class Project(Base):
     )
     # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+        DateTime, default=local_now, onupdate=local_now, nullable=False
     )
     last_touched_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -211,7 +211,7 @@ class Participant(Base):
     metadata_json: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
     __table_args__ = (
@@ -235,7 +235,7 @@ class ProjectParticipant(Base):
     role_in_project: Mapped[str] = mapped_column(String(100), nullable=False)
     allocated_weekly_hours: Mapped[Optional[float]] = mapped_column()
     joined_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
     left_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
@@ -295,14 +295,31 @@ class Task(Base):
     injected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # ----------------------------------------------------------------------
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+        DateTime, default=local_now, onupdate=local_now, nullable=False
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # --- Lease/Claim: блокировка задачи для мультиагентности (Волна 8) -----
+    # lease_* — ЛОКАЛЬНАЯ координация агентов: кто/откуда/когда взял задачу.
+    # НЕ синкается в ядро (см. sync/mapper._task_payload). lock_version —
+    # optimistic-lock через version_id_col (__mapper_args__ ниже): бампается и
+    # проверяется на каждом ORM-flush задачи.
+    lease_owner: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("participants.id"), nullable=True
+    )
+    lease_session_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    lease_origin: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    lock_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+
+    __mapper_args__ = {"version_id_col": lock_version}
 
     __table_args__ = (
         CheckConstraint(
@@ -326,6 +343,8 @@ class Task(Base):
         Index("idx_tasks_status", "status"),
         Index("idx_tasks_due", "due_date"),
         Index("idx_tasks_source_project", "source_project_id"),
+        Index("idx_tasks_lease", "lease_owner", "lease_expires_at"),
+        Index("idx_tasks_lease_expires", "lease_expires_at"),
     )
 
 
@@ -367,10 +386,10 @@ class Hypothesis(Base):
     confidence: Mapped[str] = mapped_column(String(3), default="M", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+        DateTime, default=local_now, onupdate=local_now, nullable=False
     )
     tested_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -408,7 +427,7 @@ class ActionLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
     actor_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("participants.id")
@@ -445,7 +464,7 @@ class Tag(Base):
     color: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
     __table_args__ = (
@@ -473,7 +492,7 @@ class ProjectTag(Base):
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
     __table_args__ = (
@@ -501,7 +520,7 @@ class SyncPolicy(Base):
     sync_task: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     sync_checklist: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
 
@@ -521,7 +540,7 @@ class Counterparty(Base):
     git_namespace: Mapped[Optional[str]] = mapped_column(String(200))
     backend_id: Mapped[Optional[str]] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, nullable=False
+        DateTime, default=local_now, nullable=False
     )
 
     __table_args__ = (
@@ -566,9 +585,9 @@ class Epic(Base):
     )
     injected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # ----------------------------------------------------------------------
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+        DateTime, default=local_now, onupdate=local_now, nullable=False
     )
 
     __table_args__ = (
@@ -595,7 +614,7 @@ class ChecklistItem(Base):
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     backend_id: Mapped[Optional[str]] = mapped_column(String(36))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     __table_args__ = (Index("idx_checklist_task", "task_id"),)
 
@@ -612,7 +631,7 @@ class TaskMember(Base):
         String(36), ForeignKey("participants.id"), primary_key=True
     )
     role: Mapped[str] = mapped_column(String(20), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -638,7 +657,7 @@ class Outbox(Base):
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=msk_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     last_error: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -659,5 +678,5 @@ class SyncCursor(Base):
     channel: Mapped[str] = mapped_column(String(50), primary_key=True)
     cursor: Mapped[Optional[str]] = mapped_column(String(40))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=msk_now, onupdate=msk_now, nullable=False
+        DateTime, default=local_now, onupdate=local_now, nullable=False
     )

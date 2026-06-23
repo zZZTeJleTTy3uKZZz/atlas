@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.models import ChecklistItem, Epic, Project, Task
 
 
@@ -129,7 +129,7 @@ def _delete(session: Session, kind: str, bid: str) -> dict:
     if obj is None:
         return {"skipped": "not_found"}
     if hasattr(obj, "archived_at"):
-        obj.archived_at = msk_now()
+        obj.archived_at = local_now()
     else:
         session.delete(obj)
     return {"deleted": kind}

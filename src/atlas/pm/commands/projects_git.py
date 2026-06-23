@@ -33,7 +33,7 @@ from rich.table import Table
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from atlas.pm._time import msk_now
+from atlas.pm._time import local_now
 from atlas.pm.db import make_engine, make_session, resolve_db_url
 from atlas.pm.git_backend import GitLabBackend, LocalGitOps
 from atlas.pm.git_paths import derive_group_path
@@ -205,7 +205,7 @@ def perform_git_init(
     local_ops.add_remote(local, "origin", url)
     local_ops.push(local, branch="main")
 
-    now = msk_now()
+    now = local_now()
     project.git_remote_url = url
     project.git_repo_url = url  # W45-32k: sync legacy field too
     project.git_default_branch = "main"
@@ -367,7 +367,7 @@ def push_cmd(
             console.print(f"[red]Push failed: {exc}[/red]")
             raise typer.Exit(code=1)
 
-        now = msk_now()
+        now = local_now()
         project.git_last_pushed_at = now
         project.last_touched_at = now
 
@@ -429,7 +429,7 @@ def link_cmd(
             console.print(f"[red]git remote add failed: {exc}[/red]")
             raise typer.Exit(code=1)
 
-        now = msk_now()
+        now = local_now()
         project.git_remote_url = url
         project.git_default_branch = branch
         project.git_provider = provider
@@ -523,7 +523,7 @@ def move_cmd(
                     )
 
         project.git_remote_url = new_url
-        project.last_touched_at = msk_now()
+        project.last_touched_at = local_now()
 
         _log_action(
             session,
@@ -715,7 +715,7 @@ def sync_from_remote_cmd(
                 continue
             old = proj.git_remote_url
             proj.git_remote_url = a["remote"]
-            proj.last_touched_at = msk_now()
+            proj.last_touched_at = local_now()
             _log_action(
                 session,
                 action="project_git_url_synced",

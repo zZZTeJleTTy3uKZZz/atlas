@@ -189,6 +189,14 @@ def list_cmd(
             {
                 "id": e.id, "slug": e.slug, "title": e.title,
                 "status": e.status, "origin": e.origin, "project": project_slug,
+                "lease_owner": (
+                    session.get(Participant, e.lease_owner).slug
+                    if e.lease_owner and session.get(Participant, e.lease_owner)
+                    else e.lease_owner
+                ),
+                "lease_expires_at": (
+                    e.lease_expires_at.isoformat() if e.lease_expires_at else None
+                ),
             }
             for e, project_slug in rows
         ]
@@ -224,6 +232,10 @@ def get_cmd(ref: str = typer.Argument(..., help="slug | UUID эпика")) -> No
         if epic.injected_by:
             inj = session.get(Participant, epic.injected_by)
             injector_slug = inj.slug if inj else epic.injected_by
+        lease_holder = None
+        if epic.lease_owner:
+            lp = session.get(Participant, epic.lease_owner)
+            lease_holder = lp.slug if lp else epic.lease_owner
 
         data = {
             "id": epic.id, "slug": epic.slug, "title": epic.title,
@@ -235,6 +247,14 @@ def get_cmd(ref: str = typer.Argument(..., help="slug | UUID эпика")) -> No
             "rationale": epic.rationale,
             "injected_by": injector_slug,
             "injected_at": epic.injected_at.isoformat() if epic.injected_at else None,
+            # lease/claim (эпик «Групповой lease») — кто/откуда/когда держит эпик
+            "lease_owner": lease_holder,
+            "lease_session_id": epic.lease_session_id,
+            "lease_origin": epic.lease_origin,
+            "claimed_at": epic.claimed_at.isoformat() if epic.claimed_at else None,
+            "lease_expires_at": (
+                epic.lease_expires_at.isoformat() if epic.lease_expires_at else None
+            ),
         }
 
         def _render(d):

@@ -21,8 +21,8 @@ from typer.testing import CliRunner
 @pytest.fixture()
 def fresh_engine(tmp_path, monkeypatch):
     """Чистая SQLite БД на диске + ATLAS_DB_URL в env, чтобы CLI её увидел."""
-    from atlas.pm.db import make_engine
-    from atlas.pm.models import Base
+    from atlas.db import make_engine
+    from atlas.models import Base
 
     db_path = tmp_path / "atlas.db"
     url = f"sqlite:///{db_path}"
@@ -35,8 +35,8 @@ def fresh_engine(tmp_path, monkeypatch):
 @pytest.fixture()
 def seeded_engine(fresh_engine):
     """Чистая БД + полный seed (project_types, project_statuses, participants)."""
-    from atlas.pm.db import make_session
-    from atlas.pm.seeds import seed_all
+    from atlas.db import make_session
+    from atlas.seeds import seed_all
 
     with make_session(fresh_engine) as session:
         seed_all(session)
@@ -50,20 +50,20 @@ def runner():
 
 @pytest.fixture()
 def projects_app():
-    from atlas.pm.commands.projects import projects_app
+    from atlas.commands.projects import projects_app
     return projects_app
 
 
 @pytest.fixture()
 def tasks_app():
-    from atlas.pm.commands.pm_tasks import pm_tasks_app
-    return pm_tasks_app
+    from atlas.commands.task import task_app
+    return task_app
 
 
 @pytest.fixture()
 def app():
     """CLI-приложение hypothesis."""
-    from atlas.pm.commands.hypothesis import hypothesis_app
+    from atlas.commands.hypothesis import hypothesis_app
     return hypothesis_app
 
 
@@ -106,8 +106,8 @@ def _add(runner, app, *args):
 
 class TestAdd:
     def test_add_minimal(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         result = _add(
             runner, app,
@@ -126,8 +126,8 @@ class TestAdd:
             assert h.verdict is None
 
     def test_add_explicit_slug(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         result = _add(
             runner, app,
@@ -142,8 +142,8 @@ class TestAdd:
             assert h.title == "X"
 
     def test_add_full_fields(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         result = _add(
             runner, app,
@@ -161,8 +161,8 @@ class TestAdd:
             assert h.confidence == "H"
 
     def test_add_with_task(self, runner, app, tasks_app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis, Task
+        from atlas.db import make_session
+        from atlas.models import Hypothesis, Task
 
         r = runner.invoke(tasks_app, [
             "add", "--project", "cifro", "--title", "Build onboarding", "--cpp", "x",
@@ -196,8 +196,8 @@ class TestAdd:
         assert result.exit_code != 0
 
     def test_add_slug_collision_auto(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         r1 = _add(runner, app, "--project", "cifro", "--title", "Dup", "--slug", "dup")
         assert r1.exit_code == 0
@@ -210,8 +210,8 @@ class TestAdd:
             assert h.title == "Dup"
 
     def test_add_number_autoincrement(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         for t in ["A", "B", "C"]:
             r = _add(runner, app, "--project", "cifro", "--title", t)
@@ -221,8 +221,8 @@ class TestAdd:
             assert numbers == [1, 2, 3]
 
     def test_add_status_testing_sets_tested_at(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         r = _add(runner, app, "--project", "cifro", "--title", "T", "--status", "testing")
         assert r.exit_code == 0, _combined(r)
@@ -244,8 +244,8 @@ class TestAdd:
         assert r.exit_code != 0
 
     def test_add_creates_action_log(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import ActionLog
+        from atlas.db import make_session
+        from atlas.models import ActionLog
 
         r = _add(runner, app, "--project", "cifro", "--title", "Logged")
         assert r.exit_code == 0, _combined(r)
@@ -361,8 +361,8 @@ class TestGet:
         assert result.exit_code == 0
 
     def test_get_by_uuid_full(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         with make_session(seeded_engine) as session:
@@ -371,8 +371,8 @@ class TestGet:
         assert result.exit_code == 0
 
     def test_get_by_uuid_short(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         with make_session(seeded_engine) as session:
@@ -399,8 +399,8 @@ class TestGet:
 
 class TestUpdate:
     def test_update_single_field(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "Old")
         result = runner.invoke(app, ["update", "1", "--title", "New"])
@@ -410,8 +410,8 @@ class TestUpdate:
             assert h.title == "New"
 
     def test_update_measurement_fields(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         result = runner.invoke(app, [
@@ -428,8 +428,8 @@ class TestUpdate:
             assert h.consolidated_into == "skills/pricing/SKILL.md"
 
     def test_update_status_testing_sets_tested_at(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         result = runner.invoke(app, ["update", "1", "--status", "testing"])
@@ -440,8 +440,8 @@ class TestUpdate:
             assert h.tested_at is not None
 
     def test_update_status_closed_sets_closed_at(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         result = runner.invoke(app, ["update", "1", "--status", "closed"])
@@ -463,8 +463,8 @@ class TestUpdate:
         assert result.exit_code != 0
 
     def test_update_creates_action_log_with_diff(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import ActionLog
+        from atlas.db import make_session
+        from atlas.models import ActionLog
 
         _add(runner, app, "--project", "cifro", "--title", "Old")
         runner.invoke(app, ["update", "1", "--title", "New"])
@@ -488,8 +488,8 @@ class TestUpdate:
 
 class TestClose:
     def test_close_sets_verdict_status_closed_at(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         result = runner.invoke(app, [
@@ -517,8 +517,8 @@ class TestClose:
         assert result.exit_code != 0
 
     def test_close_creates_action_log(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import ActionLog
+        from atlas.db import make_session
+        from atlas.models import ActionLog
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         runner.invoke(app, ["close", "1", "--verdict", "reject"])
@@ -538,8 +538,8 @@ class TestClose:
 
 class TestDelete:
     def test_delete_soft_sets_archived_at(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import ActionLog, Hypothesis
+        from atlas.db import make_session
+        from atlas.models import ActionLog, Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         result = runner.invoke(app, ["delete", "1"])
@@ -560,8 +560,8 @@ class TestDelete:
         assert "gone" not in result.stdout.lower()
 
     def test_delete_hard_with_confirm(self, runner, app, project_cifro, seeded_engine):
-        from atlas.pm.db import make_session
-        from atlas.pm.models import Hypothesis
+        from atlas.db import make_session
+        from atlas.models import Hypothesis
 
         _add(runner, app, "--project", "cifro", "--title", "X")
         result = runner.invoke(app, ["delete", "1", "--hard"], input="y\n")

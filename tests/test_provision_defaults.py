@@ -1,6 +1,6 @@
 """Авто-раскладка нового проекта: дефолты владельца/режима (этап 1)."""
 from atlas.appconfig import owner_member_slug
-from atlas.pm.commands._provision import resolve_project_mode
+from atlas.commands._provision import resolve_project_mode
 
 
 def test_owner_member_slug_from_atlas_dmitry():

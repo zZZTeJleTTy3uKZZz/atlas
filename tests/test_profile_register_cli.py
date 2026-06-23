@@ -18,6 +18,16 @@ from atlas.cli import app
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_keyring(monkeypatch):
+    """#201: keystore-операции в тестах идут в file-fallback, не в реальный
+    Credential Manager (изоляция + детерминизм)."""
+    monkeypatch.setattr(
+        "librarykit.secret_store.SecretStore._keyring", lambda self: None
+    )
+    monkeypatch.delenv("ATLAS_ACCESS_TOKEN", raising=False)
+
+
 @pytest.fixture
 def admin_env(monkeypatch, tmp_path):
     """Изолированный config-dir + active admin base_url/api_key через env."""
@@ -42,7 +52,7 @@ def fake_register(monkeypatch):
         return {"member_slug": member_slug, "portal_slug": portal_slug, "api_key": "k2"}
 
     monkeypatch.setattr(
-        "atlas.pm.sync.backend_client.BackendClient.register_profile", _fake
+        "atlas.sync.backend_client.BackendClient.register_profile", _fake
     )
     return captured
 
@@ -55,10 +65,35 @@ def test_register_writes_profile_config(admin_env):
     cfg_file = admin_env / "profiles" / "admin2" / "config.toml"
     assert cfg_file.is_file(), "config профиля не создан"
     data = tomllib.loads(cfg_file.read_text(encoding="utf-8"))
-    assert data["api_key"] == "k2"
+    # #201: ключ НЕ в открытом config.toml — поле пустое.
+    assert data["api_key"] == ""
     assert data["portal_id"] == "admin2"
     assert data["scope"] == "all"
     assert data["base_url"] == "http://hub"
+
+
+def test_register_stores_key_in_keystore_not_plaintext(admin_env, monkeypatch):
+    """#201: выданный ключ доступен через keystore/resolve, но НЕ открыт в TOML."""
+    from atlas import keystore
+    from atlas.appconfig import AtlasConfig, resolve_api_key
+
+    res = runner.invoke(
+        app, ["profile", "register", "admin2", "--name", "Админ2", "--scope", "all"]
+    )
+    assert res.exit_code == 0, res.output
+
+    # config.toml профиля — без открытого ключа.
+    data = tomllib.loads(
+        (admin_env / "profiles" / "admin2" / "config.toml").read_text(encoding="utf-8")
+    )
+    assert data["api_key"] == ""
+
+    # Под профилем admin2 ключ читается из keystore и через resolve_api_key.
+    monkeypatch.setenv("ATLAS_PROFILE", "admin2")
+    monkeypatch.delenv("ATLAS_API_KEY", raising=False)
+    assert keystore.load_api_key("admin2") == "k2"
+    cfg = AtlasConfig.load("atlas")
+    assert resolve_api_key(cfg) == "k2"
 
 
 def test_register_sends_core_contract_fields(admin_env, fake_register):

@@ -9,10 +9,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import (
+from atlas.models import (
     Base, Participant, Project, ProjectStatus, ProjectType, Task, TaskMember,
 )
-from atlas.pm.sync import mapper
+from atlas.sync import mapper
 
 
 @pytest.fixture

@@ -201,7 +201,7 @@ Id-префиксы: `cl-` / `np-` / `ut-` / `pp-` / `sh-`.
 
 ### 2.3 Memory Claude — индекс реестра
 
-В моей memory (`C:\Users\79288\.claude\projects\.../memory/`) создаётся **один** memory-файл `project_portfolio_index.md` (type: `project`) — короткий индекс с ссылкой на канонический `PORTFOLIO.md`. Никаких дублей деталей: memory даёт «где смотреть», канонический файл даёт правду.
+В моей memory (`~/.claude/projects/.../memory/`) создаётся **один** memory-файл `project_portfolio_index.md` (type: `project`) — короткий индекс с ссылкой на канонический `PORTFOLIO.md`. Никаких дублей деталей: memory даёт «где смотреть», канонический файл даёт правду.
 
 ### 2.4 Открыто для research
 

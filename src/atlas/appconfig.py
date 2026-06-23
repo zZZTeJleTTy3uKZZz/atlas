@@ -6,6 +6,8 @@ init-kwargs). Добавляет поля backend-хаба. Секрет ``api_k
 """
 from __future__ import annotations
 
+import os
+
 from clikit import AppConfig
 
 
@@ -24,11 +26,56 @@ class AtlasConfig(AppConfig):
     # видимость входящего синка (профиль): all — все задачи (admin);
     # personal — только задачи, где я в составе участников ("мои задачи").
     scope: str = "all"
+    # Часовой пояс PM-БД как фиксированный offset (без DST — канон naive-времени,
+    # см. atlas._time). Формат: "+03:00" / "-05:30" / "+5" / "UTC". Дефолт —
+    # MSK (UTC+3). Переопределяется слоями TOML или env ATLAS_TIMEZONE.
+    timezone: str = "+03:00"
 
 
 def load_config() -> AtlasConfig:
     """Загрузить конфиг бренда ``atlas`` (слои + env)."""
     return AtlasConfig.load("atlas")
+
+
+def resolve_api_key(cfg: AtlasConfig) -> str:
+    """Достать admin-api-ключ стора с приоритетом источников + back-compat (#201).
+
+    Приоритет:
+    1. env ``ATLAS_API_KEY`` (если задан и непустой) — явный оверрайд;
+    2. keystore (``SecretStore`` keyring/file-fallback) по ``cfg.portal_id``;
+    3. legacy: открытый ``cfg.api_key`` из TOML — если непустой, ОДНОРАЗОВО
+       мигрируется: ключ кладётся в keystore, а ``config.toml`` переписывается с
+       пустым ``api_key`` (прочие поля сохраняются). Возвращается мигрированный
+       ключ.
+
+    Иначе — пустая строка (ключа нет; команды синка попросят его задать).
+
+    ``keystore`` импортируется лениво (избегаем цикла appconfig↔keystore).
+    """
+    env_key = os.environ.get("ATLAS_API_KEY")
+    if env_key:
+        return env_key
+
+    from atlas import keystore
+
+    stored = keystore.load_api_key(cfg.portal_id)
+    if stored:
+        return stored
+
+    legacy = cfg.api_key
+    if legacy:
+        # Миграция: ключ → keystore, открытое поле в config.toml обнуляем.
+        keystore.save_api_key(cfg.portal_id, legacy)
+        AtlasConfig(
+            base_url=cfg.base_url,
+            api_key="",
+            portal_id=cfg.portal_id,
+            scope=cfg.scope,
+            timezone=cfg.timezone,
+        ).save("atlas")
+        return legacy
+
+    return ""
 
 
 # Соответствие портала-стора → дефолтный member-slug владельца нового проекта.

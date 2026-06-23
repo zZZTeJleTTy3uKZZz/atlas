@@ -3,10 +3,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from atlas.pm.models import (
+from atlas.models import (
     Base, Project, ProjectStatus, ProjectType, SyncPolicy, Task,
 )
-from atlas.pm.sync import outbox, push
+from atlas.sync import outbox, push
 
 
 class _FakeClient:

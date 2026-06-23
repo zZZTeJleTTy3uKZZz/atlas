@@ -144,7 +144,7 @@ atlas modules add \
     --name "B24 ↔ Kibersoft Sync" \
     --one-line "Двусторонняя синхронизация Bitrix24 ↔ Kibersoft (МИС) для Med Persona" \
     --git-repo-url https://gitlab.com/cifropro1/clients/med-persona/b24-kibersoft-sync.git \
-    --local-path C:\Users\79288\Documents\PROJECT\_storage\Med-Persona\modules\B24_Kibersoft_Sync \
+    --local-path ~/Documents/PROJECT/_storage/Med-Persona/modules/B24_Kibersoft_Sync \
     --prod-url https://sync.persona26med.ru \
     --prod-host 185.93.111.51 \
     --deploy-strategy git-pull \

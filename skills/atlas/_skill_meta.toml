@@ -1,0 +1,18 @@
+# Манифест навыка Atlas для skillery (tooling-тип: несёт CLI).
+# При install skillery материализует SKILL.md + agents/ + references/ (см.
+# .skillignore) и ставит сам CLI через runtime_dependencies (pip git-install).
+description = "Atlas — local-first PM-система портфеля проектов и задач (SQLite). CLI atlas: project/task/epic/checklist/idea/inbox/hypothesis/tag/backup. Всё в локальном SQLite, без сети и внешних сервисов."
+version = "0.2.1"
+kind = "tooling"
+tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
+
+# CLI-инструмент, который несёт навык.
+[[cli]]
+command_name = "atlas"
+entrypoint = "atlas.cli:app"
+
+# Runtime-зависимость: сам пакет CLI ставится из публичного git-репо по тегу.
+# pip git-install (имя пакета atlas ≠ PyPI 'atlas' — ставим из git, не с PyPI).
+runtime_dependencies = [
+    { kind = "pip", spec = "atlas @ git+https://github.com/zZZTeJleTTy3uKZZz/atlas.git@v0.2.1" },
+]

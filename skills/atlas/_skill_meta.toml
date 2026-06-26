@@ -6,13 +6,15 @@ version = "0.2.1"
 kind = "tooling"
 tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 
-# CLI-инструмент, который несёт навык.
-[[cli]]
-command_name = "atlas"
-entrypoint = "atlas.cli:app"
-
 # Runtime-зависимость: сам пакет CLI ставится из публичного git-репо по тегу.
 # pip git-install (имя пакета atlas ≠ PyPI 'atlas' — ставим из git, не с PyPI).
+# ВАЖНО (TOML): top-level массив объявляем ДО заголовка [[cli]], иначе tomllib
+# относит этот ключ ВНУТРЬ таблицы cli[0], а не на верхний уровень манифеста.
 runtime_dependencies = [
     { kind = "pip", spec = "atlas @ git+https://github.com/zZZTeJleTTy3uKZZz/atlas.git@v0.2.1" },
 ]
+
+# CLI-инструмент, который несёт навык (заголовок таблицы — ПОСЛЕ top-level ключей).
+[[cli]]
+command_name = "atlas"
+entrypoint = "atlas.cli:app"

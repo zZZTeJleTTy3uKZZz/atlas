@@ -41,9 +41,12 @@ from .commands.tags import app as tags_app
 from .commands.types import app as types_app
 
 try:
-    _ATLAS_VERSION = _pkg_version("atlas")
-except PackageNotFoundError:  # pragma: no cover — пакет не установлен (редкий случай)
-    _ATLAS_VERSION = "0.0.0"
+    _ATLAS_VERSION = _pkg_version("atlas-pm")  # dist-имя на PyPI (import-пакет — atlas)
+except PackageNotFoundError:  # editable / не установлен — читаем версию из кода
+    try:
+        from atlas import __version__ as _ATLAS_VERSION
+    except Exception:  # pragma: no cover
+        _ATLAS_VERSION = "0.0.0"
 
 app = build_root_app(
     "atlas",

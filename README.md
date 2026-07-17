@@ -71,6 +71,14 @@ atlas — это персональная система управления п
 
 Требуется Python ≥ 3.11. Дистрибутив опубликован на PyPI как **`atlas-pm`** (CLI-команда — `atlas`).
 
+**0. Одной командой** (ставит `uv` при необходимости, затем `atlas-pm`):
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/zZZTeJleTTy3uKZZz/atlas/master/install/install.sh | sh
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/zZZTeJleTTy3uKZZz/atlas/master/install/install.ps1 | iex
+```
+
 **1. Через [skillery](https://skillery.ru) (рекомендуется)** — ставит CLI и заодно навык для Claude-агента:
 ```bash
 skillery install atlas

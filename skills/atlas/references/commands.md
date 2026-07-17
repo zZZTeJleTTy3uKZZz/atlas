@@ -74,8 +74,11 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 
 **Жизненный цикл + lease — блокировка задач для мультиагентности.** Статус задачи меняется ГЛАГОЛАМИ (`start`/`review`/`block`/`unblock`/`done`/`cancel`), а не «голым» `update --status` (он обходил lease; теперь принимает лишь backlog\|todo). `start` (= `claim`) атомарно (optimistic-lock через `lock_version`) ставит lease (`lease_owner`+`lease_session_id`+`lease_origin`+`claimed_at`+`lease_expires_at`; TTL по умолч. 2ч) + status=in_progress + assignee. Второй агент на занятой задаче получает «задача занята» и exit 1 — двойной захват/затирание невозможны. `done`/`cancel` снимают lease (+`completed_at` у done); `review`/`block` его сохраняют; `unblock` требует держать lease. Завершить/перевести ЧУЖУЮ живую задачу — только с `--force` (иначе LeaseHeldError). Идентичность держателя: флаги `--actor`/`--session`/`--from` или env `ATLAS_ACTOR`/`ATLAS_SESSION`/`ATLAS_FROM` (дефолт actor — из конфига). Протухшие lease авто-освобождаются (ленивый reaper при глаголах/`list`; вручную — `task stale --reap`). **Lease — локальная координация мультиагентности** (в ядро не синкается; статус — синкается). `task get`/`list` показывают держателя. Любой переход защищён optimistic-lock.
 
-## epic — эпики (вехи/спринты; задача привязывается флагом `task --epic`)
+## epic — эпики (вехи; задача привязывается флагом `task --epic`, бывший `--sprint`)
 `add --project* --title* [--slug --goal --description --source-project --rationale --origin --injected-by]` · `list [--project --source-project]` (**без `--project` = ВЕСЬ портфель** + колонка Project) · `get <ref>` (показывает description + блок Provenance).
+
+## sprint — итерации (спринты)
+Планирование итераций: завести спринт (окно дат), набрать задачи, отслеживать прогресс. Задачи связываются с вехами через `epic` (`task --epic`). Точные подкоманды/флаги — `atlas sprint --help`.
 
 ## checklist — пункты чек-листа задачи
 `add --task* --text* [--due YYYY-MM-DD]` · `list --task <ref>` · `check <item-id> [--uncheck]` · `delete <item-id>`.
@@ -88,6 +91,9 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 
 ## participant — люди портфеля
 `add --name --kind human|ai_agent|contractor --slug --role …` · `list` · `get <ref>` · `update <ref>` · `delete <ref> [--hard --force --soft]`. `--force` каскадит FK (снимает с проектов/задач), `--soft` = is_active=False.
+
+## profile — профиль текущего пользователя/актора
+Идентичность актора по умолчанию (owner/actor из конфига), используемая в lease/аудите. Точные подкоманды/флаги — `atlas profile --help`.
 
 ## type / status / tag — справочники
 - `type list` (колонка Group) / `type add --slug --name [--group clients|products|tests|inbox]` / `type edit <ref> --name/--description/--color/--group` (slug неизменен). **10 канон-типов**: client-project / business-product / personal-utility / personal-project / shared-infrastructure / test / inbox + **роли** kit / service / superskill. Единый источник `BASE_PROJECT_TYPES` + user-override `~/.atlas/types.toml` (merge by slug); `storage_group` = физ-группа на диске.
@@ -104,7 +110,7 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
   что сделано / осталось / как проверить / ЦКП / контекст). Создаёт issue(handoff), переназначает на `--to`,
   снимает lease сдающего; **неполную передачу блокирует**. Принимающий: `issue show <ref>` → `task start <ref>`.
 
-## backlog — пул идей-интейка (DB-first) → задача/проект
+## backlog — ОСНОВНОЙ интейк идей (primary, DB-first) → задача/проект
 Сырьё ДО задачи: лёгкая запись в БД (ЦКП НЕ нужен, проект опционален — global-пул «между проектами»).
 Просматривается отдельно от задач, **конвертируется** в `todo`-задачу (ЦКП появляется тут) или зачаток проекта.
 - `backlog add --title* [--note --project --priority --slug --md]` — завести идею (global если без `--project`).
@@ -117,7 +123,8 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 > Лёгкие «идея-в-задачу» — теперь `atlas backlog`. `idea` остаётся для идеи-зачатка ПРОЕКТА.
 `add --slug --name --type --priority --tag … --one-line` · `list` · `show <slug>` (БД + MD) · `promote <slug> [--status active --priority … --init-git --canonical]` (idea→project: layout + MD→IDEA.md + extract backlog) · `demote <slug>` (обратно) · `update <slug> --…`.
 
-## inbox — свалка сырья на разбор AI (entity_kind=inbox, `_Inbox/<slug>/`)
+## inbox — LEGACY: свалка сырья на разбор AI (entity_kind=inbox, `_Inbox/<slug>/`)
+> Лёгкий интейк сырья — теперь `atlas backlog` (primary). `inbox` остаётся для проектной свалки.
 `add --slug --name --tag …` · `list` · `show <slug>`. inbox ≠ idea (idea = сформулированная мысль; inbox = «разберись что это»).
 
 ## action-log — append-only аудит (read-only для агента)
@@ -132,13 +139,15 @@ actor/владелец), `timezone`, namespaces, `team_owner`, и **дефолт
 `default_review` (bool — заводить ли reviewer), `default_reviewer` (slug; пусто → создатель). Дефолты
 применяются в `task add`/`batch`, если не заданы явно. `api_key` — только env/secret-store.
 
-## Топ-уровень (без группы): dashboard / init / stats
+## Топ-уровень (без группы): dashboard / init / stats / logs / update / connect
 - `atlas dashboard [--project <ref>] [--json]` — операционный обзор: KPI, задачи по статусам/приоритетам, что в работе (in-flight + держатель), внимание (blocked/overdue/протухшие lease), по проектам, активность. По умолчанию Rich для человека; `--json` — для агента.
 - `atlas init [--scope global|repo|all] [--agents …] [--create] [--dry-run] [--json]` — идемпотентно дописывает Atlas-дисциплину (managed-блок между маркерами) в агентские файлы. Аддитивно: чужой текст не трогается.
   - Без `--agents` — легаси: все существующие агентские файлы (`~/.claude/CLAUDE.md`, репо `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`/`.cursorrules`).
   - `--agents claude,gemini,cursor,codex,copilot` (или `all`) — **точечный выбор** агентов; с `--create` создаёт их файлы (включая вложенный `.github/copilot-instructions.md`). Реестр агент→файл (18 агентов) и весь механизм онбординга — в ките **`agentskit`** (`agentskit.AGENT_REGISTRY`/`onboard`); Atlas приносит только контент (`atlas.discipline.DISCIPLINE_BODY` + namespace `atlas`).
 - `atlas stats [--period <spec>] [--provenance] [--project <ref>]` — аналитика (counts/окно активности/provenance/git).
 - `atlas connect [<url>] [--key K] [--no-verify]` — подключить backend (синк) / статус; ключ → secret-store. `atlas disconnect` — отключить. **Local-first**: всё работает без подключения; `sync push/pull` — только после connect.
+- `atlas logs [...]` — журнал CLI/операций (человеку — Rich; агенту — `--json`). Точные фильтры — `atlas logs --help`. Ср. `action-log` (append-only аудит сущностей).
+- `atlas update [--check]` — self-update CLI с PyPI (дистрибутив **atlas-pm**, команда/import `atlas`): детектит менеджер (uv/pipx/pip) и ставит свежую версию; `--check` — показать текущую/доступную без установки. **`atlas upgrade`** — legacy (git-install), не предлагать по умолчанию.
 
 ---
 

@@ -1,17 +1,18 @@
 # Манифест навыка Atlas для skillery (tooling-тип: несёт CLI).
 # При install skillery материализует SKILL.md + agents/ + references/ (см.
 # .skillignore) и ставит сам CLI через runtime_dependencies (pip git-install).
-description = "Atlas — local-first PM-система портфеля проектов и задач (SQLite). CLI atlas: project/task/epic/checklist/idea/inbox/hypothesis/tag/backup. Всё в локальном SQLite, без сети и внешних сервисов."
-version = "0.2.5"
+description = "Atlas — local-first PM-система портфеля проектов и задач (SQLite). CLI atlas: project/task/epic/sprint/backlog/issue/checklist/hypothesis/tag/backup. Всё в локальном SQLite, без сети и внешних сервисов. Ставится с PyPI (atlas-pm), self-update `atlas update`; приёмка опциональна."
+version = "0.2.6"
 kind = "tooling"
 tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 
-# Runtime-зависимость: сам пакет CLI ставится из публичного git-репо по тегу.
-# pip git-install (имя пакета atlas ≠ PyPI 'atlas' — ставим из git, не с PyPI).
+# Runtime-зависимость: сам пакет CLI ставится с PyPI (dist-имя atlas-pm; команда/import — atlas).
+# Версия пинуется В ОДНОМ месте (==X.Y.Z), синхронно с pyproject.version — git-install больше не нужен,
+# рассинхрона «version vs @tag» больше нет.
 # ВАЖНО (TOML): top-level массив объявляем ДО заголовка [[cli]], иначе tomllib
 # относит этот ключ ВНУТРЬ таблицы cli[0], а не на верхний уровень манифеста.
 runtime_dependencies = [
-    { kind = "pip", spec = "atlas @ git+https://github.com/zZZTeJleTTy3uKZZz/atlas.git@v0.2.5" },
+    { kind = "pip", spec = "atlas-pm==0.2.6" },
 ]
 
 # CLI-инструмент, который несёт навык (заголовок таблицы — ПОСЛЕ top-level ключей).

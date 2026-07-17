@@ -2,7 +2,7 @@
 # При install skillery материализует SKILL.md + agents/ + references/ (см.
 # .skillignore) и ставит сам CLI через runtime_dependencies (pip git-install).
 description = "Atlas — local-first PM-система портфеля проектов и задач (SQLite). CLI atlas: project/task/epic/sprint/backlog/issue/checklist/hypothesis/tag/backup. Всё в локальном SQLite, без сети и внешних сервисов. Ставится с PyPI (atlas-pm), self-update `atlas update`; приёмка опциональна."
-version = "0.2.7"
+version = "0.2.8"
 kind = "tooling"
 tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 
@@ -12,7 +12,7 @@ tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 # ВАЖНО (TOML): top-level массив объявляем ДО заголовка [[cli]], иначе tomllib
 # относит этот ключ ВНУТРЬ таблицы cli[0], а не на верхний уровень манифеста.
 runtime_dependencies = [
-    { kind = "pip", spec = "atlas-pm==0.2.7" },
+    { kind = "pip", spec = "atlas-pm==0.2.8" },
 ]
 
 # CLI-инструмент, который несёт навык (заголовок таблицы — ПОСЛЕ top-level ключей).

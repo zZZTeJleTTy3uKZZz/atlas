@@ -29,7 +29,7 @@ from .commands import task_lease as _task_lease  # noqa: F401  # регистр�
 from .commands.connect import connect_cmd, disconnect_cmd
 from .commands.dashboard import dashboard_cmd
 from .commands.init import init_cmd
-from .commands.upgrade import upgrade_cmd
+from .commands.upgrade import update_cmd, upgrade_cmd
 from .commands.logs import logs_cmd
 from .commands.profile import profile_app
 from .commands.projects import projects_app
@@ -81,7 +81,8 @@ app.add_typer(stats_app, name="stats")               # аналитика пор
 app.command("dashboard")(dashboard_cmd)              # операционный board: статусы/in-flight/внимание/по проектам
 app.command("dash")(dashboard_cmd)                   # короткий алиас dashboard (ещё короче — `atlas -D`)
 app.command("init")(init_cmd)                        # Atlas-дисциплина в агентские файлы (CLAUDE.md/AGENTS.md/...)
-app.command("upgrade")(upgrade_cmd)                  # обновить Atlas (pipx из git) / подсказка для editable/skillery
+app.command("update")(update_cmd)                    # самообновление с PyPI (uv tool/pipx/pip), модель skillery
+app.command("upgrade")(upgrade_cmd)                  # legacy: обновить Atlas (pipx из git) / подсказка для editable/skillery
 app.command("logs")(logs_cmd)                        # обогащённый журнал событий (кто/что/проект/приоритет)
 
 

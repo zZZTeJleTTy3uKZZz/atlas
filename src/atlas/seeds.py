@@ -63,7 +63,7 @@ BASE_PROJECT_TYPES: list[dict[str, str]] = [
     {
         "slug": "shared-infrastructure",
         "name": "Общая инфраструктура",
-        "description": "Инструменты, используемые многими проектами (notion-task-cli и пр.)",
+        "description": "Инструменты/тулкиты, переиспользуемые многими проектами",
         "color": "#6B7280",
         "storage_group": "products",
         "default_sync_policy": "epics",

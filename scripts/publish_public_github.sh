@@ -34,7 +34,12 @@ EXCLUDES=(
   "research"
   "docs/design"
   "docs/superpowers"
-  ".gitlab-ci.yml"      # gitlab-специфично, публично не нужно
+  "docs/ATLAS_OVERVIEW.md"   # внутренний дизайн-док (прод-синк Б24/Notion)
+  "docs/PRD-MVP.md"          # внутренний PRD
+  "AGENTS.md"                # личный owner/бренд/пути/NotebookLM-UUID — НЕ публично
+  "scripts/backup"           # machine-specific личные пути + имя клиента
+  "scripts/triage"           # личные триаж-скрипты
+  ".gitlab-ci.yml"           # gitlab-специфично, публично не нужно
   ".skillgateignore"
 )
 

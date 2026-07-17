@@ -1,0 +1,28 @@
+# Публикация atlas-cli на PyPI по семвер-тегу vX.Y.Z через Trusted Publishing (OIDC).
+# Ничего не хранится: GitHub выдаёт короткоживущий OIDC-токен, PyPI доверяет связке
+# owner/repo/workflow (настраивается на pypi.org → Trusted Publisher).
+#
+# Этот файл живёт в приватном GitLab-источнике и КУРИРУЕМО уезжает в публичный
+# github (publish_public_github.sh не исключает .github/); на github-теге и срабатывает.
+name: publish-pypi
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  id-token: write   # обязательно для OIDC Trusted Publishing
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Build
+        run: uv build
+      - name: Publish to PyPI (Trusted Publishing)
+        run: uv publish --trusted-publishing always

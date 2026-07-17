@@ -25,7 +25,7 @@ def _resolve_profile(profile: str | None) -> str | None:
 
 
 def _task_name(profile: str | None) -> str:
-    """Имя задачи планировщика. С профилем — суффикс, чтобы профили (dmitry
+    """Имя задачи планировщика. С профилем — суффикс, чтобы профили (owner
     «мои задачи» / admin «все») имели независимые демоны и не затирали друг друга."""
     return f"{TASK_NAME}-{profile}" if profile else TASK_NAME
 
@@ -75,7 +75,7 @@ def install(*, profile: str | None = None, run=None) -> dict:
 
     ``profile`` (или env ``ATLAS_PROFILE``) пробрасывается в фоновую команду как
     ``atlas --profile <p> sync watch`` — так демон крутит long-poll в нужном
-    профиле (``dmitry`` → scope=personal, ``admin`` → scope=all). У каждого
+    профиле (``owner`` → scope=personal, ``admin`` → scope=all). У каждого
     профиля своя задача планировщика (имя с суффиксом)."""
     if os.name != "nt":
         return {"ok": False, "error": "демон поддерживается только на Windows"}

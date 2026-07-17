@@ -32,7 +32,7 @@ class AtlasConfig(AppConfig):
     # MSK (UTC+3). Переопределяется слоями TOML или env ATLAS_TIMEZONE.
     timezone: str = "+03:00"
 
-    # ── Идентичность владельца стора (раньше хардкод 'dmitry' по коду) ──
+    # ── Идентичность владельца стора (раньше хардкод owner-slug по коду) ──
     # member-slug владельца этого Atlas-стора: дефолтный actor аудита и
     # владелец новых проектов. Пусто → команды требуют явный --owner/--actor.
     owner: str = ""
@@ -59,9 +59,11 @@ class AtlasConfig(AppConfig):
     # ── Дефолты постановки задач (task add / batch; per-задача override) ──
     # Приоритет по умолчанию (P0..P3), если не задан явно.
     default_priority: str = "P2"
-    # Заводить ли reviewer по умолчанию (review-workflow): True → reviewer =
-    # default_reviewer или создатель; False → задачи без приёмки (как --no-review).
-    default_review: bool = True
+    # Заводить ли reviewer по умолчанию (review-workflow): False → задачи БЕЗ
+    # приёмки (соло: start→done напрямую, как --no-review). True → reviewer =
+    # default_reviewer или создатель (мультиагент). Включить приёмку точечно:
+    # `task add --reviewer <slug>`; глобально: `atlas config set default_review true`.
+    default_review: bool = False
     # Reviewer по умолчанию (slug). Пусто → создатель (ATLAS_ACTOR / owner).
     default_reviewer: str = ""
 

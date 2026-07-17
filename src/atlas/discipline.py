@@ -32,8 +32,10 @@ DISCIPLINE_BODY = """\
 - **Статус — ГЛАГОЛАМИ:** `atlas task start <ref>` (взять в работу) → `done` / `block --reason "…"` /
   `unblock` / `review` / `cancel`. Новая задача создаётся в `todo` (запланирована); `update --status`
   принимает лишь `todo`. Сырые идеи (до задачи) — в пуле `atlas backlog` (см. ниже).
-- **Приёмка (мультиагент):** исполнитель сдаёт `task submit -m "что сделал/дальше"`; закрыть в done
-  может ТОЛЬКО reviewer (`task approve` / вернуть `task reject -m "…"`). Контекст — `task comment` / `task get`.
+- **Приёмка (опционально, мультиагент):** по умолчанию review ВЫКЛЮЧЕН — соло делаешь `task start` →
+  `task done` напрямую. Включить приёмку на задаче: `task add --reviewer <slug>` (или глобально
+  `atlas config set default_review true`); тогда исполнитель сдаёт `task submit -m "…"`, а закрыть в
+  done может ТОЛЬКО назначенный reviewer (`task approve` / вернуть `task reject -m "…"`).
 - **Передача задачи агенту (богатый контекст):** `atlas task handoff <ref> --to <agent> --body-file <md>` —
   тело по шаблону `atlas issue template --kind handoff` (что сделано / осталось / как проверить / ЦКП / контекст);
   **неполную передачу блокирует** (валидатор issuekit). Принимающий: `atlas issue show <ref>` → `task start <ref>`.

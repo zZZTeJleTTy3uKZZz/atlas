@@ -899,7 +899,7 @@ def epic_claim_cmd(
     ref: str = typer.Argument(..., help="slug | UUID эпика"),
     ttl: str = typer.Option("2h", "--ttl", help="TTL аренды: 2h / 30m / 1d"),
     actor: Optional[str] = typer.Option(
-        None, "--actor", help="participant slug (default: env ATLAS_ACTOR / dmitry)"
+        None, "--actor", help="participant slug (default: env ATLAS_ACTOR / owner)"
     ),
     session_id: Optional[str] = typer.Option(None, "--session"),
     origin: Optional[str] = typer.Option(None, "--from"),

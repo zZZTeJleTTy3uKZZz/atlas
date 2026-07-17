@@ -171,7 +171,7 @@ def add_cmd(
         help="Статус (default: active = ждёт разбора).",
     ),
     tags: Optional[list[str]] = typer.Option(
-        None, "--tag", "-t", help="Теги (например, owner:dmitry, source:notion)"
+        None, "--tag", "-t", help="Теги (например, owner:<you>, source:<src>)"
     ),
     create_dir: bool = typer.Option(
         True, "--create-dir/--no-create-dir",

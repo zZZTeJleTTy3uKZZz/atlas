@@ -618,7 +618,7 @@ def batch_cmd(
         [defaults]
         project = "kasha"
         priority = "P3"
-        # reviewer = "dmitry"   ИЛИ   no_review = true
+        # reviewer = "owner"   ИЛИ   no_review = true
         [[task]]
         title = "Собрать структуру"
         cpp = "wireframe из 6 секций"

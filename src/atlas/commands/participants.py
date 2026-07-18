@@ -42,7 +42,7 @@ from atlas.slugs import (
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="Participants management: участники проектов (PM-БД), CRUD.",
+    help="Люди портфеля — реестр участников (person). Роли на задаче/проекте — `task member` / `project member`.",
 )
 console = Console()
 

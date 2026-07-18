@@ -5,7 +5,7 @@ import typer
 from clikit import command, emit_data
 from sqlalchemy import select
 
-from atlas.commands.task import _sync_portal_id
+from atlas.commands.task import _sync_portal_id, task_app
 from atlas.db import make_engine, make_session, resolve_db_url
 from atlas.models import Participant, Project, TaskMember
 from atlas.slugs import resolve_task_ref
@@ -46,7 +46,7 @@ def _enqueue_task_update(session, task) -> None:
 @member_app.command("add")
 @command
 def add_cmd(
-    task: str = typer.Option(..., "--task"),
+    task: str = typer.Argument(..., help="Task ref (number | slug | UUID)"),
     participant: str = typer.Option(..., "--participant", help="participant slug"),
     role: str = typer.Option("executor", "--role", help="responsible|executor|watcher"),
 ) -> None:
@@ -73,7 +73,7 @@ def add_cmd(
 
 @member_app.command("list")
 @command
-def list_cmd(task: str = typer.Option(..., "--task")) -> None:
+def list_cmd(task: str = typer.Argument(..., help="Task ref (number | slug | UUID)")) -> None:
     """Список участников задачи."""
     engine = make_engine(_db_url())
     with make_session(engine) as session:
@@ -95,7 +95,7 @@ def list_cmd(task: str = typer.Option(..., "--task")) -> None:
 @member_app.command("rm")
 @command
 def rm_cmd(
-    task: str = typer.Option(..., "--task"),
+    task: str = typer.Argument(..., help="Task ref (number | slug | UUID)"),
     participant: str = typer.Option(..., "--participant"),
     role: str = typer.Option(..., "--role"),
 ) -> None:
@@ -113,3 +113,8 @@ def rm_cmd(
             _enqueue_task_update(session, t)
             session.commit()
         emit_data({"removed": tm is not None}, text_renderer=lambda d: print("✓ removed" if d["removed"] else "— нет такого"))
+
+
+# Вложение под родителя-`task` (канон `atlas task member …`). Регистрируется
+# импортом этого модуля в cli.py (side-effect), как lease/handoff/worktree.
+task_app.add_typer(member_app, name="member")

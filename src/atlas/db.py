@@ -51,6 +51,45 @@ def resolve_db_url() -> str:
     return _default_url()
 
 
+def _migrations_dir() -> Path:
+    """Каталог alembic-миграций — работает при ЛЮБОЙ установке (#880):
+
+    1. собранный пакет (pip/uvx/pipx): миграции лежат ВНУТРИ пакета
+       ``atlas/migrations`` (кладутся ``force-include`` при сборке wheel);
+    2. editable/dev: миграции в корне репозитория ``<repo>/migrations``.
+    """
+    pkg = Path(__file__).resolve().parent  # …/atlas
+    packaged = pkg / "migrations"
+    if (packaged / "env.py").exists():
+        return packaged
+    for parent in pkg.parents:  # dev/editable: подняться до корня репо
+        cand = parent / "migrations"
+        if (cand / "env.py").exists():
+            return cand
+    raise RuntimeError(
+        "Не найден каталог migrations/ (ни в пакете atlas, ни в корне репозитория)."
+    )
+
+
+def run_migrations(url: str, revision: str = "head") -> None:
+    """Применить alembic-миграции ПРОГРАММНО (без subprocess / cwd / alembic.ini на диске).
+
+    Config строится в памяти, ``script_location`` резолвится относительно установки
+    (``_migrations_dir``) — работает и из репо, и из pip/uvx-пакета. Раньше
+    ``project init`` звал внешний ``python -m alembic`` c ``cwd=корень-репо`` и падал
+    вне репозитория (нет alembic.ini/migrations) — см. #880. ``ATLAS_DB_URL``
+    прокидывается в env, т.к. ``migrations/env.py`` читает его.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    os.environ["ATLAS_DB_URL"] = url
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_migrations_dir()))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, revision)
+
+
 def make_engine(url: str | None = None, *, echo: bool = False) -> Engine:
     """Создать SQLAlchemy engine.
 

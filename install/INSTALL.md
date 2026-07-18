@@ -14,7 +14,9 @@ curl -fsSL https://raw.githubusercontent.com/zZZTeJleTTy3uKZZz/atlas/master/inst
 irm https://raw.githubusercontent.com/zZZTeJleTTy3uKZZz/atlas/master/install/install.ps1 | iex
 ```
 
-Скрипт ставит `uv` (Astral), если его нет, затем `uv tool install atlas-pm` (изолированное окружение, свой Python). Скрипты намеренно **ASCII-only** — иначе `irm | iex` / `| sh` могут испортить не-ASCII символы.
+Скрипт ставит `uv` (Astral), если его нет, затем `uv tool install atlas-pm` (изолированное окружение, свой Python) и в конце запускает **`atlas setup`** — прописывает правила Atlas в агентские файлы (CLAUDE.md/AGENTS.md) и ставит **SessionStart-хук** (сводка состояния портфеля впрыскивается в начало каждой сессии агента — заметно бустит триггеринг задач). Скрипты намеренно **ASCII-only** — иначе `irm | iex` / `| sh` могут испортить не-ASCII символы.
+
+> Если `raw.githubusercontent.com` не резолвится / недоступен (корпоративный фаервол, РФ-провайдер без VPN) — сам скрипт не скачается, хотя ставится он с PyPI. В этом случае ставь напрямую через `uv` (см. «uv / pipx» ниже) или включи VPN.
 
 ## Другие способы
 
@@ -22,9 +24,19 @@ irm https://raw.githubusercontent.com/zZZTeJleTTy3uKZZz/atlas/master/install/ins
   ```bash
   skillery install atlas
   ```
-- **uv / pipx** напрямую:
+- **uv / pipx** напрямую — тянет только с PyPI, **без GitHub** (годится, когда `raw.githubusercontent.com` недоступен):
+
+  Сначала нужен **uv** (если ещё не установлен):
   ```bash
-  uv tool install atlas-pm      # или: pipx install atlas-pm
+  # Linux / macOS
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # Windows (PowerShell)
+  irm https://astral.sh/uv/install.ps1 | iex
+  ```
+  Затем ставим atlas с PyPI и делаем onboarding в агента:
+  ```bash
+  uv tool install atlas-pm      # или (нужен Python ≥3.11): pipx install atlas-pm
+  atlas setup                   # правила Atlas в агентские файлы + SessionStart-хук
   ```
 - **Из исходников** (разработка / editable):
   ```bash
@@ -36,9 +48,16 @@ irm https://raw.githubusercontent.com/zZZTeJleTTy3uKZZz/atlas/master/install/ins
 
 ```bash
 atlas config set owner <you>   # владелец стора (актор аудита, владелец новых проектов)
-atlas init                     # прописать Atlas-дисциплину в агентские файлы (CLAUDE.md/AGENTS.md)
+atlas setup                    # правила Atlas в агентов (CLAUDE.md/AGENTS.md) + SessionStart-хук триажа
 atlas project init             # применить миграции БД + справочники
 ```
+
+`atlas setup` — идемпотентный turnkey-онбординг в агента (можно перезапускать):
+
+- **правила** — Atlas-дисциплина managed-блоком в агентские файлы (как `atlas init`; `--scope global|repo|all`, `--agents claude,gemini,…`);
+- **хук** (Claude Code) — SessionStart-триаж: `atlas task triage` впрыскивает компактную сводку портфеля (числа + задачи в работе + забытые) в начало сессии, чтобы состояние задач было первым, что видит агент. Мёрж `~/.claude/settings.json` **не трогает чужие хуки**.
+
+Частично / снять: `atlas setup --no-hooks` (только правила) · `--no-rules` (только хук) · `--uninstall` (снять хук) · `--dry-run`.
 
 ## Обновление
 

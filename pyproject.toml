@@ -3,7 +3,7 @@
 # PyPI); import-пакет и команда остаются `atlas`. Ставится: uv tool install atlas-pm /
 # pipx install atlas-pm.
 name = "atlas-pm"
-version = "0.2.8"
+version = "0.3.0"
 description = "Atlas — local-first PM-система для портфеля проектов и задач"
 readme = "README.md"
 license = { text = "MIT" }
@@ -53,6 +53,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atlas"]
+
+# Миграции нужны в РАНТАЙМЕ (`atlas project init` → alembic upgrade), поэтому
+# кладём их и alembic.ini ВНУТРЬ пакета (`atlas/migrations`, `atlas/alembic.ini`) —
+# иначе pip/uvx/pipx-установка их не несёт и init падает (#880). В dev/editable
+# `run_migrations` находит их в корне репо.
+[tool.hatch.build.targets.wheel.force-include]
+"migrations" = "atlas/migrations"
+"alembic.ini" = "atlas/alembic.ini"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

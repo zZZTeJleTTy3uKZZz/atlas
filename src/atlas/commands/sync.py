@@ -117,6 +117,79 @@ def daemon_status_cmd() -> None:
               text_renderer=lambda r: print(f"{'установлен' if r.get('installed') else 'нет'}: {r.get('state')}"))
 
 
+outbox_app = typer.Typer(no_args_is_help=True, help="Локальная очередь исходящих (outbox): status / prune.")
+sync_app.add_typer(outbox_app, name="outbox")
+
+
+@outbox_app.command("status")
+@command
+def outbox_status_cmd() -> None:
+    """Сводка локального outbox: сколько pending / sent / failed."""
+    from sqlalchemy import func, select
+
+    from atlas.models import Outbox
+
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        rows = session.execute(
+            select(Outbox.status, func.count()).group_by(Outbox.status)
+        ).all()
+    counts = {status: n for status, n in rows}
+    emit_data(
+        counts,
+        text_renderer=lambda c: print(
+            " · ".join(f"{k}: {v}" for k, v in c.items()) if c else "outbox пуст"
+        ),
+    )
+
+
+@outbox_app.command("prune")
+@command
+def outbox_prune_cmd(
+    sent: bool = typer.Option(True, "--sent/--no-sent", help="Удалить отправленные (sent)."),
+    failed: bool = typer.Option(False, "--failed", help="Также удалить проваленные (failed)."),
+    all_rows: bool = typer.Option(
+        False, "--all", help="Удалить ВСЁ, включая pending (очистить мёртвую очередь #879)."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Не спрашивать подтверждение."),
+) -> None:
+    """Очистить локальный outbox: sent (по умолчанию) / failed / всё (--all).
+
+    Полезно, если очередь копилась без подключённого backend (#879) — с гейтом
+    enqueue этого больше не происходит, но накопленное можно удалить здесь."""
+    from sqlalchemy import delete, func, select
+
+    from atlas.models import Outbox
+
+    statuses = ["pending", "sent", "failed"] if all_rows else (
+        (["sent"] if sent else []) + (["failed"] if failed else [])
+    )
+    if not statuses:
+        emit_data(
+            {"pruned": 0},
+            text_renderer=lambda r: print("нечего чистить (укажи --sent / --failed / --all)"),
+        )
+        return
+
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        total = session.execute(
+            select(func.count()).select_from(Outbox).where(Outbox.status.in_(statuses))
+        ).scalar_one()
+        if total and not yes:  # деструктив → показать дельту и подтвердить
+            if not typer.confirm(f"Удалить {total} записей outbox ({', '.join(statuses)})?"):
+                emit_data({"pruned": 0, "aborted": True}, text_renderer=lambda r: print("отменено"))
+                return
+        session.execute(delete(Outbox).where(Outbox.status.in_(statuses)))
+        session.commit()
+    emit_data(
+        {"pruned": total, "statuses": statuses},
+        text_renderer=lambda r: print(
+            f"✓ удалено {r['pruned']} записей outbox ({', '.join(r['statuses'])})"
+        ),
+    )
+
+
 @sync_app.command("up")
 @command
 def up_cmd() -> None:

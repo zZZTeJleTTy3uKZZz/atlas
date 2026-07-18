@@ -1,15 +1,13 @@
-"""CLI `atlas update` / `atlas upgrade` — самообновление Atlas.
+"""CLI `atlas update` — самообновление Atlas.
 
-Два пути установки → два обновления:
-
-- **`atlas update`** (основной, модель как у skillery-cli): версия сверяется с
-  **PyPI** (dist ``atlas-pm``), обновление — авто-детект менеджера
-  (``uv tool`` / ``pipx`` / ``pip``) по ``sys.executable``. На Windows launcher
-  ``atlas.exe`` залочен, пока процесс жив, поэтому апгрейд запускается отдельным
-  detached-процессом с задержкой и применяется со следующего запуска.
-- **`atlas upgrade`** (legacy, git): ``pipx upgrade atlas`` / ``--reinstall``
-  (force из git). Оставлен для обратной совместимости и pipx-git-установок.
-- **editable (dev)** — обе команды подсказывают ``git pull`` (код живой).
+- Основной путь: версия сверяется с **PyPI** (dist ``atlas-pm``), обновление —
+  авто-детект менеджера (``uv tool`` / ``pipx`` / ``pip``) по ``sys.executable``.
+  На Windows launcher ``atlas.exe`` залочен, пока процесс жив, поэтому апгрейд
+  запускается отдельным detached-процессом с задержкой и применяется со
+  следующего запуска.
+- ``--from-git`` (legacy): полная переустановка из git (``pipx install --force``)
+  — для старых pipx-git-установок. Заменяет прежнюю отдельную команду ``atlas upgrade``.
+- **editable (dev)** — подсказывает ``git pull`` (код живой).
 
 ``--check`` — только показать текущую/последнюю версию, не обновлять.
 """
@@ -155,16 +153,39 @@ def update_cmd(
     check: bool = typer.Option(
         False, "--check", help="Только сверить версию с PyPI, не обновлять.",
     ),
+    from_git: bool = typer.Option(
+        False, "--from-git",
+        help="Legacy: переустановить из git (pipx install --force), а не обновлять с PyPI.",
+    ),
+    source: str = typer.Option(
+        DEFAULT_GIT_SOURCE, "--source", help="git-источник для --from-git.",
+    ),
 ) -> None:
-    """Обновить Atlas с PyPI (авто-детект uv tool / pipx / pip)."""
+    """Обновить Atlas с PyPI (авто-детект uv tool / pipx / pip); --from-git — legacy pipx-reinstall из git."""
     method = _install_method()
     current = _current_version()
     data: dict[str, Any] = {"current": current, "method": method}
 
+    # Legacy git-reinstall (бывшая отдельная команда `atlas upgrade --reinstall`).
+    if from_git:
+        if shutil.which("pipx") is None:
+            raise CliError(
+                "no_pipx",
+                f"pipx не найден. Вручную: pipx install --force \"{source}\" "
+                "(или обычный `atlas update` для PyPI).",
+            )
+        cmd = ["pipx", "install", "--force", source]
+        rc = subprocess.run(cmd, check=False).returncode  # noqa: S603
+        if rc != 0:
+            raise CliError("update_failed", f"pipx вернул код {rc}. Команда: {' '.join(cmd)}")
+        data["ran"] = " ".join(cmd)
+        emit_data(data, text_renderer=_render_update)
+        return
+
     if method in ("editable", "pipx-git"):
         data["hint"] = (
             "git-установка — обнови `git pull` в репозитории (editable) "
-            "или `atlas upgrade --reinstall` (pipx из git)."
+            "или `atlas update --from-git` (pipx-reinstall из git)."
         )
         emit_data(data, text_renderer=_render_update)
         return
@@ -184,62 +205,3 @@ def update_cmd(
     data["result"] = _run_upgrade(cmd)
     data["ran"] = " ".join(cmd)
     emit_data(data, text_renderer=_render_update)
-
-
-@command
-def upgrade_cmd(
-    reinstall: bool = typer.Option(
-        False, "--reinstall", help="Полная переустановка из git (force), а не pipx upgrade.",
-    ),
-    source: str = typer.Option(
-        DEFAULT_GIT_SOURCE, "--source", help="git-источник для --reinstall.",
-    ),
-    check: bool = typer.Option(
-        False, "--check", help="Только показать версию и метод установки.",
-    ),
-) -> None:
-    """Legacy: обновить Atlas из git (pipx). Для PyPI-установок используй `atlas update`."""
-    method = _install_method()
-    data: dict[str, Any] = {"current": _current_version(), "method": method}
-
-    def _render(d: dict[str, Any]) -> None:
-        console.print(f"Atlas [bold]{d['current']}[/bold] · установка: [cyan]{d['method']}[/cyan]")
-        if d.get("hint"):
-            console.print(f"  {d['hint']}")
-        if d.get("ran"):
-            console.print(f"  [green]✓ выполнено:[/green] {d['ran']} (проверь: atlas --version)")
-
-    if method == "editable":
-        data["hint"] = "editable (dev) — код живой; обнови `git pull` в репозитории Atlas."
-        emit_data(data, text_renderer=_render)
-        return
-
-    if method in ("uv-tool", "pipx", "pip"):
-        data["hint"] = "PyPI-установка — используй `atlas update` (обновит с PyPI)."
-        if not reinstall:
-            emit_data(data, text_renderer=_render)
-            return
-
-    if check:
-        data["hint"] = ("обновить: `atlas update` (PyPI) или `atlas upgrade --reinstall` "
-                        "(force из git). skillery-установка — через skillery.")
-        emit_data(data, text_renderer=_render)
-        return
-
-    if shutil.which("pipx") is None:
-        raise CliError(
-            "no_pipx",
-            "pipx не найден. Обнови вручную: pipx install --force "
-            f"\"{source}\"  (или `atlas update` для PyPI, или через skillery).",
-        )
-
-    cmd = (
-        ["pipx", "install", "--force", source]
-        if reinstall
-        else ["pipx", "upgrade", "atlas"]
-    )
-    rc = subprocess.run(cmd, check=False).returncode  # noqa: S603
-    if rc != 0:
-        raise CliError("upgrade_failed", f"pipx вернул код {rc}. Команда: {' '.join(cmd)}")
-    data["ran"] = " ".join(cmd)
-    emit_data(data, text_renderer=_render)

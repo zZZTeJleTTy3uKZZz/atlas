@@ -9,6 +9,7 @@ from clikit import CliError, command, emit_data
 from sqlalchemy import func, select
 
 from atlas.db import make_engine, make_session, resolve_db_url
+from atlas.commands.task import task_app
 from atlas.models import ChecklistItem, Project, Task
 from atlas.slugs import resolve_task_ref
 from atlas.sync import outbox as _outbox
@@ -41,7 +42,7 @@ def _enqueue(session, op, obj, project):
 @checklist_app.command("add")
 @command
 def add_cmd(
-    task: str = typer.Option(..., "--task", help="Task ref (number | slug | UUID)"),
+    task: str = typer.Argument(..., help="Task ref (number | slug | UUID)"),
     text: str = typer.Option(..., "--text"),
     due: Optional[str] = typer.Option(
         None, "--due", help="Срок пункта (YYYY-MM-DD или полный ISO)"
@@ -76,7 +77,7 @@ def add_cmd(
 
 @checklist_app.command("list")
 @command
-def list_cmd(task: str = typer.Option(..., "--task")) -> None:
+def list_cmd(task: str = typer.Argument(..., help="Task ref (number | slug | UUID)")) -> None:
     """Список пунктов чек-листа задачи."""
     engine = make_engine(_db_url())
     with make_session(engine) as session:
@@ -140,3 +141,8 @@ def delete_cmd(
             {"id": ci_id, "deleted": True},
             text_renderer=lambda d: print(f"✗ {d['id']} удалён"),
         )
+
+
+# Вложение под родителя-`task` (канон `atlas task checklist …`). Регистрируется
+# импортом этого модуля в cli.py (side-effect), как lease/handoff/worktree.
+task_app.add_typer(checklist_app, name="checklist")

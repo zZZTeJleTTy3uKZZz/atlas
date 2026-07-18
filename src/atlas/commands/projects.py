@@ -106,6 +106,16 @@ from atlas.commands.projects_git import git_app as _git_app  # noqa: E402
 
 projects_app.add_typer(_git_app, name="git")
 
+# Суб-ресурсы проекта (канон `atlas project <ресурс> <глагол>`, как `git`/`layout`):
+#   project tag    add | rm     — attach/detach тега к проекту (сам словарь тегов — `atlas tag`)
+#   project member add|list|rm  — роли участников в проекте (lead/member)
+project_tag_app = typer.Typer(no_args_is_help=True, help="Теги проекта (attach/detach).")
+projects_app.add_typer(project_tag_app, name="tag")
+project_member_app = typer.Typer(
+    no_args_is_help=True, help="Участники проекта (роли lead/member)."
+)
+projects_app.add_typer(project_member_app, name="member")
+
 # --------------------------------------------------------------------------- #
 # Constants                                                                   #
 # --------------------------------------------------------------------------- #
@@ -295,7 +305,7 @@ atlas projects get {slug}
 Любые изменения метаданных (приоритет, статус, теги) — через atlas CLI:
 
 - `atlas projects update {slug} --priority P0` — поменять приоритет
-- `atlas add-tags {slug} -t domain:<slug>` — добавить тег
+- `atlas project tag add {slug} -t domain:<slug>` — добавить тег
 - `atlas projects move {slug} --to-type <type>` — конвертировать тип
 
 ## Тип / Статус (на момент создания)
@@ -920,19 +930,12 @@ def init_cmd(
     emit_message(f"Database: {url}")
 
     emit_message("1. Применяю миграции Alembic...")
-    env = os.environ.copy()
-    env["ATLAS_DB_URL"] = url
-    project_root = _find_project_root()
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=project_root,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
+    from atlas.db import run_migrations
+    try:
+        run_migrations(url)  # программно; работает и из pip/uvx-пакета (#880)
+    except Exception as exc:  # noqa: BLE001 — показать причину, не «голый» traceback
         console.print("[red]Ошибка миграций:[/red]")
-        console.print(result.stderr)
+        console.print(str(exc))
         raise typer.Exit(code=1)
     emit_message("✓ миграции применены")
 
@@ -2385,11 +2388,11 @@ def delete_cmd(
 
 
 # --------------------------------------------------------------------------- #
-# add-tags / remove-tags                                                      #
+# project tag: add / rm (attach/detach тега к проекту)                        #
 # --------------------------------------------------------------------------- #
 
 
-@projects_app.command("add-tags")
+@project_tag_app.command("add")
 def add_tags_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     tags: list[str] = typer.Option(
@@ -2432,7 +2435,7 @@ def add_tags_cmd(
         )
 
 
-@projects_app.command("remove-tags")
+@project_tag_app.command("rm")
 def remove_tags_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     tags: list[str] = typer.Option(
@@ -2476,7 +2479,7 @@ def remove_tags_cmd(
 
 
 # --------------------------------------------------------------------------- #
-# member-add / member-list / member-remove (F4f: роли в проекте)              #
+# project member: add / list / rm (F4f: роли в проекте)                       #
 # --------------------------------------------------------------------------- #
 
 
@@ -2507,7 +2510,7 @@ def _resolve_member_or_die(session: Session, ref: str) -> Participant:
     return participant
 
 
-@projects_app.command("member-add")
+@project_member_app.command("add")
 def member_add_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     member: str = typer.Option(
@@ -2522,7 +2525,7 @@ def member_add_cmd(
     """Добавить участника в проект с ролью (lead/member).
 
     Идемпотентно: PK project_participants = (project_id, participant_id), роль не
-    в ключе → повторный member-add того же участника ОБНОВЛЯЕТ его role_in_project
+    в ключе → повторный `member add` того же участника ОБНОВЛЯЕТ его role_in_project
     (одна роль на участника в проекте), без дубля."""
     _validate_project_member_role(role)
     url = _db_url()
@@ -2560,7 +2563,7 @@ def member_add_cmd(
         )
 
 
-@projects_app.command("member-list")
+@project_member_app.command("list")
 def member_list_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
 ) -> None:
@@ -2596,7 +2599,7 @@ def member_list_cmd(
     )
 
 
-@projects_app.command("member-remove")
+@project_member_app.command("rm")
 def member_remove_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     member: str = typer.Option(

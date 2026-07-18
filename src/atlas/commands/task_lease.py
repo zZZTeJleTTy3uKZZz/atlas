@@ -813,7 +813,7 @@ def triage_cmd(
     главное — что ЗАБЫТО (active, давно не трогали). --json для агента.
 
     ``--install`` ставит ежедневный Windows Scheduled Task (отчёт triage → лог,
-    как `atlas backup install`); ``--uninstall`` снимает его."""
+    как `atlas backup schedule install`); ``--uninstall`` снимает его."""
     from rich.box import ROUNDED
     from rich.table import Table
 

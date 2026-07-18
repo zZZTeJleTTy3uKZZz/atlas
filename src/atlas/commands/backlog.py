@@ -129,6 +129,10 @@ def add_cmd(
     ),
     priority: Optional[str] = typer.Option(None, "--priority", help="P0|P1|P2|P3 (опц.)."),
     slug: Optional[str] = typer.Option(None, "--slug", help="Явный slug (иначе из title)."),
+    source: str = typer.Option(
+        "native", "--source",
+        help="Источник: native | inbox (сырьё-свалка на разбор) | др. (виден в list)."
+    ),
     md: bool = typer.Option(False, "--md", help="Зарезервировать md_path (материализация позже)."),
 ) -> None:
     """Завести идею в пул backlog (global или привязанную к проекту)."""
@@ -143,7 +147,7 @@ def add_cmd(
         final_slug = generate_unique_slug(base, _slug_exists(session)) if base else None
         item = BacklogItem(
             title=title, note=note, project_id=project_id, priority=priority,
-            slug=final_slug, status="open", source="native",
+            slug=final_slug, status="open", source=source,
             md_path=("(reserved)" if md else None),
         )
         session.add(item)
@@ -307,8 +311,24 @@ def convert_cmd(
     no_review: bool = typer.Option(False, "--no-review", help="Не заводить reviewer у задачи (для --as task)."),
     type_: Optional[str] = typer.Option(None, "--type", help="Тип проекта (для --as project)."),
     slug: Optional[str] = typer.Option(None, "--slug", help="slug нового проекта."),
+    setup_layout: bool = typer.Option(
+        True, "--setup-layout/--no-setup-layout",
+        help="[--as project] создать _storage/<slug>/ + junction (как `idea promote`)."
+    ),
+    canonical: bool = typer.Option(
+        True, "--canonical/--no-canonical",
+        help="[--as project] дописать README/AGENTS/.gitignore в _storage/<slug>/."
+    ),
+    init_git: bool = typer.Option(
+        False, "--init-git/--no-init-git", help="[--as project] git init + remote + push."
+    ),
+    private: bool = typer.Option(True, "--private/--public", help="[--as project + --init-git]."),
+    group: Optional[str] = typer.Option(None, "--group", help="[--as project + --init-git] git-namespace."),
 ) -> None:
-    """Преобразовать идею в `todo`-задачу или зачаток проекта; идея → converted."""
+    """Преобразовать идею в `todo`-задачу или зачаток проекта; идея → converted.
+
+    `--as project` материализует проект как прежний `idea promote`: layout/junction
+    (`--setup-layout`), canonical-файлы (`--canonical`), опц. git (`--init-git`)."""
     if as_ not in ("task", "project"):
         raise CliError("bad_as", "--as: task | project.")
     if priority and priority not in VALID_PRIORITIES:
@@ -325,7 +345,11 @@ def convert_cmd(
         if as_ == "task":
             result = _convert_to_task(session, cfg, item, project, cpp, priority, no_review)
         else:
-            result = _convert_to_project(session, item, type_, slug, priority)
+            result = _convert_to_project(
+                session, item, type_, slug, priority,
+                setup_layout=setup_layout, canonical=canonical,
+                init_git=init_git, private=private, group=group,
+            )
         item.status = "converted"
         item.converted_kind = as_
         item.converted_ref = str(result["ref"])
@@ -360,8 +384,13 @@ def _convert_to_task(session, cfg, item, project, cpp, priority, no_review) -> d
     return {"ref": created["number"], "title": created["title"], "task_slug": created["slug"]}
 
 
-def _convert_to_project(session, item, type_, slug, priority) -> dict[str, Any]:
+def _convert_to_project(
+    session, item, type_, slug, priority, *,
+    setup_layout: bool = True, canonical: bool = True,
+    init_git: bool = False, private: bool = True, group=None,
+) -> dict[str, Any]:
     from atlas.models import ProjectStatus, ProjectType
+    from atlas.slugs import generate_prefix_from_slug
     from atlas.slugs import generate_unique_slug as _gus
 
     type_slug = type_ or "personal-project"
@@ -386,8 +415,16 @@ def _convert_to_project(session, item, type_, slug, priority) -> dict[str, Any]:
     final = _gus(base, _pslug_exists) if base else None
     if final is None:
         raise CliError("slug_gen", "Не сгенерить slug проекта — задай --slug.")
+
+    # prefix (для будущих task-slug'ов проекта) — как `project add` / прежний `idea add`.
+    from atlas.commands.projects import _generate_unique_prefix
+    try:
+        prefix = _generate_unique_prefix(session, generate_prefix_from_slug(final))
+    except Exception:
+        prefix = None
+
     proj = Project(
-        slug=final, name=item.title, description=item.note,
+        slug=final, prefix=prefix, name=item.title, description=item.note,
         one_line_summary=(item.note or item.title)[:200],
         type_id=pt.id, status_id=ps.id,
         priority=priority or item.priority or "P2",
@@ -395,5 +432,48 @@ def _convert_to_project(session, item, type_, slug, priority) -> dict[str, Any]:
     )
     session.add(proj)
     session.flush()
-    return {"ref": proj.slug, "title": proj.name,
-            "hint": "провижн/раскладку — atlas project layout/git init"}
+
+    result: dict[str, Any] = {"ref": proj.slug, "title": proj.name}
+
+    # ── Материализация (эквивалент прежнего `idea promote`) — best-effort ──
+    storage = None
+    if setup_layout:
+        from atlas.commands.projects import _setup_storage_and_junction
+        try:
+            logical, storage, _junction = _setup_storage_and_junction(proj.slug, type_slug)
+            proj.local_path = str(logical)
+            result["storage"] = str(storage)
+        except Exception as exc:  # layout best-effort — проект уже создан в БД
+            result["layout_error"] = str(exc)
+            storage = None
+
+    if canonical and storage is not None:
+        from atlas.commands.projects import (
+            _create_canonical_files,
+            _ensure_atlas_prompt_in_dir,
+        )
+        try:
+            created = _create_canonical_files(
+                storage, project=proj, type_slug=type_slug,
+                status_slug=ps.slug, tag_slugs=[], logical_rel=proj.slug,
+            )
+            if created:
+                result["canonical_files"] = list(created)
+            _ensure_atlas_prompt_in_dir(storage)
+        except Exception as exc:
+            result["canonical_error"] = str(exc)
+
+    if init_git and storage is not None:
+        from atlas.commands.projects_git import DEFAULT_COMMIT_MESSAGE, perform_git_init
+        try:
+            git_result = perform_git_init(
+                session, proj, group=group, private=private,
+                commit_message=DEFAULT_COMMIT_MESSAGE,
+            )
+            result["git_url"] = git_result.get("url")
+        except Exception as exc:
+            result["git_error"] = str(exc)
+
+    if not setup_layout:
+        result["hint"] = "провижн/раскладку позже — atlas project layout init / git init"
+    return result

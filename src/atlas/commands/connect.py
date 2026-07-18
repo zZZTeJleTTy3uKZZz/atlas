@@ -1,13 +1,13 @@
-"""CLI `atlas connect / disconnect` — подключение к внешнему backend-сервису.
+"""CLI `atlas backend connect / disconnect / status` — подключение к внешнему backend-сервису.
 
 Atlas **local-first**: весь функционал (проекты/задачи/эпики/спринты/дашборд)
 работает БЕЗ бэкенда. ``connect`` опционально подключает синк: задаёт ``base_url``
 и кладёт admin-API-ключ в защищённый secret-store (keyring/file-fallback, НЕ в
 открытый config.toml). После — `atlas sync push/pull` шлёт/тянет события.
 
-- ``atlas connect``            — показать статус подключения;
-- ``atlas connect <url> [--key]`` — подключить (ключ: --key | интерактивный ввод);
-- ``atlas disconnect``         — убрать ключ из secret-store (опц. сбросить url).
+- ``atlas backend status``            — показать статус подключения;
+- ``atlas backend connect <url> [--key]`` — подключить (ключ: --key | интерактивный ввод);
+- ``atlas backend disconnect``        — убрать ключ из secret-store (опц. сбросить url).
 
 NB: знание о КОНКРЕТНЫХ внешних системах (Notion/Б24) живёт в backend-сервисе, не в
 CLI. Полноценный модуль работы с бэком планируется отдельным приватным китом,
@@ -52,7 +52,7 @@ def _render_status(d: dict[str, Any]) -> None:
                   f"{'[green]задан[/green]' if d['api_key_set'] else '[grey50]нет[/grey50]'}")
     if not d["connected"]:
         console.print("  [grey50]Local-first работает и так. Подключить синк: "
-                      "atlas connect <url> --key <admin-key>[/grey50]")
+                      "atlas backend connect <url> --key <admin-key>[/grey50]")
 
 
 async def _verify(base_url: str, key: str) -> tuple[bool, str]:
@@ -138,12 +138,31 @@ def disconnect_cmd(
     )
 
 
+@command
+def status_cmd() -> None:
+    """Показать статус подключения Atlas к backend."""
+    cfg = load_config()
+    emit_data(_status_data(cfg), text_renderer=_render_status)
+
+
+#: Ресурс-группа `atlas backend` — подключение к внешнему backend-сервису (синк).
+#: connect/disconnect/status собраны под одним существительным (было — два
+#: плоских top-level `atlas connect`/`atlas disconnect`).
+backend_app = typer.Typer(
+    no_args_is_help=True,
+    help="Подключение к внешнему backend-сервису (синк). Local-first работает и без него.",
+)
+backend_app.command("connect")(connect_cmd)
+backend_app.command("disconnect")(disconnect_cmd)
+backend_app.command("status")(status_cmd)
+
+
 def _require_connected() -> None:
     """Гард для sync-команд: без подключения — понятная ошибка, не сетевой таймаут."""
     cfg = load_config()
     if not (resolve_api_key(cfg) and cfg.base_url):
         raise CliError(
             "not_connected",
-            "Нет подключения к backend. Подключись: atlas connect <url> --key <admin-key> "
+            "Нет подключения к backend. Подключись: atlas backend connect <url> --key <admin-key> "
             "(local-first работает и без этого).",
         )

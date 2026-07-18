@@ -67,7 +67,7 @@ def get_projects_root() -> Path:
 
     Порядок:
     1. Env ATLAS_PROJECTS_ROOT (с expanduser + resolve).
-    2. config.projects_root (задаётся в `atlas config init`).
+    2. config.projects_root (задаётся в `atlas config setup`).
     3. Default: ~/Documents/PROJECT (под Windows — C:\\Users\\<USER>\\Documents\\PROJECT).
     """
     env = os.environ.get("ATLAS_PROJECTS_ROOT")

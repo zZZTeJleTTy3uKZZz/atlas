@@ -1,11 +1,11 @@
 """CLI-команды ``atlas backup ...`` — атомарный бэкап git-репозиториев портфеля.
 
 Команды:
-- ``run``         — запустить backup для проектов из БД (с фильтрами).
-- ``status``      — показать историю backup'ов из action_log.
-- ``install``     — зарегистрировать Windows Scheduled Task (через register_task.ps1).
-- ``uninstall``   — снять Scheduled Task atlas-daily-backup.
-- ``list-tasks``  — показать состояние зарегистрированной задачи.
+- ``run``                — запустить backup для проектов из БД (с фильтрами).
+- ``status``             — показать историю backup'ов из action_log.
+- ``schedule install``   — зарегистрировать Windows Scheduled Task (register_task.ps1).
+- ``schedule uninstall`` — снять Scheduled Task atlas-daily-backup.
+- ``schedule list``      — показать состояние зарегистрированной задачи.
 
 Логика самого backup'а вынесена в ``atlas.backup`` (функция
 ``backup_repo``) — отдельный модуль без typer-зависимостей, удобно
@@ -55,6 +55,14 @@ console = Console()
 DEFAULT_ACTOR_SLUG = default_actor()
 TASK_NAME = "atlas-daily-backup"
 DEFAULT_TIME = "03:00"
+
+# Планировщик авто-бэкапа (Windows Scheduled Task) — суб-группа `atlas backup schedule`
+# (симметрия с `atlas sync daemon`). run/status остаются прямыми глаголами backup.
+schedule_app = typer.Typer(
+    no_args_is_help=True,
+    help="Планировщик авто-бэкапа: install | uninstall | list (Windows Scheduled Task).",
+)
+backup_app.add_typer(schedule_app, name="schedule")
 
 
 # --------------------------------------------------------------------------- #
@@ -384,11 +392,11 @@ def status_cmd(
 
 
 # --------------------------------------------------------------------------- #
-# atlas backup install                                                        #
+# atlas backup schedule install                                               #
 # --------------------------------------------------------------------------- #
 
 
-@backup_app.command("install")
+@schedule_app.command("install")
 @command
 def install_cmd(
     time: str = typer.Option(
@@ -430,8 +438,8 @@ def install_cmd(
         console.print(
             f"  Запустить сейчас:  Start-ScheduledTask -TaskName '{d['task']}'"
         )
-        console.print(f"  Состояние:         atlas backup list-tasks")
-        console.print(f"  Удалить:           atlas backup uninstall")
+        console.print(f"  Состояние:         atlas backup schedule list")
+        console.print(f"  Удалить:           atlas backup schedule uninstall")
 
     emit_data(
         {
@@ -445,11 +453,11 @@ def install_cmd(
 
 
 # --------------------------------------------------------------------------- #
-# atlas backup uninstall                                                      #
+# atlas backup schedule uninstall                                             #
 # --------------------------------------------------------------------------- #
 
 
-@backup_app.command("uninstall")
+@schedule_app.command("uninstall")
 @command
 def uninstall_cmd() -> None:
     """Снять Scheduled Task ``atlas-daily-backup``."""
@@ -481,11 +489,11 @@ def uninstall_cmd() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# atlas backup list-tasks                                                     #
+# atlas backup schedule list                                                  #
 # --------------------------------------------------------------------------- #
 
 
-@backup_app.command("list-tasks")
+@schedule_app.command("list")
 @command
 def list_tasks_cmd() -> None:
     """Показать состояние зарегистрированной Scheduled Task."""
@@ -503,7 +511,7 @@ def list_tasks_cmd() -> None:
             console.print(f"[yellow]{proc.stderr.strip()}[/yellow]")
         console.print(
             f"[yellow]Task '{TASK_NAME}' не найден или не доступен. "
-            f"Установите через `atlas backup install`.[/yellow]"
+            f"Установите через `atlas backup schedule install`.[/yellow]"
         )
         raise typer.Exit(code=proc.returncode or 1)
 

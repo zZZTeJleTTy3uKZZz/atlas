@@ -8,7 +8,7 @@
 | `idea` | `_Ideas/<slug>.md` | сформулированная мысль до решения «делать» |
 | `project` | `_storage/<slug>/` + junction в группе | полноценный проект |
 
-`atlas project` работает только с `entity_kind='project'`; idea/inbox — отдельные группы (`atlas idea`, `atlas inbox`).
+`atlas project` работает только с `entity_kind='project'`. Интейк идей (в т.ч. сырьё/inbox) — единый пул `atlas backlog` (материализация в проект — `backlog convert --as project`); отдельные команды `atlas idea`/`atlas inbox` убраны (#867), legacy-записи в БД видны в `backlog list`.
 
 **5 канонических статусов**: `active` / `paused` / `archived` / `cancelled` / `experiment`
 (legacy idea/research/maintained/dormant/graduating сконвертированы миграцией 007).
@@ -76,6 +76,22 @@ client-project) — `renewal_count++`. `move --to-type` — смена типа 
   - `project git init <ref> [--provider gitlab|github] [--group …] [--private/--public]`;
     `move --to-group <group|owner>`, `sync-from-remote` — per-project по `git_provider`;
     `status`/`push`/`link` — provider-agnostic.
+  - **ОБЯЗАТЕЛЬНО: у каждого проекта портфеля — удалённый репо.** `project add` по умолчанию
+    `--no-init-git` (remote НЕ создаётся) — поэтому онбординг/создание проекта явно доводи до remote:
+    `project add … --init-git` ИЛИ следом `project git init <ref>`. Периодически сверяй
+    `project git status-all` — строки с `URL —` = проекты без remote (их десятки), доводи их.
+  - **Существующий локальный репо С ИСТОРИЕЙ → НЕ `project git init`.** Он делает `symbolic-ref HEAD
+    → main` + initial-commit, что СХЛОПЫВАЕТ всю историю в один «baseline»-коммит на remote (старая
+    ветка остаётся orphan локально, на remote истории нет). Сохрани историю вручную: `git branch -M main`
+    → создай ПУСТОЙ remote (через `glab`/`gh` из НЕ-git папки; namespace — как у соседей: личное →
+    `<personal-namespace>/products`) → `git push -u origin main` (вся история) → `project git link <ref>
+    --url … --branch main` (запись URL в БД штатно, БЕЗ create/push). `git init` — только для НОВОЙ/пустой
+    папки без ценной истории. NB: SSH к gitlab.com может быть закрыт (порт 22) — тогда remote по HTTPS
+    (auth через git credential manager).
+  - **«Открытие» проекта (private→public) — модель Atlas (`_storage/atlas/.gitlab-ci.yml`):** приватный
+    GitLab = источник правды (со всем внутренним: `_project/`/research/IP), публичный GitHub = КУРИРУЕМАЯ
+    витрина. Не push-mirror (он не фильтрует пути) — а `.gitlab-ci.yml` джоба `publish-github` по тегу
+    `vX.Y.Z` пушит в public github ТОЛЬКО чистый код. GitHub owner — `config github_owner` / `--provider github`.
 - **epic worktree** (`epic worktree …`, #300): изолированный цикл работы над эпиком в отдельной ветке/дереве.
   - `create <epic> [--base --path]` — `git worktree add` + ветка `epic/<slug>` в репо проекта эпика
     (по умолчанию рядом: `<repo>.worktrees/epic-<slug>`). У эпика должен быть slug.
@@ -106,5 +122,5 @@ ARCHITECTURE/decisions}` (документация/состояние/ADR), ис
 - **Документация** → `_project/docs/…` (не удалять — это история/состояние).
 - **Никогда не удаляй вслепую**: `_storage/<slug>/`, `.git/`, `_project/docs/`. Архивируй проект через
   `atlas project archive` (soft, физика не двигается), а не `rm`.
-- Корневая папка портфеля — `atlas config set projects_root <path>` (или `config init`); по умолчанию
+- Корневая папка портфеля — `atlas config set projects_root <path>` (или `config setup`); по умолчанию
   `~/Documents/PROJECT`.

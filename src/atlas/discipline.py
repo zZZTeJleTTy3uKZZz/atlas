@@ -45,6 +45,6 @@ DISCIPLINE_BODY = """\
   `superpowers:brainstorming` (дизайн до кода) и `superpowers:writing-plans` (декомпозиция).
 - **Деструктив (archive, `--hard`) → покажи дельту и подтверди** (soft-delete по умолчанию).
 
-Больше (спринты, дашборд `atlas dashboard`, журнал `atlas logs`, гипотезы, синк) — **используй навык
+Больше (спринты, дашборд `atlas dashboard`, журнал `atlas log list`, гипотезы, синк) — **используй навык
 `atlas`** (`atlas <group> --help` — источник правды).\
 """

@@ -181,7 +181,7 @@ def add_cmd(
 # --------------------------------------------------------------------------- #
 
 
-@app.command("edit")
+@app.command("update")
 @command
 def edit_cmd(
     ref: str = typer.Argument(..., help="slug типа (неизменяемый идентификатор)"),

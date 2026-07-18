@@ -25,8 +25,8 @@ description: |
   playwright-network-dump"
   <commentary>
   Subagent сам читает AGENTS.md, factory_registry.json, разбирает
-  структуру, применяет `atlas project update` + `add-tags` /
-  `remove-tags`, переписывает README. В конце выдаёт компактный отчёт о
+  структуру, применяет `atlas project update` + `project tag add` /
+  `project tag rm`, переписывает README. В конце выдаёт компактный отчёт о
   diff с baseline.
   </commentary>
   </example>
@@ -65,7 +65,7 @@ model: inherit
 - БД atlas (SQLite) — единый канон. CLI:
   - `atlas project get <slug>`
   - `atlas project update <slug> --one-line ... --description ... --priority ...`
-  - `atlas project add-tags <slug> -t category:slug ...`
+  - `atlas project tag add <slug> -t category:slug ...`
   - `atlas project remove-tags <slug> -t category:slug ...`
   - `atlas project move <slug> --to-type <new-type>` (если нужно сменить тип)
   - `atlas tag add --slug X --name "X" --category stack|domain|owner|other` (если
@@ -181,7 +181,7 @@ atlas project update <slug> --status active
 atlas project move <slug> --to-type personal-utility
 
 # Добавить новые теги (только те что отсутствуют)
-atlas project add-tags <slug> -t stack:X -t domain:Y
+atlas project tag add <slug> -t stack:X -t domain:Y
 
 # Удалить устаревшие (только те что точно не релевантны)
 atlas project remove-tags <slug> -t stack:Z
@@ -351,7 +351,7 @@ atlas project update <slug> \
 atlas project move <slug> --to-type <new-type>
 
 # Теги
-atlas project add-tags <slug> -t stack:b24 -t domain:crm
+atlas project tag add <slug> -t stack:b24 -t domain:crm
 atlas project remove-tags <slug> -t stack:legacy
 
 # Если тега нет в seed'е — сначала создать

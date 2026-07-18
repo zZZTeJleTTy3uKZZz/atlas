@@ -20,7 +20,17 @@ echo "[atlas] installing atlas-pm via uv tool ..."
 uv tool install --upgrade atlas-pm
 uv tool update-shell >/dev/null 2>&1 || true
 
+# make `atlas` visible in this shell (uv tool shim lives in ~/.local/bin)
+export PATH="$HOME/.local/bin:$PATH"
+
+# turnkey: write Atlas rules into agent files (CLAUDE.md/AGENTS.md) and install
+# the SessionStart triage hook (portfolio state injected at session start).
+# Non-fatal (|| ...): older atlas has no `setup` - the CLI is installed anyway.
+echo "[atlas] wiring rules + SessionStart hook into your agent (atlas setup) ..."
+atlas setup --scope global || echo "[atlas] (atlas setup not in this version - run it after 'atlas update')"
+
 echo ""
 echo "[atlas] Done. Verify:  atlas --version"
-echo "[atlas] First run:      atlas config set owner <you> && atlas init"
+echo "[atlas] First run:      atlas config set owner <you>"
+echo "[atlas] Rules + hook:   atlas setup     (re-run any time; idempotent)"
 echo "[atlas] Update later:   atlas update"

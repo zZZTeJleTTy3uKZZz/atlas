@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.2 — работа из коробки, onboarding навыка, hotfix guard entity_kind
+
+**Из коробки (#899)** — atlas больше не требует настраивать владельца:
+- `AtlasConfig.owner` по умолчанию **`admin`**: на чистой установке `project init`
+  сам заводит участника-владельца, команды не требуют `--owner/--actor`.
+- Сменить владельца: `atlas config set owner <slug>` (+ `atlas person add --slug
+  <slug> --kind human --name "…"`); явно заданный owner по-прежнему побеждает дефолт.
+
+**Onboarding навыка (#900)** — секция `[onboarding]` в `_skill_meta.toml`
+(контракт skillkit: `summary`/`next_steps`/`docs`, печатается инсталлятором):
+обязательные шаги — папка-хранилище портфеля (`config set projects_root`) и
+`atlas project init`; опционально — свой GitLab/GitHub namespace (`git init`/
+`git link` для репо с историей), кастомные типы проектов, вложенность-модули
+(`--parent`), онбординг ИИ-агента (`atlas setup`).
+
+**Hotfix регрессии 0.3.1 (guard entity_kind из #894)**
+- Гейт «не проект портфеля» отвергает ТОЛЬКО явные `idea`/`inbox`. Было строгое
+  `!= "project"`, которое отвергло бы и запись с `entity_kind = NULL`.
+- **`project get` теперь отдаёт `entity_kind`** — раньше поля не было в карточке,
+  оно читалось как `None`, и отказ `task add` было невозможно продиагностировать
+  (легко принять legacy-idea за «сломанную миграцию»).
+- **`project update --entity-kind project|idea|inbox`** — штатная починка legacy-
+  классификации без ручных правок БД (кейс: запись помечена `idea`, хотя несёт
+  сотни задач).
+
 ## 0.3.1 — закрытие тех-долга аудита 2026-06-30 (#894)
 
 Починены все 16 оставшихся дефектов аудита (`docs/design/2026-06-30-atlas-audit-findings.md`).

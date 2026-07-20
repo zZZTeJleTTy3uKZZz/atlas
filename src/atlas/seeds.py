@@ -332,7 +332,10 @@ def seed_project_statuses(session: Session) -> list[ProjectStatus]:
 def seed_participants(session: Session) -> list[Participant]:
     """Заселить базовых участников: generic AI-агент + владелец стора из конфига.
 
-    Личный владелец не хардкодится — берётся из ``AtlasConfig.owner`` (если задан).
+    Владелец не хардкодится — берётся из ``AtlasConfig.owner``, у которого есть
+    дефолт ``admin`` (#899): на чистой установке участник-владелец появляется сам,
+    и atlas работает без единой настройки. Сменить владельца —
+    ``atlas config set owner <slug>`` (+ ``atlas person add`` для нового участника).
     """
     seeds = list(PARTICIPANTS_SEED)
     owner = _owner_seed_slug()

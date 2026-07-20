@@ -2,7 +2,7 @@
 # При install skillery материализует SKILL.md + agents/ + references/ (см.
 # .skillignore) и ставит сам CLI через runtime_dependencies (pip git-install).
 description = "Atlas — local-first PM-система портфеля проектов и задач (SQLite). CLI atlas: project/task/epic/sprint/backlog/issue/checklist/hypothesis/tag/backup. Всё в локальном SQLite, без сети и внешних сервисов. Ставится с PyPI (atlas-pm), self-update `atlas update`; приёмка опциональна."
-version = "0.3.1"
+version = "0.3.2"
 kind = "tooling"
 tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 
@@ -12,10 +12,27 @@ tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 # ВАЖНО (TOML): top-level массив объявляем ДО заголовка [[cli]], иначе tomllib
 # относит этот ключ ВНУТРЬ таблицы cli[0], а не на верхний уровень манифеста.
 runtime_dependencies = [
-    { kind = "pip", spec = "atlas-pm==0.3.1" },
+    { kind = "pip", spec = "atlas-pm==0.3.2" },
 ]
 
 # CLI-инструмент, который несёт навык (заголовок таблицы — ПОСЛЕ top-level ключей).
 [[cli]]
 command_name = "atlas"
 entrypoint = "atlas.cli:app"
+
+# Онбординг «что делать дальше» ПОСЛЕ установки навыка: skillkit-инсталлятор
+# печатает это пользователю/ИИ-агенту, чтобы тот сам довёл настройку до конца.
+# Контракт: summary (строка) · next_steps (список строк) · docs (строка).
+[onboarding]
+summary = "Atlas — local-first PM портфеля проектов и задач (SQLite, без сети). Работает сразу: владелец по умолчанию `admin`, приёмка выключена. Осталось два обязательных шага — выбрать папку-хранилище портфеля и инициализировать БД; остальное опционально."
+next_steps = [
+    "1. ОБЯЗАТЕЛЬНО — выбери папку-хранилище портфеля (там будут репозитории проектов): `atlas config set projects_root \"<путь>\"` (напр. ~/Documents/PROJECT). Atlas разложит внутри физику `_storage/<slug>/` и логические папки-группы (Clients / Products / Tests / _Inbox / _Archive) с junction-ссылками на неё.",
+    "2. ОБЯЗАТЕЛЬНО — инициализируй БД: `atlas project init` (идемпотентно: миграции + справочники типов/статусов/тегов + участник-владелец). Проверка: `atlas dashboard --text`.",
+    "3. Первый проект: `atlas project add --name \"Мой проект\" --type personal-project`; задача: `atlas task add --project <slug> --title \"…\" --cpp \"измеримый результат\"` (ЦКП обязателен).",
+    "4. ВЛАДЕЛЕЦ — по умолчанию `admin` (менять не обязательно). Сменить: `atlas config set owner <slug>`; добавить людей/ИИ-агентов: `atlas person add --slug <slug> --kind human|ai_agent --name \"…\"`.",
+    "5. ОПЦИОНАЛЬНО, свой GitLab/GitHub: `atlas config set org_namespace <group>` (командный) и/или `atlas config set personal_namespace <group>` (личный). Затем `atlas project git init <ref>` создаст репозиторий в `<namespace>/clients|products|tests`. Нужен `glab` + GITLAB_TOKEN (для GitHub — `--provider github` + `atlas config set github_owner <user|org>`). Уже существующий репозиторий подключается через `atlas project git link <ref> --url <git-url>` (историю сохраняет).",
+    "6. ОПЦИОНАЛЬНО, типы проектов: 10 канонических уже засеяны — client-project → группа clients; business-product / personal-utility / personal-project / shared-infrastructure / kit / service / superskill → products; test → tests; inbox → inbox. Свои типы: `atlas type add --slug <slug> --name \"…\" --group clients|products|tests|inbox` либо файл `~/.atlas/types.toml` (секции [[types]], мерж by slug — можно и переопределить канонический). `--group` = физическая папка-группа; неизвестная → products (раскладка и git init не ломаются).",
+    "7. ОПЦИОНАЛЬНО, вложенность (модули): проект может быть модулем контейнера — `atlas project add --name \"Модуль\" --parent <container-ref>` (или `atlas project update <ref> --parent <container-ref>`). Смотреть: `atlas project list --parent <ref>` (модули) и `--standalone` (без родителя). Раскладка модуля строится внутри контейнера; циклы запрещены.",
+    "8. ОПЦИОНАЛЬНО, онбординг ИИ-агента: `atlas setup` — пропишет Atlas-дисциплину в агентские файлы (CLAUDE.md/AGENTS.md) и поставит SessionStart-хук, который показывает состояние портфеля в начале каждой сессии.",
+]
+docs = "Команды и флаги — `atlas <group> --help` (источник правды) и references/commands.md. Раскладка, типы, git и модули — references/projects-and-layout.md. Методология задач/эпиков — SKILL.md."

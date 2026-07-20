@@ -33,9 +33,13 @@ class AtlasConfig(AppConfig):
     timezone: str = "+03:00"
 
     # ── Идентичность владельца стора (раньше хардкод owner-slug по коду) ──
-    # member-slug владельца этого Atlas-стора: дефолтный actor аудита и
-    # владелец новых проектов. Пусто → команды требуют явный --owner/--actor.
-    owner: str = ""
+    # member-slug владельца этого Atlas-стора: дефолтный actor аудита и владелец
+    # новых проектов. Дефолт `admin` — atlas работает ИЗ КОРОБКИ, без обязательной
+    # настройки: `project init` заводит участника с этим slug (#899). Раньше здесь
+    # было "", и на чистой установке команды требовали явный --owner/--actor.
+    # Сменить владельца: `atlas config set owner <slug>` (+ `atlas person add
+    # --slug <slug> --kind human --name "…"`, если участника ещё нет).
+    owner: str = "admin"
 
     # ── GitLab/Git namespacing (раньше хардкод приватные org/personal namespaces) ──
     # Бизнес/организационный top-level git-namespace (дефолт для проектов).

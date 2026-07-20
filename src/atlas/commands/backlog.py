@@ -71,6 +71,7 @@ def _slug_exists(session: Session):
             select(Project.id).where(
                 Project.slug == slug,
                 Project.entity_kind.in_(("idea", "inbox")),
+                Project.archived_at.is_(None),  # архивные slug не держат
             )
         ).scalar_one_or_none() is not None
     return _check
@@ -119,9 +120,12 @@ def _proj_or_die(session: Session, ref: str) -> Project:
         raise CliError("ambiguous_ref", str(exc))
     if p is None:
         raise CliError("not_found", f"Проект '{ref}' не найден.")
-    if p.entity_kind != "project":
+    if p.entity_kind in ("idea", "inbox"):
         # [15] resolve_project_ref не фильтрует entity_kind — без этого гейта
         # задача могла привязаться к idea/inbox-псевдопроекту.
+        # ВАЖНО: сверяем по ЯВНЫМ idea/inbox, а не `!= "project"` — у проектов,
+        # созданных до введения entity_kind, поле может быть NULL, и строгая
+        # проверка ломала работу с любым старым проектом (регрессия 0.3.1).
         raise CliError(
             "not_a_project",
             f"'{ref}' — {p.entity_kind}-запись, а не проект портфеля. "

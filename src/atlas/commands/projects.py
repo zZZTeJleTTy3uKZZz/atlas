@@ -1729,6 +1729,11 @@ def get_cmd(
         "slug": project.slug,
         "prefix": project.prefix,
         "name": project.name,
+        # entity_kind ОБЯЗАН быть в карточке: без него legacy idea/inbox-запись
+        # выглядит как обычный проект, и отказ `task add` («не проект портфеля»)
+        # невозможно продиагностировать — поле читалось как None просто потому,
+        # что его не было в выводе.
+        "entity_kind": project.entity_kind,
         "type": pt.slug if pt else None,
         "type_name": pt.name if pt else None,
         "status": ps.slug if ps else None,
@@ -1871,6 +1876,12 @@ def update_cmd(
     ),
     local_path: Optional[str] = typer.Option(None, "--local-path"),
     prefix: Optional[str] = typer.Option(None, "--prefix"),
+    entity_kind: Optional[str] = typer.Option(
+        None, "--entity-kind",
+        help="Роль записи: project | idea | inbox. Нужен, чтобы починить legacy-"
+             "классификацию (запись помечена idea/inbox, но это полноценный проект). "
+             "Интейк новых идей ведётся в `atlas backlog`, не здесь.",
+    ),
     slug: Optional[str] = typer.Option(
         None, "--slug",
         help="ЗАПРЕЩЕНО менять slug — это часть task IDs. Используй delete + add.",
@@ -1935,9 +1946,14 @@ def update_cmd(
                 diffs[field] = {"old": old_value, "new": new_value}
                 setattr(project, field, new_value)
 
+        if entity_kind is not None and entity_kind not in ("project", "idea", "inbox"):
+            console.print("[red]--entity-kind: project | idea | inbox.[/red]")
+            raise typer.Exit(code=1)
+
         _maybe_update("name", name)
         _maybe_update("priority", priority)
         _maybe_update("description", description)
+        _maybe_update("entity_kind", entity_kind)
         _maybe_update("one_line_summary", one_line)
         _maybe_update("estimated_deadline", deadline_dt)
 

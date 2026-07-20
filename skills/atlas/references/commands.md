@@ -143,6 +143,11 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 `run [--type --status --tag --ref --dry-run]` · `status [--days N]` · `schedule install [--time HH:MM]` (Windows Task, деф. 03:00) · `schedule uninstall` · `schedule list`.
 
 ## config — онбординг + дефолты (config.toml)
+> **Владелец из коробки:** `owner` по умолчанию = **`admin`** (#899) — atlas работает сразу после
+> `project init`, участник `admin` заводится сидом, настройка не обязательна. Сменить владельца:
+> `atlas config set owner <slug>` (+ `atlas person add --slug <slug> --kind human --name "…"`, если
+> такого участника ещё нет). Добавить других людей/агентов — `atlas person add`.
+
 `show` · `get <key>` · `set <key> <value>` · `setup` (интерактивный визард; бывш. `config init`). Поля: `owner` (дефолтный
 actor/владелец), `timezone`, namespaces, `team_owner`, и **дефолты задач**: `default_priority` (P2),
 `default_review` (bool — заводить ли reviewer), `default_reviewer` (slug; пусто → создатель). Дефолты

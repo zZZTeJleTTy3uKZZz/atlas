@@ -3,7 +3,7 @@
 # PyPI); import-пакет и команда остаются `atlas`. Ставится: uv tool install atlas-pm /
 # pipx install atlas-pm.
 name = "atlas-pm"
-version = "0.3.3"
+version = "0.3.4"
 description = "Atlas — local-first PM-система для портфеля проектов и задач"
 readme = "README.md"
 license = { text = "MIT" }
@@ -44,8 +44,13 @@ dev = [
 atlas = "atlas.cli:main"
 
 [project.urls]
+# Well-known метки (PEP 753): PyPI рисует у них иконки и отдельную строку в
+# сайдбаре. Без Changelog пользователь пакета не мог узнать, что изменилось.
 Homepage = "https://github.com/zZZTeJleTTy3uKZZz/atlas"
 Repository = "https://github.com/zZZTeJleTTy3uKZZz/atlas"
+Changelog = "https://github.com/zZZTeJleTTy3uKZZz/atlas/blob/master/CHANGELOG.md"
+"Release Notes" = "https://github.com/zZZTeJleTTy3uKZZz/atlas/releases"
+Issues = "https://github.com/zZZTeJleTTy3uKZZz/atlas/issues"
 
 [build-system]
 requires = ["hatchling"]

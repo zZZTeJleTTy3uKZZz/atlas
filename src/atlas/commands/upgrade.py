@@ -31,6 +31,10 @@ console = Console()
 DIST_NAME = "atlas-pm"
 #: Публичный git-источник Atlas (для legacy pipx reinstall).
 DEFAULT_GIT_SOURCE = "git+https://github.com/zZZTeJleTTy3uKZZz/atlas.git"
+#: Страница релиза версии — что именно изменилось. CHANGELOG.md в wheel не
+#: попадает, страница PyPI показывает README, поэтому ссылка — единственный
+#: способ узнать содержимое обновления прямо из CLI.
+RELEASES_URL = "https://github.com/zZZTeJleTTy3uKZZz/atlas/releases/tag/v{version}"
 IS_WINDOWS = os.name == "nt"
 
 
@@ -136,6 +140,8 @@ def _render_update(d: dict[str, Any]) -> None:
     )
     if d.get("update_available"):
         console.print("  [yellow]доступно обновление[/yellow]")
+        if d.get("release_notes_url"):
+            console.print(f"  что нового: [blue]{d['release_notes_url']}[/blue]")
     elif d.get("latest"):
         console.print("  [green]актуальная версия[/green]")
     if d.get("hint"):
@@ -196,6 +202,8 @@ def update_cmd(
         raise CliError("pypi_unreachable", f"не удалось проверить PyPI ({DIST_NAME}): {e}")
     data["latest"] = latest
     data["update_available"] = _is_newer(latest, current)
+    if data["update_available"]:
+        data["release_notes_url"] = RELEASES_URL.format(version=latest)
 
     if check or not data["update_available"]:
         emit_data(data, text_renderer=_render_update)

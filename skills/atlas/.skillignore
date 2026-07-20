@@ -1,0 +1,45 @@
+# Что вырезать из УСТАНОВЛЕННОГО навыка (skillkit/filter.py, IGNORE-режим:
+# удаляется только перечисленное здесь — всё остальное остаётся нетронутым).
+#
+# Зачем: репозиторий atlas — монорепо. Тело навыка живёт в skills/atlas/ (в хабе
+# это поле skill_path), но файловая опись хаба перечисляет пути от КОРНЯ репо,
+# поэтому на update в папку навыка налипают src/, pyproject.toml и даже
+# skills/atlas/ — копия навыка внутри самого навыка.
+#
+# ВАЖНО: не переходить на allowlist `files:` во frontmatter SKILL.md. Allowlist
+# сносит всё неперечисленное, а .venv/ (per-skill venv, 65 МБ, из него работает
+# CLI-шим `atlas`) не защищён ни _PRESERVED_ROOT_NAMES, ни preserved_paths —
+# последний skillkit хардкодит и из манифеста не читает. Первый же update убил
+# бы venv вместе с рабочей командой atlas.
+#
+# Новый верхнеуровневый каталог в репозитории → добавить сюда; забытый ловит
+# tests/test_skill_payload.py.
+
+# --- код и сборка CLI (ставится с PyPI как atlas-pm, из репо не нужен) ---
+src/
+migrations/
+tests/
+install/
+scripts/
+alembic.ini
+pyproject.toml
+uv.lock
+
+# --- копия навыка внутри навыка (приезжает из-за путей от корня репо) ---
+skills/
+
+# --- документация и внутренние материалы репозитория ---
+docs/
+_project/
+research/
+README.md
+AGENTS.md
+CHANGELOG.md
+LICENSE
+
+# --- инфраструктура репозитория ---
+.github/
+.gitattributes
+.gitignore
+.gitlab-ci.yml
+.skillgateignore

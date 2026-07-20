@@ -87,9 +87,18 @@ def approve_task(
     force: bool = False,
     now: Optional[datetime] = None,
 ) -> Task:
-    """Reviewer → done (одобрить). Гейт reviewer — в finish_task. Опц. комментарий."""
+    """Reviewer → done (одобрить). Опц. комментарий.
+
+    Гейт reviewer проверяется ЗДЕСЬ, до делегирования: ``finish_task``
+    идемпотентен и на уже-``done`` задаче выходит раньше проверки, из-за чего
+    любой актор мог «одобрить» закрытую задачу и оставить фальшивый
+    approve-комментарий (аудит [9]). Комментарий пишем только при РЕАЛЬНОМ
+    переходе — повторный approve не засоряет историю.
+    """
+    was_done = task.status == "done"
+    TS._require_reviewer(session, task, actor, force)
     TS.finish_task(session, task, actor, force=force, now=now)
-    if comment:
+    if comment and not was_done:
         add_comment(session, task, actor, comment, kind="approve")
     return task
 
@@ -103,13 +112,23 @@ def reject_task(
     force: bool = False,
     now: Optional[datetime] = None,
 ) -> Task:
-    """Reviewer возвращает в работу: review → in_progress. Причина (comment) обязательна."""
-    if task.status not in ("review", "blocked"):
+    """Reviewer возвращает в работу: review → todo. Причина (comment) обязательна.
+
+    Только из ``review``: приём ``blocked`` дублировал переход blocked→in_progress
+    из ``unblock_task`` в обход lease-гейта — reviewer мог вытащить чужую
+    заблокированную задачу (аудит [4]).
+
+    Возвращаем в ``todo``, а НЕ в ``in_progress``: ``submit`` снял lease
+    исполнителя, поэтому in_progress без живого lease нарушал инвариант
+    «in_progress ⇒ есть lease» (аудит [10]). Исполнитель берёт задачу заново
+    через ``task start`` — как и написано в docstring ``submit_task``.
+    """
+    if task.status != "review":
         raise TS.TransitionError(
             f"reject только из 'review', текущий статус '{task.status}'"
         )
     TS._require_reviewer(session, task, actor, force)
-    task.status = "in_progress"
+    task.status = "todo"
     session.flush()
     TS._log_transition(session, "task_rejected", task, actor)
     add_comment(session, task, actor, comment, kind="reject")
@@ -125,7 +144,14 @@ def reopen_task(
     force: bool = False,
     now: Optional[datetime] = None,
 ) -> Task:
-    """Переоткрыть закрытую: done/cancelled → todo (reviewer-gated). Опц. комментарий."""
+    """Переоткрыть закрытую: done/cancelled → todo (reviewer-gated). Опц. комментарий.
+
+    Сбрасываем и ``started_at`` вместе с ``completed_at`` (аудит [16]): иначе
+    lead-time переоткрытой задачи считался бы от ПЕРВОГО старта (``claim_task``
+    пишет started_at только если он пуст) и искажал velocity. ``assignee_id``
+    сохраняем НАМЕРЕННО — переоткрытая задача остаётся за тем же исполнителем;
+    сменить — явным ``task update --assignee``.
+    """
     if task.status not in ("done", "cancelled"):
         raise TS.TransitionError(
             f"reopen только из done/cancelled, текущий статус '{task.status}'"
@@ -135,6 +161,7 @@ def reopen_task(
     task.status = "todo"
     if task.completed_at is not None:
         task.completed_at = None
+    task.started_at = None  # новый цикл работы → новый lead-time
     session.flush()
     TS._log_transition(session, "task_reopened", task, actor, from_status=old)
     if comment:

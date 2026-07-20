@@ -21,14 +21,28 @@ async def pull_once(
     resp = await client.poll_events(since, timeout=timeout, scope=scope)
     events = resp.get("events") or []
     applied = 0
+    skipped: list[dict] = []
     for ev in events:
-        apply.apply_event(session, ev)
-        applied += 1
+        # [12] apply_event штатно возвращает {'skipped': причина} — напр. task/epic без
+        # резолвленного проекта, checklist без родительской задачи (гонка порядка
+        # доставки). Раньше applied++ считался безусловно, и skip выглядел успехом:
+        # потеря событий была НЕВИДИМА. Теперь считаем раздельно и отдаём наружу
+        # (watch_loop логирует результат) — так пропуск виден в логе.
+        res = apply.apply_event(session, ev) or {}
+        reason = res.get("skipped") if isinstance(res, dict) else None
+        if reason:
+            skipped.append({"kind": ev.get("entity_kind"), "reason": str(reason)})
+        else:
+            applied += 1
     new_cursor = resp.get("cursor")
     if new_cursor:
         cursor.set_cursor(session, channel, new_cursor)
     session.commit()
-    return {"applied": applied, "cursor": cursor.get_cursor(session, channel)}
+    out = {"applied": applied, "cursor": cursor.get_cursor(session, channel)}
+    if skipped:  # видимость потери; полноценный retry-буфер — отдельная задача
+        out["skipped"] = len(skipped)
+        out["skipped_details"] = skipped[:10]
+    return out
 
 
 async def watch_loop(

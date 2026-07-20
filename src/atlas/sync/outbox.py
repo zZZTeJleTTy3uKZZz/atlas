@@ -91,12 +91,26 @@ def mark_sent(session: Session, outbox_id: str) -> None:
         ob.sent_at = local_now()
 
 
-def mark_failed(session: Session, outbox_id: str, error: str) -> None:
+#: Порог неудачных попыток: после него запись считается «отравленной» (poison-pill)
+#: и уходит из очереди в status='failed', чтобы один битый event не держал батч.
+MAX_PUSH_ATTEMPTS = 5
+
+
+def mark_failed(
+    session: Session, outbox_id: str, error: str, *, max_attempts: int = MAX_PUSH_ATTEMPTS
+) -> None:
+    """Учесть неудачную попытку отправки (attempts++, last_error).
+
+    В ``failed`` переводим ТОЛЬКО по достижении порога: одиночная сетевая ошибка
+    не должна навсегда выбрасывать событие из очереди — до порога запись остаётся
+    ``pending`` и уйдёт следующим push (#894 [13])."""
     ob = session.get(Outbox, outbox_id)
-    if ob is not None:
+    if ob is None:
+        return
+    ob.attempts = (ob.attempts or 0) + 1
+    ob.last_error = str(error)[:500]
+    if ob.attempts >= max_attempts:
         ob.status = "failed"
-        ob.attempts = (ob.attempts or 0) + 1
-        ob.last_error = str(error)[:500]
 
 
 __all__ = ["enqueue", "pending", "mark_sent", "mark_failed"]

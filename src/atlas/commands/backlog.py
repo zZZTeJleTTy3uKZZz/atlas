@@ -60,8 +60,18 @@ def _log(session: Session, action: str, item_id: str, details: dict) -> None:
 
 def _slug_exists(session: Session):
     def _check(slug: str) -> bool:
-        return session.execute(
+        if session.execute(
             select(BacklogItem.id).where(BacklogItem.slug == slug)
+        ).scalar_one_or_none() is not None:
+            return True
+        # [14] legacy idea/inbox живут в namespace Project и тоже попадают в
+        # `backlog list`. Без этой проверки один ref указывал бы на ДВЕ строки,
+        # а resolve всегда возвращал бы BacklogItem (legacy становилась недостижимой).
+        return session.execute(
+            select(Project.id).where(
+                Project.slug == slug,
+                Project.entity_kind.in_(("idea", "inbox")),
+            )
         ).scalar_one_or_none() is not None
     return _check
 
@@ -84,6 +94,21 @@ def _resolve_item_or_die(session: Session, ref: str) -> BacklogItem:
             return matches[0]
         if len(matches) > 1:
             raise CliError("ambiguous_ref", f"Неоднозначный ref '{ref}' (>1 идеи).")
+    # [8] legacy idea/inbox видны в `backlog list`, но это Project-записи — в
+    # BacklogItem их нет. Даём предметную подсказку вместо голого not_found
+    # (команд `atlas idea`/`atlas inbox` больше нет — управление через `project`).
+    legacy = session.execute(
+        select(Project).where(
+            Project.slug == ref, Project.entity_kind.in_(("idea", "inbox"))
+        )
+    ).scalar_one_or_none()
+    if legacy is not None:
+        raise CliError(
+            "legacy_entity",
+            f"'{ref}' — legacy {legacy.entity_kind}-запись (хранится как Project), "
+            f"не элемент backlog. Управляй ею как проектом: `atlas project get {ref}` / "
+            f"`atlas project archive {ref}`; новую идею заводи `atlas backlog add`.",
+        )
     raise CliError("not_found", f"Идея '{ref}' не найдена.")
 
 
@@ -94,6 +119,14 @@ def _proj_or_die(session: Session, ref: str) -> Project:
         raise CliError("ambiguous_ref", str(exc))
     if p is None:
         raise CliError("not_found", f"Проект '{ref}' не найден.")
+    if p.entity_kind != "project":
+        # [15] resolve_project_ref не фильтрует entity_kind — без этого гейта
+        # задача могла привязаться к idea/inbox-псевдопроекту.
+        raise CliError(
+            "not_a_project",
+            f"'{ref}' — {p.entity_kind}-запись, а не проект портфеля. "
+            f"Материализуй её: `atlas backlog convert <ref> --as project`.",
+        )
     return p
 
 
@@ -282,6 +315,15 @@ def archive_cmd(
     with make_session(engine) as session:
         item = _resolve_item_or_die(session, ref)
         ref_out = item.slug or item.id[:8]
+        if item.status == "converted" and not hard:
+            # [19] converted — терминальный статус: soft-архив затирал его и
+            # ломал связь «идея → задача/проект» в разрезе `list --status converted`.
+            raise CliError(
+                "already_converted",
+                f"Идея '{ref}' уже преобразована ({item.converted_kind} "
+                f"{item.converted_ref}) — это терминальный статус, архивировать нечего. "
+                "Удалить запись насовсем — `--hard`.",
+            )
         if hard:
             session.delete(item)
         else:

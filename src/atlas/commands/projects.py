@@ -2837,13 +2837,9 @@ def archive_cmd(
                         f"[red]Target уже существует: {dst}.[/red]"
                     )
                     raise typer.Exit(code=1)
-                try:
-                    remove_junction(src)
-                except Exception as exc:
-                    console.print(
-                        f"[red]Не удалось снять junction {src}: {exc}[/red]"
-                    )
-                    raise typer.Exit(code=1)
+                # [17] Порядок create→remove (был remove→create): при сбое создания
+                # нового junction старый оставался снятым, а local_path в БД указывал
+                # на несуществующий путь — проект «терял» физическую привязку.
                 if target is not None:
                     try:
                         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -2853,7 +2849,14 @@ def archive_cmd(
                             f"[red]Не удалось создать junction "
                             f"{dst} → {target}: {exc}[/red]"
                         )
-                        raise typer.Exit(code=1)
+                        raise typer.Exit(code=1)  # старый junction цел — откат не нужен
+                try:
+                    remove_junction(src)
+                except Exception as exc:
+                    console.print(
+                        f"[red]Не удалось снять junction {src}: {exc}[/red]"
+                    )
+                    raise typer.Exit(code=1)
                 moved_from = str(src)
                 moved_to = str(dst)
                 project.local_path = str(dst)

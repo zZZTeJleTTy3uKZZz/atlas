@@ -125,19 +125,12 @@ def derive_group_path(
 
     Возвращает: строку вида `<org-namespace>/clients`, `<personal-namespace>/archive/clients`.
 
-    Raises:
-        ValueError: если project_type не входит в известный список.
+    Неизвестный/кастомный тип не ошибка — попадает в `<top>/products` (см. ниже).
     """
     top = _select_top_level(owner_tags)
 
     if archived_group is not None:
         return f"{top}/archive/{archived_group}"
-
-    if project_type not in _KNOWN_TYPES:
-        known = ", ".join(sorted(_KNOWN_TYPES))
-        raise ValueError(
-            f"Неизвестный project_type '{project_type}'. Известные: {known}."
-        )
 
     if project_type == "client-project":
         if status in _ARCHIVE_STATUSES:
@@ -153,5 +146,8 @@ def derive_group_path(
     if project_type == "inbox":
         return f"{top}/inbox"
 
-    # Не должно сюда попасть — _KNOWN_TYPES прикрывает.
-    raise ValueError(f"Unhandled project_type '{project_type}'")
+    # [11] Кастомный тип (`atlas type add --slug …`) — НЕ ошибка: физический слой
+    # (paths.type_slug_to_group) кладёт такие в products, а здесь раньше летел
+    # ValueError → RuntimeError, и `project git init <custom>` падал без `--group`
+    # на типе, который add/layout/archive переваривают. Согласуем с paths.
+    return f"{top}/products"

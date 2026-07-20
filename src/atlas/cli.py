@@ -96,10 +96,19 @@ def _hoist_output_flags(argv: list[str]) -> list[str]:
 
     rest: list[str] = []
     mode: str | None = None
+    hoisting = True
     for tok in argv:
-        if tok in _JSON_FLAGS:
+        # [20] POSIX end-of-options: после `--` токены — ЗНАЧЕНИЯ/позиционные, а не
+        # флаги. Раньше хойст вырезал --json/--text из ЛЮБОЙ позиции, поэтому
+        # `atlas config set key -- --json` (значение, равное флагу) молча съедался
+        # и не доходил до Typer, а режим вывода переключался.
+        if tok == "--":
+            hoisting = False
+            rest.append(tok)
+            continue
+        if hoisting and tok in _JSON_FLAGS:
             mode = "json"  # json перебивает text
-        elif tok in _TEXT_FLAGS and mode != "json":
+        elif hoisting and tok in _TEXT_FLAGS and mode != "json":
             mode = "text"
         else:
             rest.append(tok)

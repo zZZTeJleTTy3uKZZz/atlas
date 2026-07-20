@@ -17,7 +17,16 @@ async def push_pending(session: Session, client, *, limit: int = 100) -> dict:
     if not items:
         return {"sent": 0}
     events = [json.loads(o.payload_json) for o in items]
-    await client.push_events(events)
+    try:
+        await client.push_events(events)
+    except Exception as exc:  # noqa: BLE001 — учитываем попытку и пробрасываем
+        # [13] Раньше ошибка просто вылетала: mark_failed нигде не вызывался,
+        # attempts/last_error оставались пустыми, а батч отправлялся заново целиком —
+        # одно перманентно-отвергаемое событие держало очередь вечно (poison-pill).
+        for o in items:
+            outbox.mark_failed(session, o.id, str(exc))
+        session.commit()
+        raise
     for o in items:
         outbox.mark_sent(session, o.id)
     session.commit()

@@ -232,6 +232,14 @@ def _resolve_project_or_die(session: Session, ref: str) -> Project:
     if proj is None:
         console.print(f"[red]Project '{ref}' не найден.[/red]")
         raise typer.Exit(code=1)
+    if proj.entity_kind != "project":
+        # [15] resolve_project_ref не фильтрует entity_kind — без гейта задача
+        # привязывалась бы к idea/inbox-псевдопроекту (stats их намеренно исключает).
+        console.print(
+            f"[red]'{ref}' — {proj.entity_kind}-запись, а не проект портфеля. "
+            f"Материализуй её: `atlas backlog convert <ref> --as project`.[/red]"
+        )
+        raise typer.Exit(code=1)
     return proj
 
 

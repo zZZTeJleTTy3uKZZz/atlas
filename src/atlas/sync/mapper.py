@@ -93,7 +93,15 @@ def _task_payload(t: Any) -> dict:
 
 
 def _checklist_due(c: Any) -> Any:
-    """due_date → ISO-строка "YYYY-MM-DD" (если datetime) | None."""
+    """due_date → ISO-строка "YYYY-MM-DD" (если datetime) | None.
+
+    [18] РЕШЕНИЕ по асимметрии с task (тот шлёт full-ISO): due пункта чек-листа —
+    это ДАТА, а не момент времени. Так его принимает CLI (``task checklist add
+    --due YYYY-MM-DD``) и таков контракт ядра (checklist_item.due), закреплённый
+    тестом test_sync_checklist. Поэтому формат НЕ выравниваем под task: обнуление
+    времени здесь не потеря, а нормализация к семантике поля. Входящий
+    ``apply._parse_due`` (fromisoformat → полночь) этому симметричен.
+    """
     due = getattr(c, "due_date", None)
     if due is None:
         return None

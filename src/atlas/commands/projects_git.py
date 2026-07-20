@@ -524,6 +524,7 @@ def link_cmd(
 
         now = local_now()
         project.git_remote_url = url
+        project.git_repo_url = url  # [5] зеркалим legacy-поле (по нему гейтит backup)
         project.git_default_branch = branch
         project.git_provider = provider
         project.git_initialized_at = now
@@ -637,6 +638,7 @@ def move_cmd(
                     )
 
         project.git_remote_url = new_url
+        project.git_repo_url = new_url  # [5] зеркалим legacy-поле
         project.last_touched_at = local_now()
 
         _log_action(
@@ -844,6 +846,7 @@ def sync_from_remote_cmd(
                 continue
             old = proj.git_remote_url
             proj.git_remote_url = a["remote"]
+            proj.git_repo_url = a["remote"]  # [5] зеркалим legacy-поле
             proj.last_touched_at = local_now()
             _log_action(
                 session,

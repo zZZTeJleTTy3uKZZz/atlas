@@ -236,15 +236,19 @@ def run_cmd(
                     "message": "no local_path",
                 })
                 continue
-            if not project.git_repo_url:
+            # [5] Источник правды — git_remote_url (его пишут git init/link/move/
+            # sync-from-remote); legacy git_repo_url оставлен как fallback. Раньше
+            # гейт смотрел ТОЛЬКО на legacy-поле, которое link/move/sync не заполняли,
+            # и привязанные через `project git link` проекты молча НЕ бэкапились.
+            if not (project.git_remote_url or project.git_repo_url):
                 if not is_json():
                     console.print(
-                        f"[yellow]⚠ {project.slug}: пустой git_repo_url — пропуск.[/yellow]"
+                        f"[yellow]⚠ {project.slug}: нет git remote url — пропуск.[/yellow]"
                     )
                 summary_rows.append({
                     "slug": project.slug,
                     "status": "skipped",
-                    "message": "no git_repo_url",
+                    "message": "no git remote url",
                 })
                 continue
 

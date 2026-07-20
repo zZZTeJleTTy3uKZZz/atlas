@@ -47,8 +47,19 @@ def _bash_exe() -> str | None:
 
 
 def _atlas_root() -> Path:
-    # .../src/atlas/pm/sync/daemon.py → корень проекта (4 уровня вверх от файла)
-    return Path(__file__).resolve().parents[4]
+    """Корень репозитория atlas (каталог с pyproject.toml).
+
+    Был жёсткий ``parents[4]`` с комментарием про несуществующий путь
+    ``src/atlas/pm/sync/daemon.py``: после переименования каталога pm→sync
+    исчез уровень вложенности, и индекс стал указывать НА УРОВЕНЬ ВЫШЕ корня —
+    демон (`sync watch`) стартовал из чужой папки (аудит [6]). Ищем маркер вверх
+    по дереву — устойчиво к будущим переносам файла.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return here.parents[3]  # .../src/atlas/sync/daemon.py → корень
 
 
 def _run_ps(script: str) -> subprocess.CompletedProcess:

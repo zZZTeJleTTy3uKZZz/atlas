@@ -92,3 +92,5 @@ logs/
 
 # autogen демоном (машинно-специфичные пути) — не в git
 scripts/sync_watch_headless*.vbs
+# autogen register_task.ps1 (абсолютные пути конкретной машины) — не в git
+scripts/backup/backup_headless.vbs

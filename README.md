@@ -99,7 +99,8 @@ uv tool install --editable .   # глобальный бинарь atlas из р
 # либо dev-окружение:  uv sync --extra dev
 ```
 
-Проверка: `atlas --version` (сейчас `0.3.0`) и `atlas --help`.
+Проверка: `atlas --version` и `atlas --help`. Что менялось от версии к версии —
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Обновление
 

@@ -1,6 +1,16 @@
 ---
 name: atlas
 description: "CLI `atlas` — local-first PM-система портфеля проектов и задач (локальный SQLite, без сети). Команды в ЕД. ЧИСЛЕ, RESTful-канон (подчинённые ресурсы вложены в родителя), --json по умолчанию: project (+ git/layout/tag/member) / task (+ member/checklist) / epic / sprint / hypothesis / person / type / status / tag / backlog / issue / log / backup / config / backend. EN triggers — atlas CLI, add project, create task with cpp, portfolio tasks, add checklist item, make project personal, add hypothesis, archive project, onboard project folder into atlas, local pm cli, sqlite task manager. RU triggers — атлас, добавь проект, создай задачу с ЦКП, задачи портфеля, добавь пункт чек-листа, сделай проект личным, добавь гипотезу, заархивируй проект, онбординг папки в atlas, локальная pm-система, портфель проектов."
+# Состав УСТАНОВЛЕННОГО навыка (allowlist skillkit): всё, что не перечислено,
+# вырезается. Якорь `/` обязателен — без него `SKILL.md` матчится на любом
+# уровне и копия skills/atlas/ выживает. `/.venv/**` — per-skill venv, из него
+# работает CLI-шим `atlas`; убрать эту строку = снести CLI при первом update.
+files:
+  - /SKILL.md
+  - /_skill_meta.toml
+  - /agents/**
+  - /references/**
+  - /.venv/**
 ---
 
 # atlas

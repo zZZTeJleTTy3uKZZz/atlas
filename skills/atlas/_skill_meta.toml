@@ -1,11 +1,11 @@
 # Манифест навыка Atlas для skillery (tooling-тип: несёт CLI).
 # Корень навыка в репозитории = skills/atlas (в хабе — поле skill_path). Состав
-# установки дочищает .skillignore рядом с этим файлом: опись хаба перечисляет
-# пути от корня монорепо, поэтому без него в папку навыка налипают src/,
-# pyproject.toml и копия skills/atlas/. Сам CLI ставится не из репозитория, а с
-# PyPI через runtime_dependencies (atlas-pm==X.Y.Z).
+# УСТАНОВКИ фиксирует allowlist files: во frontmatter SKILL.md — опись хаба
+# перечисляет пути от корня монорепо, поэтому без него в папку навыка налипают
+# src/, pyproject.toml и копия skills/atlas/. Сам CLI ставится не из
+# репозитория, а с PyPI через runtime_dependencies (atlas-pm==X.Y.Z).
 description = "Atlas — local-first PM-система портфеля проектов и задач (SQLite). CLI atlas: project/task/epic/sprint/backlog/issue/checklist/hypothesis/tag/backup. Всё в локальном SQLite, без сети и внешних сервисов. Ставится с PyPI (atlas-pm), self-update `atlas update`; приёмка опциональна."
-version = "0.3.4"
+version = "0.3.5"
 kind = "tooling"
 tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 
@@ -15,7 +15,7 @@ tags = ["pm", "cli", "task-management", "portfolio", "local-first"]
 # ВАЖНО (TOML): top-level массив объявляем ДО заголовка [[cli]], иначе tomllib
 # относит этот ключ ВНУТРЬ таблицы cli[0], а не на верхний уровень манифеста.
 runtime_dependencies = [
-    { kind = "pip", spec = "atlas-pm==0.3.4" },
+    { kind = "pip", spec = "atlas-pm==0.3.5" },
 ]
 
 # CLI-инструмент, который несёт навык (заголовок таблицы — ПОСЛЕ top-level ключей).

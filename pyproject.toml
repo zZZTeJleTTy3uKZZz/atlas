@@ -3,7 +3,7 @@
 # PyPI); import-пакет и команда остаются `atlas`. Ставится: uv tool install atlas-pm /
 # pipx install atlas-pm.
 name = "atlas-pm"
-version = "0.3.5"
+version = "0.3.6"
 description = "Atlas — local-first PM-система для портфеля проектов и задач"
 readme = "README.md"
 license = { text = "MIT" }
@@ -71,3 +71,11 @@ packages = ["src/atlas"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff.lint.per-file-ignores]
+# Компактные setup-строки в тестах («a = 1; b = 2») — осознанный стиль набора:
+# переписывать 87 мест ради косметики дороже пользы, а гейт `ruff check .` должен
+# оставаться сигналом о настоящих проблемах.
+"tests/*" = ["E702"]
+# Alembic-паттерн: импорты идут после настройки sys.path и конфигурации env.
+"migrations/env.py" = ["E402"]

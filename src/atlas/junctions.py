@@ -23,7 +23,6 @@ Junction (NTFS reparse point типа `IO_REPARSE_TAG_MOUNT_POINT`) — это
 from __future__ import annotations
 
 import os
-import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -175,7 +174,6 @@ def _junction_target_via_fsutil(p: Path) -> Optional[Path]:
         line = line.strip()
         # «Substitute Name: \??\C:\Users\...» или локализованные варианты —
         # ищем символы «\??\»
-        marker = r"\??\\"
         if "\\??\\" in line:
             idx = line.find("\\??\\")
             target = line[idx + 4:]

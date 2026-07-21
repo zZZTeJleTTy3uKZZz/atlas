@@ -442,8 +442,8 @@ def install_cmd(
         console.print(
             f"  Запустить сейчас:  Start-ScheduledTask -TaskName '{d['task']}'"
         )
-        console.print(f"  Состояние:         atlas backup schedule list")
-        console.print(f"  Удалить:           atlas backup schedule uninstall")
+        console.print("  Состояние:         atlas backup schedule list")
+        console.print("  Удалить:           atlas backup schedule uninstall")
 
     emit_data(
         {

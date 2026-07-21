@@ -441,7 +441,7 @@ def show_cmd(
 
     def _render(d: dict[str, Any]) -> None:
         console.print(f"[bold]{d['slug']}[/bold]  — {d['name']}")
-        console.print(f"  Kind:     idea")
+        console.print("  Kind:     idea")
         console.print(f"  Type:     {d['type'] or '—'}")
         console.print(f"  Status:   {d['status'] or '—'}")
         console.print(f"  Priority: {d['priority']}")
@@ -636,13 +636,13 @@ def promote_cmd(
         if d["md_moved"] is not None:
             console.print(f"  MD moved: {d['md_moved']} → IDEA.md")
         if d["backlog_extracted"]:
-            console.print(f"  Backlog:  extracted from _Ideas/BACKLOG.md")
+            console.print("  Backlog:  extracted from _Ideas/BACKLOG.md")
         if d["canonical_files"]:
             console.print(f"  Files:    {', '.join(d['canonical_files'])}")
         if d["canonical_error"]:
             console.print(f"  [yellow]⚠ canonical files: {d['canonical_error']}[/yellow]")
         if d["git_url"]:
-            console.print(f"  [green]✓ Git initialized[/green]")
+            console.print("  [green]✓ Git initialized[/green]")
             console.print(f"    URL:    {d['git_url']}")
         if d["git_error"]:
             console.print(f"  [red]✗ Git init failed: {d['git_error']}[/red]")

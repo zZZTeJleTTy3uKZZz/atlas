@@ -386,7 +386,7 @@ def show_cmd(ref: str = typer.Argument(...)) -> None:
 
     def _render(d: dict[str, Any]) -> None:
         console.print(f"[bold]{d['slug']}[/bold]  — {d['name']}")
-        console.print(f"  Kind:     inbox")
+        console.print("  Kind:     inbox")
         console.print(f"  Status:   {d['status'] or '—'}")
         console.print(f"  Priority: {d['priority']}")
         console.print(f"  Created:  {d['created']}")

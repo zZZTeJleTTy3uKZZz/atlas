@@ -200,7 +200,7 @@ def add_cmd(
         def _render(d: dict[str, Any]) -> None:
             if d["slug_auto"]:
                 console.print(f"[dim]slug auto-generated: {d['slug']}[/dim]")
-            console.print(f"[green]✓ Tag created[/green]")
+            console.print("[green]✓ Tag created[/green]")
             console.print(f"  ID:          {d['id']}")
             console.print(f"  Slug:        {d['slug']}")
             console.print(f"  Name:        {d['name']}")

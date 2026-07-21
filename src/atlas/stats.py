@@ -62,11 +62,6 @@ def project_counts(session: Session) -> dict[str, Any]:
     ``total`` — НЕ архивные (archived_at IS NULL); ``archived`` — отдельный
     счётчик архивных. Разбивки берутся по активным.
     """
-    base = (
-        select(Project)
-        .where(Project.entity_kind == "project")
-    )
-
     total = session.execute(
         select(func.count())
         .select_from(Project)
@@ -275,8 +270,6 @@ def activity_window(
         }
         for p in projects
     ]
-    project_ids = {p.id for p in projects}
-
     # Задачи: created/completed в окне. Если задан фильтр проектов — ограничиваем
     # подсчёт задач теми же проектами (множество активных в окне может не
     # совпадать с проектами задач; для счётчиков фильтр по проекту применяем

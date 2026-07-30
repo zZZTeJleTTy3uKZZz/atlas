@@ -648,11 +648,33 @@ def move_cmd(
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(code=1)
+        recovered = False
         try:
             new_url = backend.transfer_to_group(repo_full_path, to_group)
         except RuntimeError as exc:
-            console.print(f"[red]transfer failed: {exc}[/red]")
-            raise typer.Exit(code=1)
+            # Коду возврата не доверяем: glab может отдать ошибку (таймаут,
+            # неожиданный формат вывода, повтор уже выполненной операции), когда
+            # GitLab репозиторий УЖЕ перенёс. Прежде команда выходила здесь, и БД
+            # оставалась со старым URL — «в GitLab перенесено, в Atlas нет» (#1124).
+            repo_name = repo_full_path.rsplit("/", 1)[-1]
+            expected_path = f"{to_group}/{repo_name}"
+            try:
+                info = backend.get_remote_status(expected_path)
+            except RuntimeError:
+                info = None
+            if not info or not info.get("web_url"):
+                raise CliError(
+                    "transfer_failed",
+                    f"Перенос не удался: {exc}. Репозитория нет и по новому пути "
+                    f"'{expected_path}' — БД не тронута. Сверить фактическое "
+                    f"состояние: `atlas project git sync-from-remote {project.slug}`.",
+                )
+            new_url = info["web_url"]
+            recovered = True
+            console.print(
+                f"[yellow]⚠ transfer вернул ошибку ({exc}), но репозиторий уже "
+                f"в '{to_group}' — довожу локальный remote и БД.[/yellow]"
+            )
 
         # обновить локальный origin (если репо есть)
         if project.local_path:
@@ -680,6 +702,7 @@ def move_cmd(
             details={
                 "old_url": old_url,
                 "new_url": new_url,
+                "recovered": recovered,
                 "to_group": to_group,
             },
         )
@@ -692,6 +715,9 @@ def move_cmd(
             "old_url": old_url,
             "new_url": new_url,
             "to_group": to_group,
+            # True = transfer вернул ошибку, но репозиторий фактически перенесён
+            # и состояние доведено (#1124). Молчать об этом нельзя.
+            "recovered": recovered,
         },
         text_renderer=lambda d: console.print(
             f"[green]✓ Project '{d['slug']}' moved → {d['new_url']}[/green]"

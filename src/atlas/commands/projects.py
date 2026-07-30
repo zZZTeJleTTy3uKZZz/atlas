@@ -919,6 +919,7 @@ def _generate_unique_prefix(
 
 
 @projects_app.command("init")
+@command
 def init_cmd(
     db_url: Optional[str] = typer.Option(
         None, "--db-url", help="URL БД (override env ATLAS_DB_URL и default)"
@@ -981,6 +982,7 @@ def init_cmd(
 
 
 @projects_app.command("add")
+@command
 def add_cmd(
     name: str = typer.Option(..., "--name", help="Человекочитаемое название проекта"),
     type_slug: Optional[str] = typer.Option(None, "--type", help="Тип проекта. Если не задан — personal-project (личный)."),
@@ -1470,6 +1472,7 @@ def _backend_ident(project) -> str:
 
 
 @projects_app.command("make-personal")
+@command
 def make_personal_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
 ) -> None:
@@ -1534,6 +1537,7 @@ def make_personal_cmd(
 
 
 @projects_app.command("list")
+@command
 def list_cmd(
     type_slug: Optional[str] = typer.Option(None, "--type", help="Фильтр: slug типа"),
     status_slug: Optional[str] = typer.Option(None, "--status", help="Фильтр: slug статуса"),
@@ -1898,6 +1902,7 @@ def get_cmd(
 
 
 @projects_app.command("update")
+@command
 def update_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     name: Optional[str] = typer.Option(None, "--name"),
@@ -2240,6 +2245,7 @@ def _hard_delete_gitlab(full_path: str) -> bool:
 
 
 @projects_app.command("delete")
+@command
 def delete_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     hard: bool = typer.Option(
@@ -2449,6 +2455,7 @@ def delete_cmd(
 
 
 @project_tag_app.command("add")
+@command
 def add_tags_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     tags: list[str] = typer.Option(
@@ -2492,6 +2499,7 @@ def add_tags_cmd(
 
 
 @project_tag_app.command("rm")
+@command
 def remove_tags_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     tags: list[str] = typer.Option(
@@ -2567,6 +2575,7 @@ def _resolve_member_or_die(session: Session, ref: str) -> Participant:
 
 
 @project_member_app.command("add")
+@command
 def member_add_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     member: str = typer.Option(
@@ -2620,6 +2629,7 @@ def member_add_cmd(
 
 
 @project_member_app.command("list")
+@command
 def member_list_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
 ) -> None:
@@ -2656,6 +2666,7 @@ def member_list_cmd(
 
 
 @project_member_app.command("rm")
+@command
 def member_remove_cmd(
     ref: str = typer.Argument(..., help="slug | UUID проекта"),
     member: str = typer.Option(
@@ -2810,6 +2821,7 @@ def _move_folder(src: Path, dst: Path) -> bool:
 
 
 @projects_app.command("archive")
+@command
 def archive_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     status: str = typer.Option(
@@ -2995,6 +3007,7 @@ def archive_cmd(
 
 
 @projects_app.command("unarchive")
+@command
 def unarchive_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     status: str = typer.Option(
@@ -3126,6 +3139,7 @@ def unarchive_cmd(
 
 
 @projects_app.command("renew")
+@command
 def renew_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
 ) -> None:
@@ -3245,6 +3259,7 @@ def renew_cmd(
 
 
 @projects_app.command("move")
+@command
 def move_cmd(
     ref: str = typer.Argument(..., help="slug | UUID full | UUID short prefix"),
     to_type: str = typer.Option(..., "--to-type", help="Новый project_type.slug"),
@@ -3377,6 +3392,7 @@ def move_cmd(
 
 
 @projects_app.command("reorganize")
+@command
 def reorganize_cmd(
     dry_run: bool = typer.Option(
         True, "--dry-run/--apply",

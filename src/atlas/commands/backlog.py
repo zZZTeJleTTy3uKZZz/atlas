@@ -375,8 +375,8 @@ def convert_cmd(
 
     `--as project` материализует проект как прежний `idea promote`: layout/junction
     (`--setup-layout`), canonical-файлы (`--canonical`), опц. git (`--init-git`)."""
-    if as_ not in ("task", "project"):
-        raise CliError("bad_as", "--as: task | project.")
+    if as_ not in ("task", "project", "epic"):
+        raise CliError("bad_as", "--as: task | project | epic.")
     if priority and priority not in VALID_PRIORITIES:
         raise CliError("bad_priority", f"priority '{priority}': P0|P1|P2|P3.")
     engine = make_engine(_db_url())
@@ -388,7 +388,20 @@ def convert_cmd(
             raise CliError("already", f"Идея '{ref}' уже преобразована "
                                       f"({item.converted_kind} {item.converted_ref}).")
         cfg = load_config()
-        if as_ == "task":
+        if as_ == "epic":
+            # Возврат уведённого эпика (#1301): поднимает и его задачи разом.
+            from atlas import unconvert as U
+
+            try:
+                epic, restored = U.backlog_to_epic(session, item)
+            except U.UnconvertError as exc:
+                raise CliError(exc.code, exc.message)
+            result = {
+                "ref": epic.slug or epic.id[:8],
+                "title": epic.title,
+                "tasks_restored": [tk.slug for tk in restored],
+            }
+        elif as_ == "task":
             result = _convert_to_task(session, cfg, item, project, cpp, priority, no_review)
         else:
             result = _convert_to_project(
@@ -411,6 +424,17 @@ def convert_cmd(
 def _convert_to_task(session, cfg, item, project, cpp, priority, no_review) -> dict[str, Any]:
     from atlas.commands.task import _create_one_task
 
+    # Запись, уведённая из задачи (#1301), несёт прежний ЦКП в origin_payload —
+    # требовать его заново значит заставлять пользователя копипастить своё же.
+    if not cpp and item.origin_kind == "task":
+        from atlas import unconvert as U
+
+        try:
+            task = U.backlog_to_task(session, item)
+        except U.UnconvertError as exc:
+            raise CliError(exc.code, exc.message)
+        return {"ref": task.slug or task.id[:8], "title": task.title,
+                "number": task.number, "restored": True}
     if not cpp:
         raise CliError("no_cpp", "--as task требует --cpp (ЦКП задачи — измеримый результат).")
     # Резолвим проект ЗДЕСЬ через _proj_or_die (CliError → чистый JSON-контракт),

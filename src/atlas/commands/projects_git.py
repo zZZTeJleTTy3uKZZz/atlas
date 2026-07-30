@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table, is_json
+from clikit import CliError, command, emit_data, emit_table, is_json
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session

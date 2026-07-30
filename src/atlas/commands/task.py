@@ -266,17 +266,13 @@ def _epic_belongs_to_or_die(session: Session, epic: Epic, project: Project) -> E
         return epic
     owner = session.get(Project, epic.project_id)
     where = f"'{owner.slug}'" if owner else "другом проекте"
-    message = (
+    raise CliError(
+        "epic_foreign_project",
         f"Эпик '{epic.slug or epic.id}' принадлежит проекту {where}, "
         f"а задача заводится в '{project.slug}'. Эпик и задача должны быть в "
         f"одном проекте: возьмите эпик из '{project.slug}' либо заведите его "
-        f"там (`atlas epic add --project {project.slug} --title \"…\"`)."
+        f"там (`atlas epic add --project {project.slug} --title \"…\"`).",
     )
-    # `task add` / `task update` не обёрнуты в clikit-`@command`, поэтому
-    # CliError оттуда утечёт стектрейсом. Печатаем в стиле соседних проверок
-    # этих команд; в `batch` (он под `@command`) сообщение тоже доходит.
-    console.print(f"[red]{message}[/red]")
-    raise typer.Exit(code=1)
 
 
 def _resolve_epic_or_die(session: Session, ref: str) -> Epic:
@@ -341,6 +337,7 @@ def _resolve_task_or_die(session: Session, ref: str) -> Task:
 
 
 @task_app.command("add")
+@command
 def add_cmd(
     project: str = typer.Option(..., "--project", help="Project ref (slug | UUID)"),
     title: str = typer.Option(..., "--title"),
@@ -579,7 +576,6 @@ def _create_one_task(session: Session, cfg, spec: dict, *, idx: int) -> dict[str
 
     Reuse in-module хелперов (slug/number/reviewer/log/enqueue) — единая логика с add.
     Ошибки ресолва/валидации → CliError с номером элемента."""
-    from clikit import CliError
 
     proj = _resolve_project_or_die(session, str(spec["project"]))
     if proj.prefix is None:
@@ -671,7 +667,6 @@ def batch_cmd(
     import tomllib
     from pathlib import Path
 
-    from clikit import CliError
 
     from atlas.appconfig import load_config as _load_cfg
 
@@ -1092,6 +1087,7 @@ def _render_task_get(d: dict[str, Any]) -> None:
 
 
 @task_app.command("update")
+@command
 def update_cmd(
     ref: str = typer.Argument(..., help="number | slug | UUID"),
     title: Optional[str] = typer.Option(None, "--title"),
@@ -1265,6 +1261,7 @@ def _slug_for_epic(session: Session, epic_id: Optional[str]) -> Optional[str]:
 
 
 @task_app.command("delete")
+@command
 def delete_cmd(
     ref: str = typer.Argument(..., help="number | slug | UUID"),
     hard: bool = typer.Option(

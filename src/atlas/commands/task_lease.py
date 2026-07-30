@@ -948,3 +948,123 @@ def epic_release_cmd(
         data = _epic_lease_data(session, epic, "released")
         data["cascaded"] = [t.slug or t.id for t in res.claimed_tasks]
     emit_data(data, text_renderer=_render_epic_lease)
+
+
+# --------------------------------------------------------------------------- #
+# unconvert — обратный путь в пул `backlog` (#1301)                            #
+# --------------------------------------------------------------------------- #
+
+
+@task_app.command("unconvert")
+@command
+def task_unconvert_cmd(
+    ref: str = typer.Argument(..., help="number | slug | UUID задачи"),
+) -> None:
+    """Вернуть задачу в пул `backlog` (не «отменить»).
+
+    Задача не удаляется: помечается `converted` и архивируется — история,
+    комментарии и журнал остаются. ЦКП, описание и связи едут в запись пула,
+    поэтому `backlog convert` вернёт задачу с прежним slug и содержимым.
+    """
+    from atlas import unconvert as U
+
+    with make_session(_lifecycle_engine()) as session:
+        task = _resolve_task_or_die(session, ref)
+        try:
+            item = U.task_to_backlog(session, task)
+        except U.UnconvertError as exc:
+            raise CliError(exc.code, exc.message)
+        session.commit()
+        data = {
+            "task": task.slug,
+            "backlog_item": item.slug,
+            "title": item.title,
+            "action": "task_unconverted",
+        }
+    emit_data(data)
+
+
+@epic_app.command("unconvert")
+@command
+def epic_unconvert_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID эпика"),
+) -> None:
+    """Вернуть эпик в пул `backlog` ВМЕСТЕ с его задачами.
+
+    Задачи эпика становятся записями пула с ссылкой на запись эпика, поэтому
+    `backlog convert <эпик> --as epic` поднимает всю структуру разом.
+    """
+    from atlas import unconvert as U
+    from atlas.commands.task import _resolve_epic_or_die
+
+    with make_session(_lifecycle_engine()) as session:
+        epic = _resolve_epic_or_die(session, ref)
+        try:
+            parent, children = U.epic_to_backlog(session, epic)
+        except U.UnconvertError as exc:
+            raise CliError(exc.code, exc.message)
+        session.commit()
+        data = {
+            "epic": epic.slug,
+            "backlog_item": parent.slug,
+            "tasks_moved": [c.slug for c in children],
+            "action": "epic_unconverted",
+        }
+    emit_data(data)
+
+
+# --------------------------------------------------------------------------- #
+# move — перенос между проектами (#1126)                                       #
+# --------------------------------------------------------------------------- #
+
+
+@task_app.command("move")
+@command
+def task_move_cmd(
+    ref: str = typer.Argument(..., help="number | slug | UUID задачи"),
+    to_project: str = typer.Option(..., "--to-project", help="Целевой проект (slug | UUID)."),
+) -> None:
+    """Перенести задачу в другой проект.
+
+    Запись сохраняется: номер, история и комментарии остаются. Slug
+    пересобирается под prefix нового проекта, иначе он врал бы о
+    принадлежности; связь с эпиком чужого проекта снимается (#1125).
+    """
+    from atlas import unconvert as U
+    from atlas.commands.task import _resolve_project_or_die
+
+    with make_session(_lifecycle_engine()) as session:
+        task = _resolve_task_or_die(session, ref)
+        project = _resolve_project_or_die(session, to_project)
+        try:
+            data = U.move_task_to_project(session, task, project)
+        except U.UnconvertError as exc:
+            raise CliError(exc.code, exc.message)
+        _enqueue_task_update(session, task)
+        session.commit()
+    emit_data({**data, "action": "task_moved"})
+
+
+@epic_app.command("move")
+@command
+def epic_move_cmd(
+    ref: str = typer.Argument(..., help="slug | UUID эпика"),
+    to_project: str = typer.Option(..., "--to-project", help="Целевой проект (slug | UUID)."),
+) -> None:
+    """Перенести эпик в другой проект ВМЕСТЕ с его задачами.
+
+    Связь эпик↔задача внутрипроектная (#1125), поэтому оставить задачи на месте
+    значило бы её разорвать.
+    """
+    from atlas import unconvert as U
+    from atlas.commands.task import _resolve_epic_or_die, _resolve_project_or_die
+
+    with make_session(_lifecycle_engine()) as session:
+        epic = _resolve_epic_or_die(session, ref)
+        project = _resolve_project_or_die(session, to_project)
+        try:
+            data = U.move_epic_to_project(session, epic, project)
+        except U.UnconvertError as exc:
+            raise CliError(exc.code, exc.message)
+        session.commit()
+    emit_data({**data, "action": "epic_moved"})

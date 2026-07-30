@@ -691,6 +691,20 @@ class BacklogItem(Base):
     )
     converted_kind: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # task|project
     converted_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # ---- обратная конвертация task/epic → пул (#1301) ----
+    #: Родительская запись пула: у задач эпика, уведённого в бэклог, это запись
+    #: самого эпика. Без неё возврат не знает, что вернуть вместе с эпиком.
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("backlog_items.id", ondelete="SET NULL"), nullable=True
+    )
+    #: Чем запись была до увода: task | epic. Отличается от `source` — тот про
+    #: происхождение идеи (native/legacy/…), а не про обратный путь.
+    origin_kind: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    #: Прежний slug — возврат восстанавливает его, а не генерирует новый, чтобы
+    #: ссылки в описаниях и коммитах не протухали.
+    origin_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    #: JSON с полями, которых нет в BacklogItem (ЦКП, описание, assignee и т.п.).
+    origin_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(
         String(20), default="native", server_default="native", nullable=False
     )
@@ -706,7 +720,7 @@ class BacklogItem(Base):
             name="ck_backlog_items_status",
         ),
         CheckConstraint(
-            "converted_kind IS NULL OR converted_kind IN ('task','project')",
+            "converted_kind IS NULL OR converted_kind IN ('task','project','epic')",
             name="ck_backlog_items_converted_kind",
         ),
         Index("idx_backlog_items_project", "project_id"),

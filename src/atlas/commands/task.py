@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data
+from clikit import CliError, command, emit_data
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
@@ -255,6 +255,30 @@ def _resolve_assignee_or_die(session: Session, slug: str) -> Participant:
     return p
 
 
+def _epic_belongs_to_or_die(session: Session, epic: Epic, project: Project) -> Epic:
+    """Проверить, что эпик принадлежит проекту задачи (#1125).
+
+    `Epic.slug` уникален глобально, поэтому резолв по slug находит и чужие
+    эпики. Без этой проверки задача молча привязывалась к эпику другого
+    проекта — связь уводила её из своего проекта, и заметить это можно было
+    только вручную сверив карточки."""
+    if epic.project_id == project.id:
+        return epic
+    owner = session.get(Project, epic.project_id)
+    where = f"'{owner.slug}'" if owner else "другом проекте"
+    message = (
+        f"Эпик '{epic.slug or epic.id}' принадлежит проекту {where}, "
+        f"а задача заводится в '{project.slug}'. Эпик и задача должны быть в "
+        f"одном проекте: возьмите эпик из '{project.slug}' либо заведите его "
+        f"там (`atlas epic add --project {project.slug} --title \"…\"`)."
+    )
+    # `task add` / `task update` не обёрнуты в clikit-`@command`, поэтому
+    # CliError оттуда утечёт стектрейсом. Печатаем в стиле соседних проверок
+    # этих команд; в `batch` (он под `@command`) сообщение тоже доходит.
+    console.print(f"[red]{message}[/red]")
+    raise typer.Exit(code=1)
+
+
 def _resolve_epic_or_die(session: Session, ref: str) -> Epic:
     """Найти Epic по slug / full UUID / short UUID prefix (≥7). Нет → Exit(1).
 
@@ -442,7 +466,9 @@ def add_cmd(
         # ----- epic -----
         epic_obj: Optional[Epic] = None
         if epic:
-            epic_obj = _resolve_epic_or_die(session, epic)
+            epic_obj = _epic_belongs_to_or_die(
+                session, _resolve_epic_or_die(session, epic), proj
+            )
 
         # ----- provenance / инвариант origin↔source -----
         source_id: Optional[str] = None
@@ -590,7 +616,12 @@ def _create_one_task(session: Session, cfg, spec: dict, *, idx: int) -> dict[str
             raise CliError("reviewer", f"#{idx}: reviewer — {exc}")
 
     assignee_id = _resolve_assignee_or_die(session, str(spec["assignee"])).id if spec.get("assignee") else None
-    epic_id = _resolve_epic_or_die(session, str(spec["epic"])).id if spec.get("epic") else None
+    epic_id = (
+        _epic_belongs_to_or_die(
+            session, _resolve_epic_or_die(session, str(spec["epic"])), proj
+        ).id
+        if spec.get("epic") else None
+    )
     due_dt = _parse_date(str(spec["due_date"]), "due-date") if spec.get("due_date") else None
 
     task = Task(
@@ -1162,7 +1193,10 @@ def update_cmd(
 
         # epic — нужен resolve через ref (slug | UUID); diff логируем slug'ами
         if epic is not None:
-            epic_obj = _resolve_epic_or_die(session, epic)
+            epic_obj = _epic_belongs_to_or_die(
+                session, _resolve_epic_or_die(session, epic),
+                session.get(Project, task.project_id),
+            )
             if task.epic_id != epic_obj.id:
                 diffs["epic"] = {
                     "old": _slug_for_epic(session, task.epic_id),

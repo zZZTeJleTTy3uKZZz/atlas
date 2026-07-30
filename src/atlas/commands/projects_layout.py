@@ -1,4 +1,4 @@
-"""CLI-команды `atlas projects layout ...` — junction-based layout.
+"""CLI-команды `atlas project layout ...` — junction-based layout.
 
 Sub-typer-app, регистрируется в `projects_app` через
 ``projects_app.add_typer(layout_app, name="layout")``.
@@ -230,7 +230,7 @@ def init_cmd(
         if not view.local_path:
             console.print(
                 f"[red]У проекта '{view.slug}' не задан local_path. "
-                f"Установите его через `atlas projects update`.[/red]"
+                f"Установите его через `atlas project update`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -241,7 +241,7 @@ def init_cmd(
             console.print(
                 f"[red]Проект '{view.slug}' уже мигрирован "
                 f"(local_path является junction). "
-                f"Используйте `atlas projects layout sync {view.slug}`.[/red]"
+                f"Используйте `atlas project layout sync {view.slug}`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -417,7 +417,7 @@ def sync_cmd(
         if not storage.exists():
             console.print(
                 f"[red]_storage/{view.slug} не существует. "
-                f"Сначала: `atlas projects layout init {view.slug}`.[/red]"
+                f"Сначала: `atlas project layout init {view.slug}`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -600,6 +600,39 @@ def sync_cmd(
 # --------------------------------------------------------------------------- #
 
 
+#: Имена внутри ``modules/``, которые не считаются нарушением конвенции.
+_MODULES_IGNORED = frozenset({"__pycache__", ".gitkeep", ".gitignore", "README.md"})
+
+
+def _check_modules_convention(storage: Path) -> list[dict[str, Any]]:
+    """Проверить, что ``modules/`` содержит только junction'ы модулей (#938).
+
+    Папка зарезервирована раскладкой Atlas: туда кладутся ссылки на
+    ``_storage/<slug>`` проектов-модулей. Обычный пакет с тем же именем
+    схлопывается с ней — junction попадает внутрь пакета и ломает импорты, а
+    ``layout sync`` рискует снести чужой код. Внутренние части → ``components/``.
+    """
+    modules = storage / "modules"
+    if not modules.is_dir():
+        return []
+
+    offenders = sorted(
+        item.name for item in modules.iterdir()
+        if item.name not in _MODULES_IGNORED and not _is_junction(item)
+    )
+    if not offenders:
+        return []
+    return [{
+        "name": "modules_not_reserved",
+        "ok": False,
+        "issue": (
+            f"в modules/ лежат не-junction'ы: {', '.join(offenders)}. "
+            f"Папка зарезервирована под модули Atlas — перенесите внутренние "
+            f"части в components/ (и поправьте импорты)."
+        ),
+    }]
+
+
 def _check_duplicate_junctions(
     view, *, root: Path, storage: Path, expected: Optional[Path] = None,
 ) -> list[dict[str, Any]]:
@@ -662,6 +695,7 @@ def _verify_one(
                 view, root=root, storage=storage, expected=expected,
             )
             checks.extend(extra)
+            checks.extend(_check_modules_convention(storage))
     ok = all(c.get("ok", False) for c in checks)
     return {
         "ok": ok,

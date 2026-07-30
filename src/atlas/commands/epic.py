@@ -12,7 +12,13 @@ from sqlalchemy import select
 from atlas._time import local_now
 from atlas.db import make_engine, make_session, resolve_db_url
 from atlas.models import ActionLog, Epic, Participant, Project
-from atlas.slugs import AmbiguousRefError, resolve_project_ref, slugify_text
+from atlas.slugs import (
+    AmbiguousRefError,
+    SlugGenerationError,
+    generate_unique_slug,
+    resolve_project_ref,
+    slugify_text,
+)
 from atlas.sync import outbox as _outbox
 
 epic_app = typer.Typer(no_args_is_help=True, help="Эпики (тематическая группировка задач).")
@@ -58,6 +64,39 @@ def _resolve_participant(session, slug: str | None) -> Participant | None:
     return session.execute(
         select(Participant).where(Participant.slug == slug)
     ).scalar_one_or_none()
+
+
+def _epic_owner(session, slug: str):
+    """Эпик, который уже занял slug (или None)."""
+    return session.execute(select(Epic).where(Epic.slug == slug)).scalar_one_or_none()
+
+
+def _resolve_epic_slug(session, *, slug: str | None, title: str) -> str | None:
+    """Свободный slug эпика или внятный отказ.
+
+    Явно заданный занятый slug — ошибка с указанием проекта-владельца: slug
+    уникален глобально, поэтому «занято» может быть в другом проекте, и без
+    этого пользователю негде искать конфликт."""
+    if slug:
+        taken = _epic_owner(session, slug)
+        if taken is not None:
+            owner = session.get(Project, taken.project_id)
+            where = f" (проект '{owner.slug}')" if owner else ""
+            raise CliError(
+                "slug_taken",
+                f"Slug '{slug}' уже занят эпиком «{taken.title}»{where}. "
+                f"Slug эпика уникален глобально — возьмите другой, например "
+                f"'{slug}-2', либо опустите --slug (сгенерируется сам).",
+            )
+        return slug
+
+    base = slugify_text(title)
+    if not base:
+        return None
+    try:
+        return generate_unique_slug(base, lambda s: _epic_owner(session, s) is not None)
+    except SlugGenerationError as exc:
+        raise CliError("slug_generation_failed", str(exc))
 
 
 @epic_app.command("add")
@@ -118,9 +157,16 @@ def add_cmd(
                 if injected_by is not None and injector is None:
                     raise CliError("not_found", f"Участник '{injected_by}' не найден.")
 
+        # ----- slug -----
+        # `Epic.slug` уникален ГЛОБАЛЬНО, поэтому конфликт возможен и с эпиком
+        # чужого проекта. Без этой проверки запись уходила в БД и падала сырым
+        # IntegrityError со стектрейсом (#1127). Поведение как у `task add`:
+        # явный занятый slug — отказ, авто-slug — следующий свободный.
+        final_slug = _resolve_epic_slug(session, slug=slug, title=title)
+
         epic = Epic(
             project_id=proj.id, title=title,
-            slug=slug or slugify_text(title) or None, goal=goal,
+            slug=final_slug, goal=goal,
             description=description,
             source_project_id=source_id,
             origin=final_origin,

@@ -1,4 +1,4 @@
-"""CLI-команды `atlas projects git ...` — Git/GitLab integration.
+"""CLI-команды `atlas project git ...` — Git/GitLab integration.
 
 Sub-typer `git_app`, регистрируется в `projects.py`:
     projects_app.add_typer(git_app, name="git")
@@ -187,7 +187,7 @@ def perform_git_init(
     """Полная git-init для проекта: local init + remote create + push + БД.
 
     Извлечено из ``init_cmd`` для повторного использования из
-    ``atlas projects add --init-git``. ``provider`` — ``gitlab`` (glab) или
+    ``atlas project add --init-git``. ``provider`` — ``gitlab`` (glab) или
     ``github`` (gh); бэкенд выбирается фабрикой ``get_backend``. Caller'у
     возвращается dict с ``{url, group_path, branch, provider}``. Вся
     error-handling — через ``RuntimeError`` (caller конвертит в typer.Exit).
@@ -512,7 +512,7 @@ def link_cmd(
         if not (local / ".git").exists():
             console.print(
                 f"[red]В {local} нет .git/ — сначала `git init` или используй "
-                f"`atlas projects git init` (новое создание).[/red]"
+                f"`atlas project git init` (новое создание).[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -586,6 +586,38 @@ def _repo_full_path_from_url(url: str) -> str:
     if s.endswith(".git"):
         s = s[: -len(".git")]
     return s.strip("/")
+
+
+def _normalize_git_url(url: Optional[str]) -> str:
+    """Свести URL репозитория к сравнимой форме ``host/namespace/repo``.
+
+    Один и тот же репозиторий записывается по-разному: с `.git` и без, по ssh и
+    по https, с разным регистром namespace, со слэшем на конце. Для `sync-from-
+    remote` это косметика — сравнивать нужно то, на что URL указывает."""
+    s = (url or "").strip()
+    if not s:
+        return ""
+    if s.startswith("git@") and ":" in s:                 # git@host:group/repo
+        host, path = s[len("git@"):].split(":", 1)
+        s = f"{host}/{path}"
+    elif "://" in s:                                      # scheme://[user@]host/path
+        s = s.split("://", 1)[1]
+        if "@" in s.split("/", 1)[0]:                     # ssh://git@host/...
+            s = s.split("@", 1)[1]
+    s = s.rstrip("/")
+    if s.endswith(".git"):
+        s = s[: -len(".git")]
+    return s.lower()
+
+
+def _same_remote(a: Optional[str], b: Optional[str]) -> bool:
+    """Указывают ли два URL на один репозиторий.
+
+    Пустое значение не совпадает ни с чем, включая другое пустое: это не
+    «одинаково», а «сравнивать нечего» — иначе проект без remote выглядел бы
+    синхронизированным."""
+    na, nb = _normalize_git_url(a), _normalize_git_url(b)
+    return bool(na) and na == nb
 
 
 @git_app.command("move")
@@ -757,23 +789,40 @@ def status_all_cmd(
 @git_app.command("sync-from-remote")
 @command
 def sync_from_remote_cmd(
+    ref: Optional[str] = typer.Argument(
+        None, help="slug | UUID проекта; без аргумента — весь портфель.",
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run/--apply",
         help="--dry-run — только показать diff, не применять.",
     ),
 ) -> None:
-    """Сравнить URL'ы в БД с реальными в GitLab/GitHub; обновить отличающиеся."""
+    """Сравнить URL'ы в БД с реальными в GitLab/GitHub; обновить отличающиеся.
+
+    Без `<ref>` — все проекты с remote. С `<ref>` — только один: обход всего
+    портфеля ради одного проекта стоит десятков сетевых запросов (#1129).
+    """
     engine = make_engine(_db_url())
 
     actions: list[dict[str, Any]] = []
     with make_session(engine) as session:
-        projects = (
-            session.execute(
-                select(Project).where(Project.git_remote_url.is_not(None))
+        if ref is not None:
+            project = _resolve_project_or_die(session, ref)
+            if not project.git_remote_url:
+                raise CliError(
+                    "no_remote",
+                    f"У '{project.slug}' нет git_remote_url — нечего сверять. "
+                    f"Подключить: `atlas project git link {project.slug} --url <git-url>`.",
+                )
+            projects = [project]
+        else:
+            projects = list(
+                session.execute(
+                    select(Project).where(Project.git_remote_url.is_not(None))
+                )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
 
         for proj in projects:
             stored = proj.git_remote_url or ""
@@ -792,7 +841,10 @@ def sync_from_remote_cmd(
                 continue
 
             actual = info.get("web_url") or stored
-            if actual != stored:
+            # Сравниваем то, на что URL указывает, а не как он записан: иначе
+            # «.git», регистр namespace и слэш на конце дают ложные расхождения
+            # и предложение обновить URL на такой же (#925).
+            if not _same_remote(actual, stored):
                 actions.append({
                     "slug": proj.slug,
                     "stored": stored,

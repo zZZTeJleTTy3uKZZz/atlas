@@ -90,6 +90,21 @@ _JSON_FLAGS = frozenset({"--json", "-J"})
 _TEXT_FLAGS = frozenset({"--text", "--plain"})
 
 
+#: Команды, у которых `--text` — СОБСТВЕННАЯ опция (содержимое), а не флаг
+#: вывода. Для них хойст `--text` отключается, иначе значение теряется и Typer
+#: падает с «Missing option --text» (#1131). Полноту реестра стережёт
+#: tests/test_text_flag_conflict.py.
+_OWN_TEXT_OPTION_PATHS: tuple[tuple[str, ...], ...] = (
+    ("task", "checklist", "add"),
+)
+
+
+def _argv_matches(argv: list[str], path: tuple[str, ...]) -> bool:
+    """Идут ли слова ``path`` подряд в начале командной части argv."""
+    words = [t for t in argv if not t.startswith("-")]
+    return words[: len(path)] == list(path)
+
+
 def _hoist_output_flags(argv: list[str]) -> list[str]:
     """Вынуть output-флаги из argv (любая позиция) → env ATLAS_OUTPUT; вернуть остаток."""
     import os
@@ -97,6 +112,10 @@ def _hoist_output_flags(argv: list[str]) -> list[str]:
     rest: list[str] = []
     mode: str | None = None
     hoisting = True
+    # У некоторых команд `--text` — их собственная опция; глобальным флагом
+    # вывода он там быть не может (#1131). `--json` это не касается.
+    text_is_own = any(_argv_matches(argv, p) for p in _OWN_TEXT_OPTION_PATHS)
+    text_flags = frozenset() if text_is_own else _TEXT_FLAGS
     for tok in argv:
         # [20] POSIX end-of-options: после `--` токены — ЗНАЧЕНИЯ/позиционные, а не
         # флаги. Раньше хойст вырезал --json/--text из ЛЮБОЙ позиции, поэтому
@@ -108,7 +127,7 @@ def _hoist_output_flags(argv: list[str]) -> list[str]:
             continue
         if hoisting and tok in _JSON_FLAGS:
             mode = "json"  # json перебивает text
-        elif hoisting and tok in _TEXT_FLAGS and mode != "json":
+        elif hoisting and tok in text_flags and mode != "json":
             mode = "text"
         else:
             rest.append(tok)

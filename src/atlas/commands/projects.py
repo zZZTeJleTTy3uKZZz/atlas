@@ -1,4 +1,4 @@
-"""CLI-команды `atlas projects ...`.
+"""CLI-команды `atlas project ...`.
 
 CRUD по проектам портфеля + init + archive engine.
 
@@ -37,7 +37,7 @@ from typing import Any, Optional
 import typer
 from clikit import CliError, command, emit_data, emit_message, emit_table
 from rich.console import Console
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from atlas._time import local_now
@@ -100,7 +100,7 @@ projects_app = typer.Typer(
 )
 console = Console()
 
-# Git/GitLab integration: sub-typer `atlas projects git ...` (см. projects_git.py).
+# Git/GitLab integration: sub-typer `atlas project git ...` (см. projects_git.py).
 from atlas.commands.projects_git import git_app as _git_app  # noqa: E402
 
 projects_app.add_typer(_git_app, name="git")
@@ -226,7 +226,7 @@ def _prefix_exists_fn(session: Session):
 def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
     """Резолв списка tag-refs: raise typer.Exit на несуществующий.
 
-    Подсказка в сообщении: `atlas tags add --slug ... --category ...`.
+    Подсказка в сообщении: `atlas tag add --slug ... --category ...`.
     """
     resolved: list[Tag] = []
     for ref in tag_refs:
@@ -242,7 +242,7 @@ def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
         if tag is None:
             console.print(
                 f"[red]Tag '{ref}' не найден. "
-                f"Создайте: `atlas tags add --slug ... --category ...`.[/red]"
+                f"Создайте: `atlas tag add --slug ... --category ...`.[/red]"
             )
             raise typer.Exit(code=1)
         resolved.append(tag)
@@ -269,7 +269,7 @@ CANONICAL_README_TEMPLATE = """\
 Карточка проекта в Atlas-БД (Atlas):
 
 ```sh
-atlas projects get {slug}
+atlas project get {slug}
 ```
 
 Физический layout:
@@ -280,7 +280,7 @@ atlas projects get {slug}
 ## TODO (placeholder)
 
 - [ ] Заполнить README реальным контентом проекта.
-- [ ] Подключить GitLab-репозиторий (если ещё нет): `atlas projects git init {slug}`.
+- [ ] Подключить GitLab-репозиторий (если ещё нет): `atlas project git init {slug}`.
 """
 
 CANONICAL_AGENTS_TEMPLATE = """\
@@ -298,14 +298,14 @@ CANONICAL_AGENTS_TEMPLATE = """\
 Проект зарегистрирован в Atlas-БД (Atlas). Карточка:
 
 ```sh
-atlas projects get {slug}
+atlas project get {slug}
 ```
 
 Любые изменения метаданных (приоритет, статус, теги) — через atlas CLI:
 
-- `atlas projects update {slug} --priority P0` — поменять приоритет
+- `atlas project update {slug} --priority P0` — поменять приоритет
 - `atlas project tag add {slug} -t domain:<slug>` — добавить тег
-- `atlas projects move {slug} --to-type <type>` — конвертировать тип
+- `atlas project move {slug} --to-type <type>` — конвертировать тип
 
 ## Тип / Статус (на момент создания)
 
@@ -319,7 +319,7 @@ atlas projects get {slug}
 
 ## Канонические команды
 
-- `atlas projects get {slug}` — карточка проекта
+- `atlas project get {slug}` — карточка проекта
 - `atlas task list --project {slug}` — задачи проекта (когда W7
   волна будет реализована)
 
@@ -563,7 +563,7 @@ def _setup_storage_and_junction(
     поведение (type-группа). Идемпотентно: правильный junction не пересоздаём.
 
     NOTE: Если logical уже существует и НЕ junction — оставляем как есть
-    (логика migrate-to-storage обработает позднее, через `atlas projects
+    (логика migrate-to-storage обработает позднее, через `atlas project
     layout init`). SAFETY: реальные директории не удаляем; снятие junction —
     только через `remove_junction` (is_junction-проверка внутри).
     """
@@ -720,7 +720,7 @@ def _reparent_relocate_junction(
         result["new_local_path"] = str(new_logical)
         result["warning"] = (
             "storage модуля отсутствует — junction не пересоздан "
-            "(запусти `atlas projects layout init` если нужна физика)."
+            "(запусти `atlas project layout init` если нужна физика)."
         )
         return result
 
@@ -795,7 +795,7 @@ def _require_container_laid_out(
     мигрирован в `_storage/<container>/` (его storage существует ИЛИ его
     container_logical — существующий junction). Иначе создание junction модуля
     породит фантомную реальную папку контейнера вне storage. Поднимает CliError
-    с подсказкой `atlas projects layout init <container>`.
+    с подсказкой `atlas project layout init <container>`.
     """
     container = session.get(Project, parent_id)
     if container is None:
@@ -821,7 +821,7 @@ def _require_container_laid_out(
             f"Контейнер '{container.slug}' ещё не разложен физически "
             f"(нет ни _storage/{container.slug}/, ни его папки "
             f"{container_logical}). Сначала выполните "
-            f"`atlas projects layout init {container.slug}`, затем повторите "
+            f"`atlas project layout init {container.slug}`, затем повторите "
             f"создание модуля. (Иначе модуль уехал бы в фантомную папку.)",
         )
 
@@ -1089,7 +1089,7 @@ def add_cmd(
         ).scalar_one_or_none()
         if pt is None:
             console.print(
-                f"[red]Тип '{mode.type_slug}' не найден. См. `atlas projects types`.[/red]"
+                f"[red]Тип '{mode.type_slug}' не найден. См. `atlas type list`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -1098,7 +1098,7 @@ def add_cmd(
         ).scalar_one_or_none()
         if ps is None:
             console.print(
-                f"[red]Статус '{status_slug}' не найден. См. `atlas projects statuses`.[/red]"
+                f"[red]Статус '{status_slug}' не найден. См. `atlas project statuses`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -1426,7 +1426,7 @@ def add_cmd(
                 emit_message(
                     f"✗ Git init failed: {exc}. Проект создан в БД и "
                     f"канонизирован, но без git. Повтор: "
-                    f"`atlas projects git init {final_slug}`.",
+                    f"`atlas project git init {final_slug}`.",
                     level="warn",
                 )
 
@@ -1551,10 +1551,23 @@ def list_cmd(
     ),
     standalone: bool = typer.Option(
         False, "--standalone",
-        help="Только самостоятельные проекты (без родителя, parent IS NULL).",
+        help="Только самостоятельные проекты (поведение по умолчанию, parent IS NULL).",
+    ),
+    modules: bool = typer.Option(
+        False, "--modules",
+        help="Только модули (проекты внутри контейнеров, parent IS NOT NULL).",
+    ),
+    show_all: bool = typer.Option(
+        False, "--all",
+        help="Проекты и модули вместе (прежнее поведение по умолчанию).",
     ),
 ) -> None:
-    """Список проектов (--json по умолчанию; --text — таблица)."""
+    """Список проектов портфеля (--json по умолчанию; --text — таблица).
+
+    Модули (проекты с родителем) по умолчанию СКРЫТЫ: это внутренности
+    контейнера, а не отдельные единицы портфеля. Сколько их — видно в колонке
+    `modules` у контейнера; сами модули — `--parent <ref>`, `--modules`, `--all`.
+    """
     _PROJECT_LIST_COLUMNS = [
         {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
         {"key": "prefix", "header": "prefix", "style": "dim"},
@@ -1562,12 +1575,22 @@ def list_cmd(
         {"key": "type", "header": "type", "style": "magenta"},
         {"key": "status", "header": "status", "style": "green"},
         {"key": "priority", "header": "P", "justify": "center", "style": "bold"},
+        {"key": "modules", "header": "modules", "justify": "center", "style": "dim"},
         {"key": "last_touched", "header": "last touched", "style": "dim"},
     ]
 
-    if parent is not None and standalone:
+    # Область видимости задаётся ровно одним способом — иначе непонятно, что
+    # показано: молча выигравший флаг хуже явного отказа.
+    scope_flags = [
+        ("--parent", parent is not None),
+        ("--standalone", standalone),
+        ("--modules", modules),
+        ("--all", show_all),
+    ]
+    chosen = [name for name, on in scope_flags if on]
+    if len(chosen) > 1:
         console.print(
-            "[red]--parent и --standalone взаимоисключающи.[/red]"
+            f"[red]Взаимоисключающие флаги области: {', '.join(chosen)}.[/red]"
         )
         raise typer.Exit(code=1)
 
@@ -1624,10 +1647,27 @@ def list_cmd(
         if parent is not None:
             parent_proj = _resolve_parent_or_die(session, parent)
             stmt = stmt.where(Project.parent_id == parent_proj.id)
-        if standalone:
+        elif modules:
+            stmt = stmt.where(Project.parent_id.is_not(None))
+        elif not show_all:
+            # Умолчание (и явный --standalone) — портфель без внутренностей.
             stmt = stmt.where(Project.parent_id.is_(None))
 
+        stmt = stmt.add_columns(Project.id.label("project_id"))
         rows = session.execute(stmt).all()
+
+        # Сколько модулей у каждого показанного контейнера: скрывать модули
+        # молча нельзя — иначе контейнер выглядит пустым (#917).
+        module_counts: dict[str, int] = {}
+        shown_ids = [row.project_id for row in rows]
+        if shown_ids:
+            counts = session.execute(
+                select(Project.parent_id, func.count(Project.id))
+                .where(Project.parent_id.in_(shown_ids))
+                .where(Project.archived_at.is_(None))
+                .group_by(Project.parent_id)
+            ).all()
+            module_counts = {pid: cnt for pid, cnt in counts}
 
     data = [
         {
@@ -1637,6 +1677,7 @@ def list_cmd(
             "type": row.type_slug,
             "status": row.status_slug,
             "priority": row.priority,
+            "modules": module_counts.get(row.project_id, 0),
             "last_touched": (
                 row.last_touched_at.strftime("%Y-%m-%d")
                 if row.last_touched_at else None
@@ -2736,7 +2777,7 @@ def _status_by_slug_or_die(session: Session, status_slug: str) -> ProjectStatus:
     ).scalar_one_or_none()
     if ps is None:
         console.print(
-            f"[red]Статус '{status_slug}' не найден. См. `atlas statuses list`.[/red]"
+            f"[red]Статус '{status_slug}' не найден. См. `atlas status list`.[/red]"
         )
         raise typer.Exit(code=1)
     return ps
@@ -3238,7 +3279,7 @@ def move_cmd(
         ).scalar_one_or_none()
         if new_type is None:
             console.print(
-                f"[red]Тип '{to_type}' не найден. См. `atlas types list`.[/red]"
+                f"[red]Тип '{to_type}' не найден. См. `atlas type list`.[/red]"
             )
             raise typer.Exit(code=1)
 
@@ -3542,7 +3583,7 @@ def reorganize_cmd(
 
 
 # --------------------------------------------------------------------------- #
-# layout sub-app: `atlas projects layout ...`                                 #
+# layout sub-app: `atlas project layout ...`                                 #
 # --------------------------------------------------------------------------- #
 from atlas.commands.projects_layout import layout_app as _layout_app  # noqa: E402
 

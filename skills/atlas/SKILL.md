@@ -162,6 +162,7 @@ priority = "P1"             # override дефолта батча
 2. **Сверься с живым CLI**: `atlas <group> --help` — источник правды (навык мог отстать; точные флаги — в [references/commands.md](references/commands.md)).
 3. **Собери команду**: ref-резолв (slug/number/UUID), обязательные флаги (`--name` на `project add`, `--cpp` на `task add`). Slug придумай сам (kebab-case).
 4. **Выполни.** `--json` — дефолт; человеку добавь `--text`. Деструктивные мутации (`archive`, массовые правки, `--hard`) — сначала покажи что изменится и подтверди.
+5. **Не занимай `modules/`** внутри проекта: имя зарезервировано под junction'ы проектов-модулей (`project add --parent`). Свои пакеты и подсистемы — в `components/`. Иначе junction модуля попадёт внутрь твоего пакета и сломает импорты; `atlas project layout verify` репортит это как `modules_not_reserved`.
 
 ## Examples
 

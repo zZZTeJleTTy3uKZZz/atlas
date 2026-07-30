@@ -176,7 +176,7 @@ def _render_dashboard(d: dict[str, Any]) -> None:
     if t["review"]:
         console.print(_task_table("👀 На ревью", t["review"], show_holder=True))
     console.print(_by_project_table(d["by_project"]))
-    console.print("[dim]Журнал событий → [bold]atlas logs[/bold] (кто/что/проект/приоритет).[/dim]")
+    console.print("[dim]Журнал событий → [bold]atlas log list[/bold] (кто/что/проект/приоритет).[/dim]")
 
 
 @command

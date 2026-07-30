@@ -118,6 +118,11 @@ client-project) — `renewal_count++`. `move --to-type` — смена типа 
 ARCHITECTURE/decisions}` (документация/состояние/ADR), исходники/skills/cases. Источник истины по
 метаданным — БД atlas; при расхождении README↔AGENTS.md — побеждает AGENTS.md.
 
+- **`modules/` — зарезервировано Atlas**: там лежат ТОЛЬКО junction'ы на `_storage/<slug>` проектов-
+  модулей (`project add --parent <container>`). Свои внутренние части (пакеты, подсистемы, разделы
+  контента) клади в **`components/`**. Если положить обычный пакет `modules/`, он схлопнется с
+  раскладкой: junction модуля окажется внутри пакета и сломает импорты, а `layout sync` может снести
+  чужой код. Проверка машинная — `atlas project layout verify` репортит `modules_not_reserved`.
 - **Артефакты/выгрузки/временное** → `_artifacts/` или `_scratch/` (gitignore, безопасно удалять).
 - **Документация** → `_project/docs/…` (не удалять — это история/состояние).
 - **Никогда не удаляй вслепую**: `_storage/<slug>/`, `.git/`, `_project/docs/`. Архивируй проект через

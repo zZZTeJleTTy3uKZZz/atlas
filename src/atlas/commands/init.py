@@ -18,7 +18,7 @@ from typing import Any
 
 import typer
 from agentskit import onboard, resolve_agent_keys
-from clikit import command
+from clikit import CliError, command
 from rich.console import Console
 
 from atlas.discipline import ATLAS_NAMESPACE, DISCIPLINE_BODY
@@ -73,15 +73,13 @@ def init_cmd(
     — точечно (с ``--create`` создаст их файлы).
     """
     if scope not in ("global", "repo", "all"):
-        console.print(f"[red]Неверный --scope '{scope}': global|repo|all.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("bad_kind", f"Неверный --scope '{scope}': global|repo|all.")
     agent_keys: list[str] | None = None
     if agents.strip():
         try:
             agent_keys = resolve_agent_keys(agents)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1) from exc
+            raise CliError("precondition", str(exc)) from exc
 
     results = onboard(
         namespace=ATLAS_NAMESPACE, body=DISCIPLINE_BODY,

@@ -18,7 +18,7 @@ Sub-typer `git_app`, регистрируется в `projects.py`:
 - Все subprocess (`git`/`glab`) идут через ``atlas.git_backend.run`` —
   тестируются мокингом одной функции, не реальные процессы.
 - `resolve_project_ref` — единый способ найти проект по slug/UUID/short.
-- ошибки → ``typer.Exit(code=1)`` + понятное сообщение в console.
+- ошибки → ``CliError(code, message)`` (clikit сам отдаёт машинный JSON/exit 1).
 """
 from __future__ import annotations
 
@@ -104,11 +104,9 @@ def _resolve_project_or_die(session: Session, ref: str) -> Project:
     try:
         project = resolve_project_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc)) from exc
     if project is None:
-        console.print(f"[red]Project '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Project '{ref}' не найден.")
     return project
 
 
@@ -123,12 +121,12 @@ def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
     for ref in tag_refs:
         try:
             tag = resolve_tag_ref(session, ref)
-        except (AmbiguousTagRefError, InvalidTagCategoryError, ValueError) as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+        except AmbiguousTagRefError as exc:
+            raise CliError("ambiguous_ref", str(exc)) from exc
+        except (InvalidTagCategoryError, ValueError) as exc:
+            raise CliError("bad_kind", str(exc)) from exc
         if tag is None:
-            console.print(f"[red]Tag '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Tag '{ref}' не найден.")
         resolved.append(tag)
     return resolved
 
@@ -190,7 +188,7 @@ def perform_git_init(
     ``atlas project add --init-git``. ``provider`` — ``gitlab`` (glab) или
     ``github`` (gh); бэкенд выбирается фабрикой ``get_backend``. Caller'у
     возвращается dict с ``{url, group_path, branch, provider}``. Вся
-    error-handling — через ``RuntimeError`` (caller конвертит в typer.Exit).
+    error-handling — через ``RuntimeError`` (caller конвертит в CliError).
 
     Унифицированные фиксы:
       - бэкенд (GitLab/GitHub) — через ``get_backend(provider)``.
@@ -292,11 +290,11 @@ def init_cmd(
     from atlas.git_backend import SUPPORTED_PROVIDERS
 
     if provider not in SUPPORTED_PROVIDERS:
-        console.print(
-            f"[red]Provider '{provider}' не поддерживается "
-            f"({', '.join(sorted(SUPPORTED_PROVIDERS))}).[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Provider '{provider}' не поддерживается "
+            f"({', '.join(sorted(SUPPORTED_PROVIDERS))}).",
         )
-        raise typer.Exit(code=1)
 
     engine = make_engine(_db_url())
     with make_session(engine) as session:
@@ -311,8 +309,7 @@ def init_cmd(
                 log_action_fn=_log_action,
             )
         except RuntimeError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("git_failed", str(exc)) from exc
         session.commit()
 
     emit_data(
@@ -437,24 +434,20 @@ def push_cmd(
         project = _resolve_project_or_die(session, ref)
 
         if not project.local_path:
-            console.print(
-                f"[red]Project '{project.slug}': local_path не задан.[/red]"
+            raise CliError(
+                "precondition",
+                f"Project '{project.slug}': local_path не задан.",
             )
-            raise typer.Exit(code=1)
         local = Path(project.local_path)
         if not local.exists():
-            console.print(
-                f"[red]local_path не существует: {local}.[/red]"
-            )
-            raise typer.Exit(code=1)
+            raise CliError("precondition", f"local_path не существует: {local}.")
 
         branch = project.git_default_branch or "main"
 
         try:
             LocalGitOps().push(local, branch=branch)
         except RuntimeError as exc:
-            console.print(f"[red]Push failed: {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("git_failed", f"Push failed: {exc}") from exc
 
         now = local_now()
         project.git_last_pushed_at = now
@@ -491,36 +484,34 @@ def link_cmd(
 ) -> None:
     """Привязать существующий remote к проекту (без create / push)."""
     if not URL_RE.search(url):
-        console.print(
-            f"[red]Невалидный URL '{url}': ожидается http(s)://… или git@…[/red]"
+        raise CliError(
+            "invalid_url",
+            f"Невалидный URL '{url}': ожидается http(s)://… или git@…",
         )
-        raise typer.Exit(code=1)
     if provider not in ("gitlab", "github"):
-        console.print(f"[red]Provider '{provider}' не поддерживается.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("bad_kind", f"Provider '{provider}' не поддерживается.")
 
     engine = make_engine(_db_url())
     with make_session(engine) as session:
         project = _resolve_project_or_die(session, ref)
 
         if not project.local_path:
-            console.print(
-                f"[red]Project '{project.slug}': local_path не задан.[/red]"
+            raise CliError(
+                "precondition",
+                f"Project '{project.slug}': local_path не задан.",
             )
-            raise typer.Exit(code=1)
         local = Path(project.local_path)
         if not (local / ".git").exists():
-            console.print(
-                f"[red]В {local} нет .git/ — сначала `git init` или используй "
-                f"`atlas project git init` (новое создание).[/red]"
+            raise CliError(
+                "precondition",
+                f"В {local} нет .git/ — сначала `git init` или используй "
+                f"`atlas project git init` (новое создание).",
             )
-            raise typer.Exit(code=1)
 
         try:
             LocalGitOps().add_remote(local, "origin", url)
         except RuntimeError as exc:
-            console.print(f"[red]git remote add failed: {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("git_failed", f"git remote add failed: {exc}") from exc
 
         now = local_now()
         project.git_remote_url = url
@@ -635,10 +626,10 @@ def move_cmd(
         project = _resolve_project_or_die(session, ref)
 
         if not project.git_remote_url:
-            console.print(
-                f"[red]У '{project.slug}' нет git_remote_url — нечего двигать.[/red]"
+            raise CliError(
+                "precondition",
+                f"У '{project.slug}' нет git_remote_url — нечего двигать.",
             )
-            raise typer.Exit(code=1)
 
         old_url = project.git_remote_url
         repo_full_path = _repo_full_path_from_url(old_url)
@@ -646,8 +637,7 @@ def move_cmd(
         try:
             backend = get_backend(project.git_provider or "gitlab")
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("bad_kind", str(exc)) from exc
         recovered = False
         try:
             new_url = backend.transfer_to_group(repo_full_path, to_group)

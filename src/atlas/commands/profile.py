@@ -84,7 +84,7 @@ async def register_cmd(
     admin_key = resolve_api_key(cfg)
     if not admin_key or not cfg.base_url:
         raise CliError(
-            "CONFIG",
+            "precondition",
             "не задан api_key/base_url активного admin-конфига — настрой конфиг "
             "(ATLAS_API_KEY/ATLAS_BASE_URL или config.toml)",
         )

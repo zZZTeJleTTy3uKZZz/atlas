@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table, is_json
+from clikit import CliError, command, emit_data, emit_table, is_json
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -131,11 +131,9 @@ def _select_projects(
         try:
             project = resolve_project_ref(session, ref)
         except AmbiguousRefError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("ambiguous_ref", str(exc))
         if project is None:
-            console.print(f"[red]Project '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project '{ref}' не найден.")
         if not include_archived and project.archived_at is not None:
             return []
         return [project]
@@ -148,16 +146,14 @@ def _select_projects(
             select(ProjectType).where(ProjectType.slug == type_slug)
         ).scalar_one_or_none()
         if pt is None:
-            console.print(f"[red]Тип '{type_slug}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Тип '{type_slug}' не найден.")
         stmt = stmt.where(Project.type_id == pt.id)
     if status_slug is not None:
         ps = session.execute(
             select(ProjectStatus).where(ProjectStatus.slug == status_slug)
         ).scalar_one_or_none()
         if ps is None:
-            console.print(f"[red]Статус '{status_slug}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Статус '{status_slug}' не найден.")
         stmt = stmt.where(Project.status_id == ps.id)
     if tag_slugs:
         # AND-семантика: проект должен иметь все указанные теги.
@@ -167,8 +163,7 @@ def _select_projects(
         if len(tag_objs) != len(tag_slugs):
             found = {t.slug for t in tag_objs}
             missing = [s for s in tag_slugs if s not in found]
-            console.print(f"[red]Теги не найдены: {missing}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Теги не найдены: {missing}")
         for t in tag_objs:
             stmt = stmt.where(
                 Project.id.in_(
@@ -337,11 +332,9 @@ def status_cmd(
             try:
                 project = resolve_project_ref(session, ref)
             except AmbiguousRefError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("ambiguous_ref", str(exc))
             if project is None:
-                console.print(f"[red]Project '{ref}' не найден.[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("not_found", f"Project '{ref}' не найден.")
             stmt = stmt.where(ActionLog.entity_id == project.id)
 
         rows = session.execute(stmt).scalars().all()
@@ -411,8 +404,7 @@ def install_cmd(
     try:
         script = _find_register_task_script()
     except RuntimeError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("script_not_found", str(exc))
 
     cmd = [
         "powershell",
@@ -429,10 +421,12 @@ def install_cmd(
     if proc.returncode != 0:
         if proc.stdout and not is_json():
             console.print(proc.stdout)
-        if proc.stderr:
-            console.print(f"[red]{proc.stderr}[/red]")
-        console.print("[red]Установка не удалась.[/red]")
-        raise typer.Exit(code=proc.returncode or 1)
+        raise CliError(
+            "schedule_install_failed",
+            f"Установка не удалась.\n{proc.stderr}" if proc.stderr
+            else "Установка не удалась.",
+            exit_code=proc.returncode or 1,
+        )
 
     def _render(d: dict[str, Any]) -> None:
         if d["stdout"]:
@@ -476,10 +470,12 @@ def uninstall_cmd() -> None:
     if proc.returncode != 0:
         if proc.stdout and not is_json():
             console.print(proc.stdout)
-        if proc.stderr:
-            console.print(f"[red]{proc.stderr}[/red]")
-        console.print("[red]Не удалось удалить Scheduled Task.[/red]")
-        raise typer.Exit(code=proc.returncode or 1)
+        raise CliError(
+            "schedule_remove_failed",
+            f"Не удалось удалить Scheduled Task.\n{proc.stderr}" if proc.stderr
+            else "Не удалось удалить Scheduled Task.",
+            exit_code=proc.returncode or 1,
+        )
 
     def _render(d: dict[str, Any]) -> None:
         if d["stdout"]:

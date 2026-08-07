@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 import typer
-from clikit import command, emit_table
+from clikit import CliError, command, emit_table
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,8 +45,7 @@ def _resolve_actor_id(session: Session, slug: str) -> Optional[str]:
         select(Participant).where(Participant.slug == slug)
     ).scalar_one_or_none()
     if p is None:
-        console.print(f"[red]Actor '{slug}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Actor '{slug}' не найден.")
     return p.id
 
 
@@ -96,10 +95,10 @@ def list_cmd(
         try:
             since_dt = datetime.fromisoformat(since)
         except ValueError:
-            console.print(
-                f"[red]Невалидный --since '{since}': ожидаю YYYY-MM-DD.[/red]"
+            raise CliError(
+                "invalid_date",
+                f"Невалидный --since '{since}': ожидаю YYYY-MM-DD.",
             )
-            raise typer.Exit(code=1)
 
     url = _db_url()
     engine = make_engine(url)
@@ -111,11 +110,9 @@ def list_cmd(
             try:
                 proj = resolve_project_ref(session, project)
             except AmbiguousRefError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("ambiguous_ref", str(exc))
             if proj is None:
-                console.print(f"[red]Project '{project}' не найден.[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("not_found", f"Project '{project}' не найден.")
             task_ids = [
                 tid for (tid,) in session.execute(
                     select(Task.id).where(Task.project_id == proj.id)

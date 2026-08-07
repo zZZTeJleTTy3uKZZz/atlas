@@ -26,7 +26,7 @@ import re
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table, is_json
+from clikit import CliError, command, emit_data, emit_table, is_json
 from rich.console import Console
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -177,48 +177,46 @@ def _resolve_hypothesis_ref(session: Session, ref: str) -> Optional[Hypothesis]:
 
 def _validate_slug_part(slug: str) -> None:
     if not SLUG_PART_RE.match(slug):
-        console.print(
-            f"[red]Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.[/red]"
+        raise CliError(
+            "invalid_slug",
+            f"Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_status(status: str) -> None:
     if status not in VALID_STATUSES:
-        console.print(
-            f"[red]Невалидный status '{status}': "
-            f"допустимы {sorted(VALID_STATUSES)}.[/red]"
+        raise CliError(
+            "bad_status",
+            f"Невалидный status '{status}': "
+            f"допустимы {sorted(VALID_STATUSES)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_confidence(conf: str) -> None:
     if conf not in VALID_CONFIDENCE:
-        console.print(
-            f"[red]Невалидный confidence '{conf}': "
-            f"допустимы {sorted(VALID_CONFIDENCE)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидный confidence '{conf}': "
+            f"допустимы {sorted(VALID_CONFIDENCE)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_verdict(verdict: str) -> None:
     if verdict not in VALID_VERDICTS:
-        console.print(
-            f"[red]Невалидный verdict '{verdict}': "
-            f"допустимы {sorted(VALID_VERDICTS)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидный verdict '{verdict}': "
+            f"допустимы {sorted(VALID_VERDICTS)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _resolve_project_or_die(session: Session, ref: str) -> Project:
     try:
         proj = resolve_project_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if proj is None:
-        console.print(f"[red]Project '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Project '{ref}' не найден.")
     return proj
 
 
@@ -226,11 +224,9 @@ def _resolve_task_or_die(session: Session, ref: str):
     try:
         task = resolve_task_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if task is None:
-        console.print(f"[red]Task '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Task '{ref}' не найден.")
     return task
 
 
@@ -238,11 +234,9 @@ def _resolve_hypothesis_or_die(session: Session, ref: str) -> Hypothesis:
     try:
         h = _resolve_hypothesis_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if h is None:
-        console.print(f"[red]Hypothesis '{ref}' не найдена.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Hypothesis '{ref}' не найдена.")
     return h
 
 
@@ -297,22 +291,22 @@ def add_cmd(
     with make_session(engine) as session:
         proj = _resolve_project_or_die(session, project)
         if proj.prefix is None:
-            console.print(
-                f"[red]У проекта '{proj.slug}' нет prefix — "
-                f"нельзя сгенерировать hypothesis slug.[/red]"
+            raise CliError(
+                "precondition",
+                f"У проекта '{proj.slug}' нет prefix — "
+                f"нельзя сгенерировать hypothesis slug.",
             )
-            raise typer.Exit(code=1)
 
         # ----- task (опц.) -----
         task_obj = None
         if task:
             task_obj = _resolve_task_or_die(session, task)
             if task_obj.project_id != proj.id:
-                console.print(
-                    f"[red]Task '{task}' принадлежит другому проекту — "
-                    f"гипотеза и задача должны быть в одном проекте.[/red]"
+                raise CliError(
+                    "forbidden",
+                    f"Task '{task}' принадлежит другому проекту — "
+                    f"гипотеза и задача должны быть в одном проекте.",
                 )
-                raise typer.Exit(code=1)
 
         # ----- slug -----
         slug_auto = False
@@ -320,25 +314,24 @@ def add_cmd(
             _validate_slug_part(slug)
             final_slug = build_task_slug(proj.prefix, slug)
             if _slug_exists_fn(session)(final_slug):
-                console.print(
-                    f"[red]Slug '{final_slug}' занят. "
-                    f"Попробуйте '{slug}-2' или другой.[/red]"
+                raise CliError(
+                    "slug_taken",
+                    f"Slug '{final_slug}' занят. "
+                    f"Попробуйте '{slug}-2' или другой.",
                 )
-                raise typer.Exit(code=1)
         else:
             base_part = slugify_text(title)
             if not base_part:
-                console.print(
-                    f"[red]Не удалось сгенерировать slug из '{title}': "
-                    f"передайте --slug явно.[/red]"
+                raise CliError(
+                    "slug_gen",
+                    f"Не удалось сгенерировать slug из '{title}': "
+                    f"передайте --slug явно.",
                 )
-                raise typer.Exit(code=1)
             base_full = build_task_slug(proj.prefix, base_part)
             try:
                 final_slug = generate_unique_slug(base_full, _slug_exists_fn(session))
             except SlugGenerationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("slug_gen", str(exc))
             slug_auto = True
 
         # ----- number -----
@@ -682,19 +675,21 @@ def update_cmd(
 ) -> None:
     """Обновить поля гипотезы (status-переходы авто-timestamp)."""
     if slug is not None:
-        console.print(
-            "[red]Изменение slug запрещено: slug — immutable ID. "
-            "delete + add если нужно.[/red]"
+        raise CliError(
+            "immutable_field",
+            "Изменение slug запрещено: slug — immutable ID. "
+            "delete + add если нужно.",
         )
-        raise typer.Exit(code=1)
     if number is not None:
-        console.print("[red]Изменение number запрещено: number — immutable.[/red]")
-        raise typer.Exit(code=1)
-    if project is not None:
-        console.print(
-            "[red]Изменение project запрещено: сломает slug-prefix. delete + add.[/red]"
+        raise CliError(
+            "immutable_field",
+            "Изменение number запрещено: number — immutable.",
         )
-        raise typer.Exit(code=1)
+    if project is not None:
+        raise CliError(
+            "immutable_field",
+            "Изменение project запрещено: сломает slug-prefix. delete + add.",
+        )
 
     if confidence is not None:
         _validate_confidence(confidence)

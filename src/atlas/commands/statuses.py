@@ -13,7 +13,7 @@ import re
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table
+from clikit import CliError, command, emit_data, emit_table
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -66,10 +66,10 @@ def _log_action(
 
 def _validate_slug(slug: str) -> None:
     if not SLUG_RE.match(slug):
-        console.print(
-            f"[red]Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.[/red]"
+        raise CliError(
+            "invalid_slug",
+            f"Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50."
         )
-        raise typer.Exit(code=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -96,10 +96,10 @@ def add_cmd(
             select(ProjectStatus).where(ProjectStatus.slug == slug)
         ).scalar_one_or_none()
         if existing is not None:
-            console.print(
-                f"[red]Project status '{slug}' уже существует.[/red]"
+            raise CliError(
+                "conflict",
+                f"Project status '{slug}' уже существует."
             )
-            raise typer.Exit(code=1)
 
         ps = ProjectStatus(
             slug=slug,

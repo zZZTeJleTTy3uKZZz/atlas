@@ -18,7 +18,7 @@ import re
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table
+from clikit import CliError, command, emit_data, emit_table
 from rich.console import Console
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -95,19 +95,19 @@ def _slug_exists_fn(session: Session):
 
 def _validate_category(category: str) -> None:
     if category not in VALID_CATEGORIES:
-        console.print(
-            f"[red]Невалидная category '{category}': "
-            f"допустимы {sorted(VALID_CATEGORIES)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидная category '{category}': "
+            f"допустимы {sorted(VALID_CATEGORIES)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_slug(slug: str) -> None:
     if not TAG_SLUG_RE.match(slug):
-        console.print(
-            f"[red]Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.[/red]"
+        raise CliError(
+            "invalid_slug",
+            f"Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.",
         )
-        raise typer.Exit(code=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -119,18 +119,14 @@ def _resolve_or_die(session: Session, ref: str) -> Tag:
     try:
         tag = resolve_tag_ref(session, ref)
     except AmbiguousTagRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     except InvalidTagCategoryError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("bad_kind", str(exc))
     except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("invalid_ref", str(exc))
 
     if tag is None:
-        console.print(f"[red]Tag '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Tag '{ref}' не найден.")
     return tag
 
 
@@ -166,10 +162,7 @@ def add_cmd(
         if slug:
             _validate_slug(slug)
             if _slug_exists_fn(session)(slug):
-                console.print(
-                    f"[red]Slug '{slug}' занят. Выберите другой.[/red]"
-                )
-                raise typer.Exit(code=1)
+                raise CliError("slug_taken", f"Slug '{slug}' занят. Выберите другой.")
             final_slug = slug
         else:
             final_slug = generate_tag_slug(name, category, _slug_exists_fn(session))
@@ -401,11 +394,11 @@ def update_cmd(
 ) -> None:
     """Обновить поля тега (любые, кроме slug)."""
     if slug is not None:
-        console.print(
-            "[red]Изменение slug запрещено: slug — стабильный идентификатор "
-            "для агентов/скриптов.[/red]"
+        raise CliError(
+            "immutable_field",
+            "Изменение slug запрещено: slug — стабильный идентификатор "
+            "для агентов/скриптов.",
         )
-        raise typer.Exit(code=1)
 
     if category is not None:
         _validate_category(category)
@@ -495,11 +488,11 @@ def delete_cmd(
         ).scalar() or 0
 
         if attached_count > 0 and not force:
-            console.print(
-                f"[red]Tag '{slug_for_msg}' attached to {attached_count} project(s). "
-                "Use --force to delete tag and detach from all.[/red]"
+            raise CliError(
+                "precondition",
+                f"Tag '{slug_for_msg}' attached to {attached_count} project(s). "
+                "Use --force to delete tag and detach from all.",
             )
-            raise typer.Exit(code=1)
 
         detached = 0
         if attached_count > 0 and force:

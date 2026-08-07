@@ -13,7 +13,7 @@ import re
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table
+from clikit import CliError, command, emit_data, emit_table
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -69,18 +69,18 @@ def _log_action(
 
 def _validate_slug(slug: str) -> None:
     if not SLUG_RE.match(slug):
-        console.print(
-            f"[red]Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.[/red]"
+        raise CliError(
+            "invalid_slug",
+            f"Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_group(group: str) -> None:
     if group not in VALID_GROUPS:
-        console.print(
-            f"[red]Невалидная группа '{group}'. Допустимо: {', '.join(VALID_GROUPS)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидная группа '{group}'. Допустимо: {', '.join(VALID_GROUPS)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_policy(session: Session, policy: str) -> None:
@@ -89,10 +89,10 @@ def _validate_policy(session: Session, policy: str) -> None:
     ).scalar_one_or_none()
     if exists is None:
         known = session.execute(select(SyncPolicy.slug).order_by(SyncPolicy.slug)).scalars().all()
-        console.print(
-            f"[red]Неизвестная sync-policy '{policy}'. Известные: {', '.join(known)}.[/red]"
+        raise CliError(
+            "not_found",
+            f"Неизвестная sync-policy '{policy}'. Известные: {', '.join(known)}.",
         )
-        raise typer.Exit(code=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -130,10 +130,9 @@ def add_cmd(
             select(ProjectType).where(ProjectType.slug == slug)
         ).scalar_one_or_none()
         if existing is not None:
-            console.print(
-                f"[red]Project type '{slug}' уже существует.[/red]"
+            raise CliError(
+                "conflict", f"Project type '{slug}' уже существует.",
             )
-            raise typer.Exit(code=1)
 
         pt = ProjectType(
             slug=slug,
@@ -204,8 +203,7 @@ def edit_cmd(
             select(ProjectType).where(ProjectType.slug == ref)
         ).scalar_one_or_none()
         if pt is None:
-            console.print(f"[red]Project type '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project type '{ref}' не найден.")
 
         if group is not None:
             _validate_group(group)

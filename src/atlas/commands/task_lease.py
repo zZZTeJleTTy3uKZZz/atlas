@@ -56,16 +56,14 @@ def _resolve_actor_or_die(session, actor_slug: Optional[str]):
     try:
         return L.resolve_actor(session, actor_slug)
     except L.LeaseError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", str(exc)) from exc
 
 
 def _parse_ttl_or_die(raw: str):
     try:
         return L.parse_ttl(raw)
     except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("invalid_ttl", str(exc)) from exc
 
 
 def _lease_data(session, task: Task, action: str) -> dict[str, Any]:
@@ -281,8 +279,7 @@ def release_cmd(
         try:
             L.release_task(session, task, actor_p)
         except L.LeaseNotOwnedError as exc:
-            console.print(f"[red]✗ {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("lease_not_owned", str(exc)) from exc
         session.commit()
         data = _lease_data(session, task, "released")
     emit_data(data, text_renderer=_render_lease)
@@ -304,8 +301,7 @@ def renew_cmd(
         try:
             L.renew_lease(session, task, actor_p, ttl=ttl_td)
         except L.LeaseNotOwnedError as exc:
-            console.print(f"[red]✗ {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("lease_not_owned", str(exc)) from exc
         session.commit()
         data = _lease_data(session, task, "renewed")
     emit_data(data, text_renderer=_render_lease)
@@ -325,8 +321,10 @@ def take_cmd(
 ) -> None:
     """Принудительно отобрать задачу (даже занятую/протухшую). Требует --force."""
     if not force:
-        console.print("[red]✗ take требует --force (принудительный отбор lease)[/red]")
-        raise typer.Exit(code=1)
+        raise CliError(
+            "precondition",
+            "take требует --force (принудительный отбор lease).",
+        )
     ttl_td = _parse_ttl_or_die(ttl)
     engine = make_engine(resolve_db_url())
     with make_session(engine) as session:
@@ -339,8 +337,7 @@ def take_cmd(
                 origin=L.resolve_origin(origin), ttl=ttl_td,
             )
         except L.OptimisticLockError as exc:
-            console.print(f"[red]✗ {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("lease_not_owned", str(exc)) from exc
         _enqueue_task_update(session, task)  # статус→in_progress в ядро
         session.commit()
         data = _lease_data(session, task, "taken")

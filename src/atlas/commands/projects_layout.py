@@ -38,7 +38,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table, is_json
+from clikit import CliError, command, emit_data, emit_table, is_json
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -177,11 +177,9 @@ def _resolve_or_die(session: Session, ref: str) -> Project:
     try:
         project = resolve_project_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if project is None:
-        console.print(f"[red]Project '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Project '{ref}' не найден.")
     return project
 
 
@@ -228,36 +226,35 @@ def init_cmd(
         view = _project_view(session, project)
 
         if not view.local_path:
-            console.print(
-                f"[red]У проекта '{view.slug}' не задан local_path. "
-                f"Установите его через `atlas project update`.[/red]"
+            raise CliError(
+                "precondition",
+                f"У проекта '{view.slug}' не задан local_path. "
+                f"Установите его через `atlas project update`.",
             )
-            raise typer.Exit(code=1)
 
         local_path = Path(view.local_path)
 
         # Уже junction? Тогда sync, не init.
         if _is_junction(local_path):
-            console.print(
-                f"[red]Проект '{view.slug}' уже мигрирован "
+            raise CliError(
+                "conflict",
+                f"Проект '{view.slug}' уже мигрирован "
                 f"(local_path является junction). "
-                f"Используйте `atlas project layout sync {view.slug}`.[/red]"
+                f"Используйте `atlas project layout sync {view.slug}`.",
             )
-            raise typer.Exit(code=1)
 
         if not local_path.exists():
-            console.print(
-                f"[red]local_path не существует: {local_path}.[/red]"
+            raise CliError(
+                "precondition", f"local_path не существует: {local_path}."
             )
-            raise typer.Exit(code=1)
 
         storage = get_storage_path(view.slug, root=root)
         if storage.exists():
-            console.print(
-                f"[red]_storage/{view.slug} уже существует: {storage}. "
-                f"Сначала разберитесь с конфликтом руками.[/red]"
+            raise CliError(
+                "conflict",
+                f"_storage/{view.slug} уже существует: {storage}. "
+                f"Сначала разберитесь с конфликтом руками.",
             )
-            raise typer.Exit(code=1)
 
         logical = _logical_for(session, view, root=root)
 
@@ -300,8 +297,7 @@ def init_cmd(
                 local_path, storage, copy_first=copy_first,
             )
         except (RuntimeError, FileNotFoundError, OSError) as exc:
-            console.print(f"[red]Ошибка переноса: {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("layout_failed", f"Ошибка переноса: {exc}")
 
         files_count = int(move_result.get("files_count", 0))
 
@@ -316,20 +312,19 @@ def init_cmd(
                         f"[yellow]⚠ junction уже есть в {logical} — пропускаю.[/yellow]"
                     )
                 elif logical.exists():
-                    console.print(
-                        f"[red]На логическом пути {logical} реальная директория, "
-                        f"не junction. Не пересоздаю автоматически.[/red]"
+                    raise CliError(
+                        "layout_failed",
+                        f"На логическом пути {logical} реальная директория, "
+                        f"не junction. Не пересоздаю автоматически.",
                     )
-                    raise typer.Exit(code=1)
                 else:
                     try:
                         layout_mod._create_junction_safe(logical, storage)
                         junction_created = True
                     except (JunctionError, SafetyError) as exc:
-                        console.print(
-                            f"[red]Не удалось создать junction: {exc}[/red]"
+                        raise CliError(
+                            "layout_failed", f"Не удалось создать junction: {exc}"
                         )
-                        raise typer.Exit(code=1)
 
         # ---- Update local_path ----
         new_local = str(logical) if not no_junction else str(storage)
@@ -415,11 +410,11 @@ def sync_cmd(
         current = Path(view.local_path) if view.local_path else None
 
         if not storage.exists():
-            console.print(
-                f"[red]_storage/{view.slug} не существует. "
-                f"Сначала: `atlas project layout init {view.slug}`.[/red]"
+            raise CliError(
+                "precondition",
+                f"_storage/{view.slug} не существует. "
+                f"Сначала: `atlas project layout init {view.slug}`.",
             )
-            raise typer.Exit(code=1)
 
         # ---- Дeтерминируем что нужно сделать. ----
         plan_lines: list[str] = []
@@ -441,12 +436,12 @@ def sync_cmd(
                     action_kind = "recreate"
                 elif current.exists():
                     if not force:
-                        console.print(
-                            f"[red]current local_path '{current}' — реальная "
+                        raise CliError(
+                            "precondition",
+                            f"current local_path '{current}' — реальная "
                             f"директория, не junction. Отказываюсь удалять. "
-                            f"Используй --force для переноса в _old_git_backups/.[/red]"
+                            f"Используй --force для переноса в _old_git_backups/.",
                         )
-                        raise typer.Exit(code=1)
                     plan_lines.append(
                         f"backup real-dir: {current} → _old_git_backups/"
                     )
@@ -458,12 +453,12 @@ def sync_cmd(
                 action_kind = "recreate"
             elif expected_logical.exists():
                 if not force:
-                    console.print(
-                        f"[red]На expected_logical '{expected_logical}' лежит "
+                    raise CliError(
+                        "precondition",
+                        f"На expected_logical '{expected_logical}' лежит "
                         f"реальная директория. Не трогаю. "
-                        f"Используй --force для переноса в _old_git_backups/.[/red]"
+                        f"Используй --force для переноса в _old_git_backups/.",
                     )
-                    raise typer.Exit(code=1)
                 plan_lines.append(
                     f"backup real-dir: {expected_logical} → _old_git_backups/"
                 )
@@ -533,10 +528,10 @@ def sync_cmd(
                         real_dir, bk, copy_first=False
                     )
                 except Exception as exc:
-                    console.print(
-                        f"[red]Не удалось перенести {real_dir} → {bk}: {exc}[/red]"
+                    raise CliError(
+                        "layout_failed",
+                        f"Не удалось перенести {real_dir} → {bk}: {exc}",
                     )
-                    raise typer.Exit(code=1)
                 if not is_json():
                     console.print(
                         f"  [yellow]backup → {bk}[/yellow]"
@@ -546,21 +541,22 @@ def sync_cmd(
             try:
                 layout_mod.remove_junction(current)
             except (JunctionError, SafetyError) as exc:
-                console.print(f"[red]Не удалось снять старый junction: {exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError(
+                    "layout_failed", f"Не удалось снять старый junction: {exc}"
+                )
         # Snять junction на expected (если был «битый» — указывал не туда).
         if _is_junction(expected_logical):
             try:
                 layout_mod.remove_junction(expected_logical)
             except (JunctionError, SafetyError) as exc:
-                console.print(f"[red]Не удалось снять junction expected: {exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError(
+                    "layout_failed", f"Не удалось снять junction expected: {exc}"
+                )
         # Создать новый.
         try:
             layout_mod._create_junction_safe(expected_logical, storage)
         except (JunctionError, SafetyError) as exc:
-            console.print(f"[red]Не удалось создать junction: {exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("layout_failed", f"Не удалось создать junction: {exc}")
 
         old_local = project.local_path
         new_local = str(expected_logical)
@@ -860,16 +856,14 @@ def migrate_all_cmd(
                 select(ProjectType).where(ProjectType.slug == type_filter)
             ).scalar_one_or_none()
             if pt is None:
-                console.print(f"[red]Тип '{type_filter}' не найден.[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("not_found", f"Тип '{type_filter}' не найден.")
             stmt = stmt.where(Project.type_id == pt.id)
         if status_filter:
             ps = session.execute(
                 select(ProjectStatus).where(ProjectStatus.slug == status_filter)
             ).scalar_one_or_none()
             if ps is None:
-                console.print(f"[red]Статус '{status_filter}' не найден.[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("not_found", f"Статус '{status_filter}' не найден.")
             stmt = stmt.where(Project.status_id == ps.id)
 
         projects = list(session.execute(stmt).scalars().all())
@@ -883,11 +877,9 @@ def migrate_all_cmd(
                 try:
                     tag = resolve_tag_ref(session, raw)
                 except (ValueError,):
-                    console.print(f"[red]Tag '{raw}' invalid.[/red]")
-                    raise typer.Exit(code=1)
+                    raise CliError("invalid_slug", f"Tag '{raw}' invalid.")
                 if tag is None:
-                    console.print(f"[red]Tag '{raw}' не найден.[/red]")
-                    raise typer.Exit(code=1)
+                    raise CliError("not_found", f"Tag '{raw}' не найден.")
                 tag_slugs.append(tag.slug)
             matching = filter_projects_by_tags(session, tag_slugs, archived=True)
             allowed_ids = {p.id for p in matching}

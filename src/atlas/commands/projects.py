@@ -185,26 +185,26 @@ def _log_action(
 
 def _validate_slug(slug: str) -> None:
     if not SLUG_RE.match(slug):
-        console.print(
-            f"[red]Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.[/red]"
+        raise CliError(
+            "invalid_slug",
+            f"Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_prefix(prefix: str) -> None:
     if not PREFIX_RE.match(prefix):
-        console.print(
-            f"[red]Невалидный prefix '{prefix}': допустимы [a-z0-9], длина 1-5.[/red]"
+        raise CliError(
+            "invalid_prefix",
+            f"Невалидный prefix '{prefix}': допустимы [a-z0-9], длина 1-5.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_priority(priority: str) -> None:
     if priority not in VALID_PRIORITIES:
-        console.print(
-            f"[red]Невалидный priority '{priority}': допустимы {sorted(VALID_PRIORITIES)}.[/red]"
+        raise CliError(
+            "bad_priority",
+            f"Невалидный priority '{priority}': допустимы {sorted(VALID_PRIORITIES)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _slug_exists_fn(session: Session):
@@ -224,7 +224,7 @@ def _prefix_exists_fn(session: Session):
 
 
 def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
-    """Резолв списка tag-refs: raise typer.Exit на несуществующий.
+    """Резолв списка tag-refs: raise CliError на несуществующий.
 
     Подсказка в сообщении: `atlas tag add --slug ... --category ...`.
     """
@@ -232,19 +232,19 @@ def _resolve_tags_or_die(session: Session, tag_refs: list[str]) -> list[Tag]:
     for ref in tag_refs:
         try:
             tag = resolve_tag_ref(session, ref)
-        except (AmbiguousTagRefError, InvalidTagCategoryError) as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+        except AmbiguousTagRefError as exc:
+            raise CliError("ambiguous_ref", str(exc))
+        except InvalidTagCategoryError as exc:
+            raise CliError("bad_kind", str(exc))
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("invalid_ref", str(exc))
 
         if tag is None:
-            console.print(
-                f"[red]Tag '{ref}' не найден. "
-                f"Создайте: `atlas tag add --slug ... --category ...`.[/red]"
+            raise CliError(
+                "not_found",
+                f"Tag '{ref}' не найден. "
+                f"Создайте: `atlas tag add --slug ... --category ...`.",
             )
-            raise typer.Exit(code=1)
         resolved.append(tag)
     return resolved
 
@@ -934,9 +934,7 @@ def init_cmd(
     try:
         run_migrations(url)  # программно; работает и из pip/uvx-пакета (#880)
     except Exception as exc:  # noqa: BLE001 — показать причину, не «голый» traceback
-        console.print("[red]Ошибка миграций:[/red]")
-        console.print(str(exc))
-        raise typer.Exit(code=1)
+        raise CliError("migration_failed", f"Ошибка миграций: {exc}")
     emit_message("✓ миграции применены")
 
     emit_message(
@@ -1077,10 +1075,10 @@ def add_cmd(
         try:
             deadline_dt = datetime.fromisoformat(deadline)
         except ValueError:
-            console.print(
-                f"[red]Невалидный deadline '{deadline}': ожидаю YYYY-MM-DD.[/red]"
+            raise CliError(
+                "invalid_date",
+                f"Невалидный deadline '{deadline}': ожидаю YYYY-MM-DD.",
             )
-            raise typer.Exit(code=1)
 
     url = _db_url()
     engine = make_engine(url)
@@ -1090,19 +1088,19 @@ def add_cmd(
             select(ProjectType).where(ProjectType.slug == mode.type_slug)
         ).scalar_one_or_none()
         if pt is None:
-            console.print(
-                f"[red]Тип '{mode.type_slug}' не найден. См. `atlas type list`.[/red]"
+            raise CliError(
+                "not_found",
+                f"Тип '{mode.type_slug}' не найден. См. `atlas type list`.",
             )
-            raise typer.Exit(code=1)
 
         ps = session.execute(
             select(ProjectStatus).where(ProjectStatus.slug == status_slug)
         ).scalar_one_or_none()
         if ps is None:
-            console.print(
-                f"[red]Статус '{status_slug}' не найден. См. `atlas project statuses`.[/red]"
+            raise CliError(
+                "not_found",
+                f"Статус '{status_slug}' не найден. См. `atlas project statuses`.",
             )
-            raise typer.Exit(code=1)
 
         # ----- parent (опц.): резолв в id; на add цикл невозможен -----
         parent_id: Optional[str] = None
@@ -1115,25 +1113,24 @@ def add_cmd(
         if slug:
             _validate_slug(slug)
             if _slug_exists_fn(session)(slug):
-                console.print(
-                    f"[red]Slug '{slug}' занят. "
-                    f"Попробуйте '{slug}-2' или выберите другой.[/red]"
+                raise CliError(
+                    "slug_taken",
+                    f"Slug '{slug}' занят. "
+                    f"Попробуйте '{slug}-2' или выберите другой.",
                 )
-                raise typer.Exit(code=1)
             final_slug = slug
         else:
             base = slugify_text(name)
             if not base:
-                console.print(
-                    f"[red]Не удалось сгенерировать slug из '{name}': "
-                    f"передайте --slug явно.[/red]"
+                raise CliError(
+                    "slug_gen",
+                    f"Не удалось сгенерировать slug из '{name}': "
+                    f"передайте --slug явно.",
                 )
-                raise typer.Exit(code=1)
             try:
                 final_slug = generate_unique_slug(base, _slug_exists_fn(session))
             except SlugGenerationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("slug_gen", str(exc))
             slug_auto = True
 
         # ----- prefix -----
@@ -1141,24 +1138,23 @@ def add_cmd(
         if prefix:
             _validate_prefix(prefix)
             if _prefix_exists_fn(session)(prefix):
-                console.print(
-                    f"[red]Prefix '{prefix}' занят. Выберите другой.[/red]"
+                raise CliError(
+                    "prefix_taken",
+                    f"Prefix '{prefix}' занят. Выберите другой.",
                 )
-                raise typer.Exit(code=1)
             final_prefix = prefix
         else:
             base_prefix = generate_prefix_from_slug(final_slug)
             if not base_prefix:
-                console.print(
-                    f"[red]Не удалось сгенерировать prefix из slug '{final_slug}': "
-                    f"передайте --prefix явно.[/red]"
+                raise CliError(
+                    "prefix_gen",
+                    f"Не удалось сгенерировать prefix из slug '{final_slug}': "
+                    f"передайте --prefix явно.",
                 )
-                raise typer.Exit(code=1)
             try:
                 final_prefix = _generate_unique_prefix(session, base_prefix)
             except SlugGenerationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("prefix_gen", str(exc))
             prefix_auto = True
 
         # ----- resolve local_path (W45-32m: relative→absolute, auto-derive) -----
@@ -1593,10 +1589,10 @@ def list_cmd(
     ]
     chosen = [name for name, on in scope_flags if on]
     if len(chosen) > 1:
-        console.print(
-            f"[red]Взаимоисключающие флаги области: {', '.join(chosen)}.[/red]"
+        raise CliError(
+            "conflicting_flags",
+            f"Взаимоисключающие флаги области: {', '.join(chosen)}.",
         )
-        raise typer.Exit(code=1)
 
     url = _db_url()
     engine = make_engine(url)
@@ -1716,12 +1712,10 @@ def get_cmd(
         try:
             project = resolve_project_ref(session, ref)
         except AmbiguousRefError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("ambiguous_ref", str(exc))
 
         if project is None:
-            console.print(f"[red]Project '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project '{ref}' не найден.")
 
         pt = session.get(ProjectType, project.type_id)
         ps = session.get(ProjectStatus, project.status_id)
@@ -1942,17 +1936,17 @@ def update_cmd(
 ) -> None:
     """Обновить поля проекта (любые, кроме slug)."""
     if parent is not None and no_parent:
-        console.print(
-            "[red]--parent и --no-parent взаимоисключающи.[/red]"
+        raise CliError(
+            "conflicting_flags",
+            "--parent и --no-parent взаимоисключающи.",
         )
-        raise typer.Exit(code=1)
 
     if slug is not None:
-        console.print(
-            "[red]Изменение slug запрещено: slug участвует в task IDs. "
-            "Если действительно нужно — `delete` + `add`.[/red]"
+        raise CliError(
+            "immutable_field",
+            "Изменение slug запрещено: slug участвует в task IDs. "
+            "Если действительно нужно — `delete` + `add`.",
         )
-        raise typer.Exit(code=1)
 
     if priority is not None:
         _validate_priority(priority)
@@ -1964,8 +1958,7 @@ def update_cmd(
         try:
             deadline_dt = datetime.fromisoformat(deadline)
         except ValueError:
-            console.print(f"[red]Невалидный deadline '{deadline}'.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("invalid_date", f"Невалидный deadline '{deadline}'.")
 
     url = _db_url()
     engine = make_engine(url)
@@ -1974,12 +1967,10 @@ def update_cmd(
         try:
             project = resolve_project_ref(session, ref)
         except AmbiguousRefError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("ambiguous_ref", str(exc))
 
         if project is None:
-            console.print(f"[red]Project '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project '{ref}' не найден.")
 
         diffs: dict[str, dict[str, Any]] = {}
 
@@ -1992,8 +1983,7 @@ def update_cmd(
                 setattr(project, field, new_value)
 
         if entity_kind is not None and entity_kind not in ("project", "idea", "inbox"):
-            console.print("[red]--entity-kind: project | idea | inbox.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("bad_kind", "--entity-kind: project | idea | inbox.")
 
         _maybe_update("name", name)
         _maybe_update("priority", priority)
@@ -2022,10 +2012,10 @@ def update_cmd(
                 select(ProjectStatus).where(ProjectStatus.slug == status_slug)
             ).scalar_one_or_none()
             if ps is None:
-                console.print(
-                    f"[red]Статус '{status_slug}' не найден.[/red]"
+                raise CliError(
+                    "not_found",
+                    f"Статус '{status_slug}' не найден.",
                 )
-                raise typer.Exit(code=1)
             if project.status_id != ps.id:
                 # сохраним slug в diff (читабельнее, чем UUID)
                 old_status = session.get(ProjectStatus, project.status_id)
@@ -2037,10 +2027,10 @@ def update_cmd(
 
         if prefix is not None and project.prefix != prefix:
             if _prefix_exists_fn(session)(prefix):
-                console.print(
-                    f"[red]Prefix '{prefix}' занят. Выберите другой.[/red]"
+                raise CliError(
+                    "prefix_taken",
+                    f"Prefix '{prefix}' занят. Выберите другой.",
                 )
-                raise typer.Exit(code=1)
             diffs["prefix"] = {"old": project.prefix, "new": prefix}
             project.prefix = prefix
 
@@ -2284,12 +2274,10 @@ def delete_cmd(
         try:
             project = resolve_project_ref(session, ref)
         except AmbiguousRefError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("ambiguous_ref", str(exc))
 
         if project is None:
-            console.print(f"[red]Project '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project '{ref}' не найден.")
 
         slug_for_msg = project.slug
         project_id = project.id
@@ -2471,11 +2459,9 @@ def add_tags_cmd(
         try:
             project = resolve_project_ref(session, ref)
         except AmbiguousRefError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("ambiguous_ref", str(exc))
         if project is None:
-            console.print(f"[red]Project '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project '{ref}' не найден.")
 
         resolved = _resolve_tags_or_die(session, tags)
         slugs = [t.slug for t in resolved]
@@ -2515,11 +2501,9 @@ def remove_tags_cmd(
         try:
             project = resolve_project_ref(session, ref)
         except AmbiguousRefError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("ambiguous_ref", str(exc))
         if project is None:
-            console.print(f"[red]Project '{ref}' не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("not_found", f"Project '{ref}' не найден.")
 
         resolved = _resolve_tags_or_die(session, tags)
         slugs = [t.slug for t in resolved]
@@ -2551,11 +2535,11 @@ def _validate_project_member_role(role: str) -> None:
     """Роль участия в проекте — строго из VALID_PROJECT_MEMBER_ROLES (ноль хардкода
     зашитых имён: множество — единый источник правды, совпадает с ядром)."""
     if role not in VALID_PROJECT_MEMBER_ROLES:
-        console.print(
-            f"[red]Невалидная роль '{role}': допустимы "
-            f"{sorted(VALID_PROJECT_MEMBER_ROLES)}.[/red]"
+        raise CliError(
+            "bad_role",
+            f"Невалидная роль '{role}': допустимы "
+            f"{sorted(VALID_PROJECT_MEMBER_ROLES)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _resolve_member_or_die(session: Session, ref: str) -> Participant:
@@ -2566,11 +2550,9 @@ def _resolve_member_or_die(session: Session, ref: str) -> Participant:
     try:
         participant = _resolve_participant_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if participant is None:
-        console.print(f"[red]Participant '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Participant '{ref}' не найден.")
     return participant
 
 
@@ -2721,31 +2703,27 @@ def member_remove_cmd(
 
 
 def _resolve_project_or_die(session: Session, ref: str) -> Project:
-    """Resolve project ref с выводом ошибок и typer.Exit."""
+    """Resolve project ref с выводом ошибок через CliError."""
     try:
         project = resolve_project_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if project is None:
-        console.print(f"[red]Project '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Project '{ref}' не найден.")
     return project
 
 
 def _resolve_parent_or_die(session: Session, ref: str) -> Project:
-    """Резолв parent-ref в Project. Ошибки → typer.Exit(1).
+    """Резолв parent-ref в Project. Ошибки → CliError.
 
     Сообщение об ошибке упоминает 'parent', чтобы причина была понятна.
     """
     try:
         parent = resolve_project_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]Parent: {exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", f"Parent: {exc}")
     if parent is None:
-        console.print(f"[red]Parent '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Parent '{ref}' не найден.")
     return parent
 
 
@@ -2759,20 +2737,20 @@ def _check_no_cycle_or_die(
     ловится здесь же на первом шаге.
     """
     if new_parent_id == project_id:
-        console.print(
-            "[red]Проект не может быть родителем самому себе.[/red]"
+        raise CliError(
+            "forbidden",
+            "Проект не может быть родителем самому себе.",
         )
-        raise typer.Exit(code=1)
 
     seen: set[str] = set()
     cursor: Optional[str] = new_parent_id
     while cursor is not None:
         if cursor == project_id:
-            console.print(
-                "[red]Смена parent создаст цикл в иерархии проектов "
-                "(cycle detected). Отменено.[/red]"
+            raise CliError(
+                "cycle_detected",
+                "Смена parent создаст цикл в иерархии проектов "
+                "(cycle detected). Отменено.",
             )
-            raise typer.Exit(code=1)
         if cursor in seen:
             # защита от уже существующего цикла в данных (не наш случай).
             break
@@ -2787,10 +2765,10 @@ def _status_by_slug_or_die(session: Session, status_slug: str) -> ProjectStatus:
         select(ProjectStatus).where(ProjectStatus.slug == status_slug)
     ).scalar_one_or_none()
     if ps is None:
-        console.print(
-            f"[red]Статус '{status_slug}' не найден. См. `atlas status list`.[/red]"
+        raise CliError(
+            "not_found",
+            f"Статус '{status_slug}' не найден. См. `atlas status list`.",
         )
-        raise typer.Exit(code=1)
     return ps
 
 
@@ -2839,11 +2817,11 @@ def archive_cmd(
     personal-utility/personal-project/shared-infrastructure → products.
     """
     if status not in VALID_ARCHIVE_STATUSES:
-        console.print(
-            f"[red]Невалидный --status '{status}': допустимы "
-            f"{sorted(VALID_ARCHIVE_STATUSES)}.[/red]"
+        raise CliError(
+            "bad_status",
+            f"Невалидный --status '{status}': допустимы "
+            f"{sorted(VALID_ARCHIVE_STATUSES)}.",
         )
-        raise typer.Exit(code=1)
 
     url = _db_url()
     engine = make_engine(url)
@@ -2853,22 +2831,20 @@ def archive_cmd(
         project = _resolve_project_or_die(session, ref)
 
         if project.archived_at is not None:
-            console.print(
-                f"[red]Project '{project.slug}' уже archived "
-                f"({project.archived_at}). Используйте `unarchive`.[/red]"
+            raise CliError(
+                "conflict",
+                f"Project '{project.slug}' уже archived "
+                f"({project.archived_at}). Используйте `unarchive`.",
             )
-            raise typer.Exit(code=1)
 
         pt = session.get(ProjectType, project.type_id)
         if pt is None:
-            console.print("[red]Broken data: project.type_id не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("broken_data", "Broken data: project.type_id не найден.")
 
         try:
             group = type_slug_to_group(pt.slug)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("bad_kind", str(exc))
 
         target_status = _status_by_slug_or_die(session, status)
 
@@ -2901,10 +2877,10 @@ def archive_cmd(
                     pass
                 dst = archive_path(root, group, project.slug)
                 if dst.exists():
-                    console.print(
-                        f"[red]Target уже существует: {dst}.[/red]"
+                    raise CliError(
+                        "conflict",
+                        f"Target уже существует: {dst}.",
                     )
-                    raise typer.Exit(code=1)
                 # [17] Порядок create→remove (был remove→create): при сбое создания
                 # нового junction старый оставался снятым, а local_path в БД указывал
                 # на несуществующий путь — проект «терял» физическую привязку.
@@ -2913,18 +2889,19 @@ def archive_cmd(
                         dst.parent.mkdir(parents=True, exist_ok=True)
                         create_junction(dst, target)
                     except Exception as exc:
-                        console.print(
-                            f"[red]Не удалось создать junction "
-                            f"{dst} → {target}: {exc}[/red]"
+                        # старый junction цел — откат не нужен
+                        raise CliError(
+                            "layout_failed",
+                            f"Не удалось создать junction "
+                            f"{dst} → {target}: {exc}",
                         )
-                        raise typer.Exit(code=1)  # старый junction цел — откат не нужен
                 try:
                     remove_junction(src)
                 except Exception as exc:
-                    console.print(
-                        f"[red]Не удалось снять junction {src}: {exc}[/red]"
+                    raise CliError(
+                        "layout_failed",
+                        f"Не удалось снять junction {src}: {exc}",
                     )
-                    raise typer.Exit(code=1)
                 moved_from = str(src)
                 moved_to = str(dst)
                 project.local_path = str(dst)
@@ -2933,8 +2910,7 @@ def archive_cmd(
                 try:
                     moved = _move_folder(src, dst)
                 except FileExistsError as exc:
-                    console.print(f"[red]{exc}[/red]")
-                    raise typer.Exit(code=1)
+                    raise CliError("conflict", str(exc))
                 if moved:
                     moved_from = str(src)
                     moved_to = str(dst)
@@ -3028,23 +3004,21 @@ def unarchive_cmd(
         project = _resolve_project_or_die(session, ref)
 
         if project.archived_at is None:
-            console.print(
-                f"[red]Project '{project.slug}' не архивирован.[/red]"
+            raise CliError(
+                "conflict",
+                f"Project '{project.slug}' не архивирован.",
             )
-            raise typer.Exit(code=1)
 
         pt = session.get(ProjectType, project.type_id)
         if pt is None:
-            console.print("[red]Broken data: project.type_id не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("broken_data", "Broken data: project.type_id не найден.")
 
         # Группа для возврата берётся из актуального type (если type_id изменился
         # между archive и unarchive — возвращаемся в новую группу).
         try:
             target_group = type_slug_to_group(pt.slug)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("bad_kind", str(exc))
 
         type_changed_warning = None
         if project.archived_group and project.archived_group != target_group:
@@ -3073,8 +3047,7 @@ def unarchive_cmd(
             try:
                 moved = _move_folder(src, dst)
             except FileExistsError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("conflict", str(exc))
             if moved:
                 moved_from = str(src)
                 moved_to = str(dst)
@@ -3157,16 +3130,15 @@ def renew_cmd(
 
         pt = session.get(ProjectType, project.type_id)
         if pt is None:
-            console.print("[red]Broken data: project.type_id не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("broken_data", "Broken data: project.type_id не найден.")
 
         if pt.slug != "client-project":
-            console.print(
-                f"[red]renew имеет смысл только для client-project "
+            raise CliError(
+                "forbidden",
+                f"renew имеет смысл только для client-project "
                 f"(у проекта тип '{pt.slug}'). "
-                f"Для остальных используйте `unarchive`.[/red]"
+                f"Для остальных используйте `unarchive`.",
             )
-            raise typer.Exit(code=1)
 
         was_archived = project.archived_at is not None
         count_before = project.renewal_count
@@ -3183,8 +3155,7 @@ def renew_cmd(
             try:
                 type_slug_to_group(pt.slug)  # валидация типа (raises ValueError)
             except ValueError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("bad_kind", str(exc))
 
             if project.local_path:
                 src = Path(project.local_path)
@@ -3192,8 +3163,7 @@ def renew_cmd(
                 try:
                     moved = _move_folder(src, dst)
                 except FileExistsError as exc:
-                    console.print(f"[red]{exc}[/red]")
-                    raise typer.Exit(code=1)
+                    raise CliError("conflict", str(exc))
                 if moved:
                     moved_from = str(src)
                     moved_to = str(dst)
@@ -3278,25 +3248,24 @@ def move_cmd(
         project = _resolve_project_or_die(session, ref)
 
         if project.archived_at is not None:
-            console.print(
-                f"[red]Project '{project.slug}' archived — сначала `unarchive`, "
-                f"потом `move`.[/red]"
+            raise CliError(
+                "conflict",
+                f"Project '{project.slug}' archived — сначала `unarchive`, "
+                f"потом `move`.",
             )
-            raise typer.Exit(code=1)
 
         old_type = session.get(ProjectType, project.type_id)
         if old_type is None:
-            console.print("[red]Broken data: project.type_id не найден.[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("broken_data", "Broken data: project.type_id не найден.")
 
         new_type = session.execute(
             select(ProjectType).where(ProjectType.slug == to_type)
         ).scalar_one_or_none()
         if new_type is None:
-            console.print(
-                f"[red]Тип '{to_type}' не найден. См. `atlas type list`.[/red]"
+            raise CliError(
+                "not_found",
+                f"Тип '{to_type}' не найден. См. `atlas type list`.",
             )
-            raise typer.Exit(code=1)
 
         if old_type.id == new_type.id:
             console.print(
@@ -3308,8 +3277,7 @@ def move_cmd(
             old_group = type_slug_to_group(old_type.slug)
             new_group = type_slug_to_group(new_type.slug)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1)
+            raise CliError("bad_kind", str(exc))
 
         # #7: модуль живёт в <container>/modules/<slug> НЕЗАВИСИМО от type.
         # Смена типа не должна выносить junction в type-группу — иначе
@@ -3326,8 +3294,7 @@ def move_cmd(
             try:
                 moved = _move_folder(src, dst)
             except FileExistsError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("conflict", str(exc))
             if moved:
                 moved_from = str(src)
                 moved_to = str(dst)

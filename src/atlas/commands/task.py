@@ -120,11 +120,11 @@ def _commit_or_optimistic_die(session: Session) -> None:
         session.commit()
     except StaleDataError:
         session.rollback()
-        console.print(
-            "[red]✗ Задача изменена параллельно (version conflict) — "
-            "перечитайте (atlas task get) и повторите.[/red]"
+        raise CliError(
+            "conflict",
+            "Задача изменена параллельно (version conflict) — "
+            "перечитайте (atlas task get) и повторите.",
         )
-        raise typer.Exit(code=1)
 
 
 def _slug_exists_fn(session: Session):
@@ -142,28 +142,28 @@ def _slug_exists_fn(session: Session):
 
 def _validate_slug_part(slug: str) -> None:
     if not SLUG_PART_RE.match(slug):
-        console.print(
-            f"[red]Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.[/red]"
+        raise CliError(
+            "invalid_slug",
+            f"Невалидный slug '{slug}': допустимы [a-z0-9-], длина 2-50.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_priority(priority: str) -> None:
     if priority not in VALID_PRIORITIES:
-        console.print(
-            f"[red]Невалидный priority '{priority}': "
-            f"допустимы {sorted(VALID_PRIORITIES)}.[/red]"
+        raise CliError(
+            "bad_priority",
+            f"Невалидный priority '{priority}': "
+            f"допустимы {sorted(VALID_PRIORITIES)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_status(status: str) -> None:
     if status not in VALID_STATUSES:
-        console.print(
-            f"[red]Невалидный status '{status}': "
-            f"допустимы {sorted(VALID_STATUSES)}.[/red]"
+        raise CliError(
+            "bad_status",
+            f"Невалидный status '{status}': "
+            f"допустимы {sorted(VALID_STATUSES)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_planning_status(status: str) -> None:
@@ -183,65 +183,63 @@ def _validate_planning_status(status: str) -> None:
         return
     if status in LIFECYCLE_STATUSES:
         verb = VERB_FOR_STATUS.get(status, "task <глагол>")
-        console.print(
-            f"[red]Статус '{status}' ставится командой '{verb}', а не --status "
-            f"(чтобы не обойти lease). add/update --status допускают: todo.[/red]"
+        raise CliError(
+            "forbidden",
+            f"Статус '{status}' ставится командой '{verb}', а не --status "
+            f"(чтобы не обойти lease). add/update --status допускают: todo.",
         )
-        raise typer.Exit(code=1)
-    console.print(
-        f"[red]Невалидный status '{status}': add/update допускают только todo "
-        f"(идеи — в `atlas backlog`).[/red]"
+    raise CliError(
+        "bad_status",
+        f"Невалидный status '{status}': add/update допускают только todo "
+        f"(идеи — в `atlas backlog`).",
     )
-    raise typer.Exit(code=1)
 
 
 def _validate_quality_tier(tier: str) -> None:
     if tier not in VALID_QUALITY_TIERS:
-        console.print(
-            f"[red]Невалидный quality tier '{tier}': "
-            f"допустимы {sorted(VALID_QUALITY_TIERS)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидный quality tier '{tier}': "
+            f"допустимы {sorted(VALID_QUALITY_TIERS)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_origin(origin: str) -> None:
     if origin not in VALID_ORIGINS:
-        console.print(
-            f"[red]Невалидный origin '{origin}': "
-            f"допустимы {sorted(VALID_ORIGINS)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидный origin '{origin}': "
+            f"допустимы {sorted(VALID_ORIGINS)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _parse_date(value: str, label: str) -> datetime:
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        console.print(
-            f"[red]Невалидный {label} '{value}': ожидаю YYYY-MM-DD.[/red]"
+        raise CliError(
+            "invalid_date",
+            f"Невалидный {label} '{value}': ожидаю YYYY-MM-DD.",
         )
-        raise typer.Exit(code=1)
 
 
 def _resolve_project_or_die(session: Session, ref: str) -> Project:
     try:
         proj = resolve_project_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if proj is None:
-        console.print(f"[red]Project '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Project '{ref}' не найден.")
     if proj.entity_kind in ("idea", "inbox"):
         # [15] resolve_project_ref не фильтрует entity_kind — без гейта задача
         # привязывалась бы к idea/inbox-псевдопроекту (stats их намеренно исключает).
         # ВАЖНО: только ЯВНЫЕ idea/inbox. У проектов, созданных до введения поля,
         # entity_kind = NULL; строгое `!= "project"` ломало их (регрессия 0.3.1).
-        console.print(
-            f"[red]'{ref}' — {proj.entity_kind}-запись, а не проект портфеля. "
-            f"Материализуй её: `atlas backlog convert <ref> --as project`.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"'{ref}' — {proj.entity_kind}-запись, а не проект портфеля. "
+            f"Материализуй её: `atlas backlog convert <ref> --as project`.",
         )
-        raise typer.Exit(code=1)
     return proj
 
 
@@ -250,8 +248,7 @@ def _resolve_assignee_or_die(session: Session, slug: str) -> Participant:
         select(Participant).where(Participant.slug == slug)
     ).scalar_one_or_none()
     if p is None:
-        console.print(f"[red]Участник '{slug}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Участник '{slug}' не найден.")
     return p
 
 
@@ -306,16 +303,15 @@ def _resolve_epic_or_die(session: Session, ref: str) -> Epic:
             select(Epic).where(Epic.id.like(f"{ref}%"))
         ).scalars().all()
         if len(matches) > 1:
-            console.print(
-                f"[red]UUID prefix '{ref}' матчит {len(matches)} эпиков; "
-                f"уточни больше символов.[/red]"
+            raise CliError(
+                "ambiguous_ref",
+                f"UUID prefix '{ref}' матчит {len(matches)} эпиков; "
+                f"уточни больше символов.",
             )
-            raise typer.Exit(code=1)
         epic = matches[0] if matches else None
 
     if epic is None:
-        console.print(f"[red]Epic '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Epic '{ref}' не найден.")
     return epic
 
 
@@ -323,11 +319,9 @@ def _resolve_task_or_die(session: Session, ref: str) -> Task:
     try:
         task = resolve_task_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if task is None:
-        console.print(f"[red]Task '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Task '{ref}' не найден.")
     return task
 
 
@@ -401,8 +395,9 @@ def add_cmd(
         due_dt = _parse_date(due_date, "due-date")
 
     if not cpp.strip():
-        console.print("[red]Поле --cpp не может быть пустым (ЦКП обязателен).[/red]")
-        raise typer.Exit(code=1)
+        raise CliError(
+            "precondition", "Поле --cpp не может быть пустым (ЦКП обязателен)."
+        )
 
     url = _db_url()
     engine = make_engine(url)
@@ -410,11 +405,11 @@ def add_cmd(
     with make_session(engine) as session:
         proj = _resolve_project_or_die(session, project)
         if proj.prefix is None:
-            console.print(
-                f"[red]У проекта '{proj.slug}' нет prefix — "
-                f"нельзя сгенерировать task slug.[/red]"
+            raise CliError(
+                "precondition",
+                f"У проекта '{proj.slug}' нет prefix — "
+                f"нельзя сгенерировать task slug.",
             )
-            raise typer.Exit(code=1)
 
         # ----- slug -----
         slug_auto = False
@@ -422,25 +417,24 @@ def add_cmd(
             _validate_slug_part(slug)
             final_slug = build_task_slug(proj.prefix, slug)
             if _slug_exists_fn(session)(final_slug):
-                console.print(
-                    f"[red]Slug '{final_slug}' занят. "
-                    f"Попробуйте '{slug}-2' или другой.[/red]"
+                raise CliError(
+                    "slug_taken",
+                    f"Slug '{final_slug}' занят. "
+                    f"Попробуйте '{slug}-2' или другой.",
                 )
-                raise typer.Exit(code=1)
         else:
             base_part = slugify_text(title)
             if not base_part:
-                console.print(
-                    f"[red]Не удалось сгенерировать slug из '{title}': "
-                    f"передайте --slug явно.[/red]"
+                raise CliError(
+                    "slug_gen",
+                    f"Не удалось сгенерировать slug из '{title}': "
+                    f"передайте --slug явно.",
                 )
-                raise typer.Exit(code=1)
             base_full = build_task_slug(proj.prefix, base_part)
             try:
                 final_slug = generate_unique_slug(base_full, _slug_exists_fn(session))
             except SlugGenerationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("slug_gen", str(exc))
             slug_auto = True
 
         # ----- assignee -----
@@ -457,8 +451,7 @@ def add_cmd(
             try:
                 reviewer_id = L.resolve_actor(session, reviewer or (_cfg.default_reviewer or None)).id
             except L.LeaseError as exc:
-                console.print(f"[red]reviewer: {exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("reviewer_unresolved", f"reviewer: {exc}")
 
         # ----- epic -----
         epic_obj: Optional[Epic] = None
@@ -785,8 +778,7 @@ def list_cmd(
             from atlas.sprint import resolve_sprint as _resolve_sprint
             sp = _resolve_sprint(session, sprint)
             if sp is None:
-                console.print(f"[red]Спринт '{sprint}' не найден.[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("not_found", f"Спринт '{sprint}' не найден.")
             stmt = stmt.where(Task.sprint_id == sp.id)
         if source_project is not None:
             src = _resolve_project_or_die(session, source_project)
@@ -1127,20 +1119,20 @@ def update_cmd(
 ) -> None:
     """Обновить поля задачи (любые, кроме slug/number/project)."""
     if slug is not None:
-        console.print(
-            "[red]Изменение slug запрещено: slug — immutable ID. "
-            "delete + add если нужно.[/red]"
+        raise CliError(
+            "immutable_field",
+            "Изменение slug запрещено: slug — immutable ID. "
+            "delete + add если нужно.",
         )
-        raise typer.Exit(code=1)
     if number is not None:
-        console.print("[red]Изменение number запрещено: number — immutable.[/red]")
-        raise typer.Exit(code=1)
-    if project is not None:
-        console.print(
-            "[red]Изменение project запрещено: сломает slug-prefix. "
-            "delete + add.[/red]"
+        raise CliError(
+            "immutable_field", "Изменение number запрещено: number — immutable."
         )
-        raise typer.Exit(code=1)
+    if project is not None:
+        raise CliError(
+            "immutable_field",
+            "Изменение project запрещено: сломает slug-prefix. delete + add.",
+        )
 
     if priority is not None:
         _validate_priority(priority)

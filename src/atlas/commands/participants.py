@@ -17,7 +17,7 @@ import json
 from typing import Any, Optional
 
 import typer
-from clikit import command, emit_data, emit_table
+from clikit import CliError, command, emit_data, emit_table
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -126,28 +126,25 @@ def _resolve_or_die(session: Session, ref: str) -> Participant:
     try:
         p = _resolve_participant_ref(session, ref)
     except AmbiguousRefError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("ambiguous_ref", str(exc))
     if p is None:
-        console.print(f"[red]Participant '{ref}' не найден.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("not_found", f"Participant '{ref}' не найден.")
     return p
 
 
 def _validate_kind(kind: str) -> None:
     if kind not in VALID_KINDS:
-        console.print(
-            f"[red]Невалидный kind '{kind}': допустимы {sorted(VALID_KINDS)}.[/red]"
+        raise CliError(
+            "bad_kind",
+            f"Невалидный kind '{kind}': допустимы {sorted(VALID_KINDS)}.",
         )
-        raise typer.Exit(code=1)
 
 
 def _validate_metadata_json(value: str) -> str:
     try:
         json.loads(value)
     except json.JSONDecodeError as exc:
-        console.print(f"[red]Невалидный --metadata-json: {exc}[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("invalid_json", f"Невалидный --metadata-json: {exc}")
     return value
 
 
@@ -185,24 +182,20 @@ def add_cmd(
         slug_auto = False
         if slug:
             if _slug_exists_fn(session)(slug):
-                console.print(
-                    f"[red]Slug '{slug}' занят. Выберите другой.[/red]"
-                )
-                raise typer.Exit(code=1)
+                raise CliError("slug_taken", f"Slug '{slug}' занят. Выберите другой.")
             final_slug = slug
         else:
             base = slugify_text(name)
             if not base:
-                console.print(
-                    f"[red]Не удалось сгенерировать slug из '{name}': "
-                    f"передайте --slug явно.[/red]"
+                raise CliError(
+                    "slug_gen",
+                    f"Не удалось сгенерировать slug из '{name}': "
+                    f"передайте --slug явно.",
                 )
-                raise typer.Exit(code=1)
             try:
                 final_slug = generate_unique_slug(base, _slug_exists_fn(session))
             except SlugGenerationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                raise typer.Exit(code=1)
+                raise CliError("slug_gen", str(exc))
             slug_auto = True
 
         participant = Participant(
@@ -421,10 +414,10 @@ def update_cmd(
 ) -> None:
     """Обновить поля участника (любые, кроме slug)."""
     if slug is not None:
-        console.print(
-            "[red]Изменение slug запрещено: slug — immutable.[/red]"
+        raise CliError(
+            "immutable_field",
+            "Изменение slug запрещено: slug — immutable.",
         )
-        raise typer.Exit(code=1)
 
     if kind is not None:
         _validate_kind(kind)
@@ -516,8 +509,7 @@ def delete_cmd(
     - --force: cascade удаление (project_participants → DELETE, tasks.assignee_id → NULL).
     """
     if soft and force:
-        console.print("[red]Нельзя одновременно --soft и --force.[/red]")
-        raise typer.Exit(code=1)
+        raise CliError("conflict", "Нельзя одновременно --soft и --force.")
 
     url = _db_url()
     engine = make_engine(url)
@@ -567,11 +559,11 @@ def delete_cmd(
         n_tasks = len(task_rows)
 
         if (n_links > 0 or n_tasks > 0) and not force:
-            console.print(
-                f"[red]Participant '{slug_for_msg}' used in {n_links} "
-                f"project(s) / {n_tasks} task(s). Use --force to cascade.[/red]"
+            raise CliError(
+                "precondition",
+                f"Participant '{slug_for_msg}' used in {n_links} "
+                f"project(s) / {n_tasks} task(s). Use --force to cascade.",
             )
-            raise typer.Exit(code=1)
 
         cascade_details = {"links_removed": 0, "tasks_unassigned": 0}
         if force:

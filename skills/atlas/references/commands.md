@@ -19,7 +19,7 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 |---|---|
 | `project init` | apply миграции + seed справочников (типы/статусы/28 тегов). Идемпотентно. |
 | `project add` | создать проект (по умолчанию ЛИЧНЫЙ; `--team` — командный). |
-| `project list [--type --status --tag (AND) --archived]` | список. |
+| `project list [--type --status --tag (AND) --archived]` | список **портфеля**: модули (проекты с родителем) СКРЫТЫ по умолчанию — это части контейнера, а не единицы портфеля. Сколько их — в колонке `modules` у контейнера. |
 | `project get <ref>` | карточка (поля + теги + участники + git/layout статус). |
 | `project update <ref> --…` | обновить любые поля кроме slug. |
 | `project delete <ref> [--hard]` | soft (archived_at) по умолчанию; `--hard` — физическое. |
@@ -27,7 +27,7 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 | `project tag add <ref> --tag …` / `project tag rm <ref> --tag …` | теги (идемпотентно / graceful). |
 | `project member add <ref> --member <slug> --role lead\|member` | участники проекта. |
 | `project member list <ref>` / `project member rm <ref> --member <slug>` | список / снять. |
-| `project list --parent <ref>` / `--standalone` | модули контейнера / проекты без родителя. |
+| `project list --parent <ref>` / `--standalone` / **`--modules`** / **`--all`** | модули конкретного контейнера / только самостоятельные (= умолчание) / **только модули** / **проекты и модули вместе**. Флаги области взаимоисключающи: две области сразу → отказ. |
 | `project archive <ref> --status completed\|paused\|frozen\|archived` | mv в `_Archive/<group>/` + статус. |
 | `project unarchive <ref> [--status active]` | вернуть из архива. |
 | `project renew <ref>` | renewal_count++ (только client-project). |

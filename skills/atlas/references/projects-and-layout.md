@@ -8,7 +8,7 @@
 | `idea` | `_Ideas/<slug>.md` | сформулированная мысль до решения «делать» |
 | `project` | `_storage/<slug>/` + junction в группе | полноценный проект |
 
-`atlas project` работает только с `entity_kind='project'`. Интейк идей (в т.ч. сырьё/inbox) — единый пул `atlas backlog` (материализация в проект — `backlog convert --as project`); отдельные команды `atlas idea`/`atlas inbox` убраны (#867), legacy-записи в БД видны в `backlog list`.
+`atlas project` работает только с `entity_kind='project'`. Если команда отвечает «— idea-запись, а не проект портфеля», запись классифицирована как `idea`/`inbox`: посмотреть — `atlas project get <ref>` (поле `entity_kind`), починить — **`atlas project update <ref> --entity-kind project`** (штатный путь, без правки БД руками). Интейк идей (в т.ч. сырьё/inbox) — единый пул `atlas backlog` (материализация в проект — `backlog convert --as project`); отдельные команды `atlas idea`/`atlas inbox` убраны (#867), legacy-записи в БД видны в `backlog list`.
 
 **5 канонических статусов**: `active` / `paused` / `archived` / `cancelled` / `experiment`
 (legacy idea/research/maintained/dormant/graduating сконвертированы миграцией 007).

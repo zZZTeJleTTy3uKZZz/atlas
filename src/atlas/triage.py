@@ -88,6 +88,7 @@ def build_triage(
     in_progress: list[dict] = []
     review: list[dict] = []
     blocked: list[dict] = []
+    orphan_review: list[dict] = []
     stale: list[dict] = []
 
     for t in tasks:
@@ -97,13 +98,19 @@ def build_triage(
             in_progress.append(b)
         elif t.status == "review":
             review.append(b)
+            # Задача в review без приёмщика — тупик: закрыть в done может ТОЛЬКО
+            # назначенный reviewer, поэтому такая запись не закроется никогда.
+            # `submit` их больше не создаёт (#1316), но в базе они уже есть —
+            # показываем отдельно, иначе тонут в общем счётчике review.
+            if t.reviewer_id is None:
+                orphan_review.append(b)
         elif t.status == "blocked":
             blocked.append(b)
         # STALE: активная задача, не тронутая дольше порога (забытая работа)
         if t.status in ACTIVE_STATUSES and t.updated_at is not None and t.updated_at < threshold:
             stale.append(b)
 
-    for lst in (in_progress, review, blocked):
+    for lst in (in_progress, review, blocked, orphan_review):
         lst.sort(key=lambda x: _PRIO_RANK.get(x["priority"], 9))
     stale.sort(key=lambda x: -(x["age_days"] or 0))  # самые забытые сверху
 
@@ -117,5 +124,6 @@ def build_triage(
         "in_progress": in_progress,
         "review": review,
         "blocked": blocked,
+        "review_without_reviewer": orphan_review,
         "stale": stale,
     }

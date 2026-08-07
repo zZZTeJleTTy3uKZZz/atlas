@@ -582,11 +582,24 @@ def submit_cmd(
     comment: Optional[str] = typer.Option(None, "--comment", "-m", help="Что сделано/что дальше (передача reviewer'у)."),
     actor: Optional[str] = typer.Option(None, "--actor"),
 ) -> None:
-    """Отправить задачу на проверку → review (исполнитель). Опц. комментарий-передача."""
+    """Отправить задачу на проверку → review (исполнитель). Опц. комментарий-передача.
+
+    Требует назначенного reviewer: закрыть задачу в `done` может только он, поэтому
+    `review` без приёмщика — тупик, из которого её не достанет никто (#1316).
+    """
     with make_session(_lifecycle_engine()) as session:
         L.expire_stale_leases(session)
         task = _resolve_task_or_die(session, ref)
         actor_p = _resolve_actor_or_die(session, actor)
+        if task.reviewer_id is None:
+            raise CliError(
+                "no_reviewer",
+                f"У задачи нет reviewer'а — из review её будет некому закрыть "
+                f"(в done переводит только назначенный приёмщик).\n"
+                f"  · назначить: `atlas task update {ref} --reviewer <slug>` и повторить submit\n"
+                f"  · соло без приёмки: `atlas task done {ref}` напрямую\n"
+                f"  · всегда с приёмкой: `atlas config set default_review true`",
+            )
         try:
             TR.submit_task(session, task, actor_p, comment=comment)
         except L.LeaseHeldError as exc:

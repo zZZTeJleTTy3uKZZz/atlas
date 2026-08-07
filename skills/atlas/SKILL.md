@@ -58,12 +58,40 @@ Atlas (SQLite, local-first) — проекты · задачи · эпики · 
 **Канон:** `<ресурс> <глагол>`; подчинённые ресурсы — суб-группы родителя (как `epic worktree`).
 
 `project` (CRUD + архив + суб-группы `git`/`layout`/`tag`/`member`) · `task` (CRUD + **жизненный
-цикл глаголами** + lease, `--cpp` обязателен; суб-группы `member`/`checklist`, глагол `handoff`) ·
-`epic` (+ `worktree`) · `sprint` (итерации) · `hypothesis` (ledger) · `person` (люди портфеля,
-бывш. `participant`) · `type` / `status` / `tag` (справочники) · `backlog` (**единый интейк**
-идей, DB-first; convert --as task | project со scaffolding layout/canonical/git) · `issue`
+цикл глаголами** + lease, `--cpp` обязателен; суб-группы `member`/`checklist`, глаголы `handoff`,
+**`move`**, **`unconvert`**) · `epic` (+ `worktree`, **`move`**, **`unconvert`**) · `sprint`
+(итерации) · `hypothesis` (ledger) · `person` (люди портфеля, бывш. `participant`) ·
+`type` / `status` / `tag` (справочники) · `backlog` (**единый интейк** идей, DB-first;
+`convert --as task | epic | project` со scaffolding layout/canonical/git) · `issue`
 (bug/feature/**handoff**) · `log` (`list` обогащённо + `raw` аудит) · `backup` (run/status +
 суб-группа `schedule`) · `profile`.
+
+### Перенос и возврат — сущности НЕ приколочены к проекту
+
+Частый вопрос агента: «Atlas не даёт перенести задачу в другой проект». Даёт:
+
+```bash
+atlas task move <ref> --to-project <slug>   # номер, история и комментарии сохраняются;
+                                            # slug пересобирается под prefix нового проекта
+atlas epic move <ref> --to-project <slug>   # эпик едет ВМЕСТЕ со своими задачами
+```
+
+Связь эпик↔задача внутрипроектная: при переносе одной задачи её связь с эпиком
+прежнего проекта снимается, а эпик переносится только целиком — иначе связь
+порвётся. Задача в эпик чужого проекта не заводится вовсе (гейт).
+
+Обратный ход в пул — тоже есть, и он не «отмена»:
+
+```bash
+atlas task unconvert <ref>                  # задача → запись пула (не cancel!)
+atlas epic unconvert <ref>                  # эпик + ВСЕ его задачи → пул, каскадом
+atlas backlog convert <ref> --as task       # обратно в задачу
+atlas backlog convert <ref> --as epic       # эпик поднимается вместе с задачами
+```
+
+Что переживает круг: ЦКП, описание, проект, приоритет, прежний slug. Что не
+возвращается: **номер задачи** — он глобально уникален и остаётся за архивной
+записью (прежний хранится в `origin_payload` как след).
 
 Топ-уровень (без группы): **`dashboard`** (операционный обзор портфеля) · **`init`**
 (прописать Atlas-дисциплину в агентские файлы) · **`setup`** (turnkey: правила + SessionStart-хук

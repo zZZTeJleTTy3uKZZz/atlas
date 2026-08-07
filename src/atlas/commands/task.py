@@ -1098,6 +1098,11 @@ def update_cmd(
     story_points: Optional[int] = typer.Option(None, "--story-points"),
     due_date: Optional[str] = typer.Option(None, "--due-date", help="YYYY-MM-DD"),
     assignee: Optional[str] = typer.Option(None, "--assignee"),
+    reviewer: Optional[str] = typer.Option(
+        None, "--reviewer",
+        help="Приёмщик задачи (slug участника). Без него `task submit` не пустит "
+             "задачу в review — закрывать её было бы некому (#1316).",
+    ),
     epic: Optional[str] = typer.Option(
         None, "--epic", help="Epic ref (slug | UUID) → epic_id.",
     ),
@@ -1186,6 +1191,17 @@ def update_cmd(
                     "new": assignee,
                 }
                 task.assignee_id = ass_obj.id
+
+        # reviewer — тот же resolve, что у assignee. Назначается и ПОСЛЕ создания:
+        # без этого задача без приёмщика не выбиралась из тупика (#1316).
+        if reviewer is not None:
+            rev_obj = _resolve_assignee_or_die(session, reviewer)
+            if task.reviewer_id != rev_obj.id:
+                diffs["reviewer"] = {
+                    "old": _slug_for_assignee(session, task.reviewer_id),
+                    "new": reviewer,
+                }
+                task.reviewer_id = rev_obj.id
 
         # epic — нужен resolve через ref (slug | UUID); diff логируем slug'ами
         if epic is not None:

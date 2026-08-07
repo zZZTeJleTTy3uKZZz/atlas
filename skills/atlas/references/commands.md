@@ -52,6 +52,8 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 | `task get <ref>` | карточка. |
 | `task update <ref> --…` | обновить поля (кроме slug/number/project). `--status` — ТОЛЬКО `todo`; lifecycle — глаголами ниже. Идеи (до задачи) — пул `atlas backlog`. |
 | `task delete <ref> [--hard]` | soft по умолчанию. |
+| **`task move <ref> --to-project <slug>`** | **перенести задачу в другой проект.** Номер, история и комментарии сохраняются; slug пересобирается под prefix нового проекта; связь с эпиком прежнего проекта снимается (эпик↔задача — внутрипроектная связь). |
+| **`task unconvert <ref>`** | **вернуть задачу в пул `backlog`** — это НЕ `cancel`: задача не провалилась, а вернулась в раздумья. Карточка (ЦКП/описание/приоритет/проект) уезжает в запись пула, сама задача архивируется, slug освобождается под возврат. Обратно — `backlog convert <ref> --as task`. |
 | **Жизненный цикл (глаголы):** | |
 | `task start <ref> [--ttl 2h --actor --session --from]` | взять в работу: lease + status=in_progress + assignee (синоним `claim`). Занята другим → exit 1. |
 | `task review <ref> [--force --actor]` | → review (lease сохраняется). |
@@ -83,6 +85,10 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 ## epic — эпики (вехи; задача привязывается флагом `task --epic`, бывший `--sprint`)
 `add --project* --title* [--slug --goal --description --source-project --rationale --origin --injected-by]` · `list [--project --source-project]` (**без `--project` = ВЕСЬ портфель** + колонка Project) · `get <ref>` (показывает description + блок Provenance).
 Групповой lease: `epic claim <ref>` / `epic release <ref>` (захват/освобождение эпика с каскадом на его задачи).
+**Перенос между проектами:** `epic move <ref> --to-project <slug>` — эпик едет ВМЕСТЕ со своими задачами
+(оставить их значило бы порвать связь; переносить эпик по частям нельзя).
+**Возврат в пул:** `epic unconvert <ref>` — эпик и ВСЕ его задачи становятся записями `backlog` каскадом,
+задачи ссылаются на запись эпика; поднять обратно целиком — `backlog convert <ref> --as epic`.
 Суб-группа изоляции веток — `epic worktree create|list|merge|remove <ref>` (git worktree на ветке `epic/<slug>`; детали — [projects-and-layout.md](projects-and-layout.md)).
 
 ## sprint — итерации (спринты, Scrum-тайм-боксы)
@@ -126,6 +132,8 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 - `backlog list [--project --global --status open|converted|archived|all]` — вид «идеи»; показывает И
   legacy idea/inbox-записи БД (единый вид). `backlog show <ref>` · `backlog edit <ref> --…` · `backlog archive <ref> [--hard]`.
 - `backlog convert <ref> --as task --project <p> --cpp "…"` → создаёт `todo`-задачу;
+  `--as epic --project <p>` → поднимает эпик; если запись пришла из `epic unconvert`, вместе с ним
+  восстанавливаются и его задачи с прежними связями;
   `--as project [--type --slug --setup-layout --canonical --init-git --private --group]` → зачаток проекта
   **С МАТЕРИАЛИЗАЦИЕЙ** (layout/junction + canonical README/AGENTS + опц. git) — эквивалент прежнего `idea promote`.
 - Раздельные виды: `backlog list` (что преобразовать) vs `task list` (`todo` — что брать в работу). Новая задача создаётся в `todo`.

@@ -22,6 +22,38 @@ def _by_backend(session: Session, model, backend_id: str):
     ).scalar_one_or_none()
 
 
+def _by_slug(session: Session, model, slug: str):
+    return session.execute(
+        select(model).where(model.slug == slug)
+    ).scalar_one_or_none()
+
+
+def _free_slug(session: Session, model, slug: str) -> str:
+    """Подобрать свободный slug: <slug>, <slug>-2, <slug>-3, …"""
+    candidate, n = slug, 1
+    while _by_slug(session, model, candidate) is not None:
+        n += 1
+        candidate = f"{slug}-{n}"
+    return candidate
+
+
+def _adopt_by_slug(session: Session, model, bid: str, payload: dict):
+    """Усыновить локальную запись, созданную ДО подключения к хабу.
+
+    Такая запись имеет тот же slug, но пустой backend_id: по backend_id она не
+    находится, а слепой insert падает на UNIQUE (slug) и намертво заклинивает
+    pull (курсор не двигается). Возвращает запись, если усыновили, иначе None.
+    """
+    slug = payload.get("slug")
+    if not slug:
+        return None
+    existing = _by_slug(session, model, slug)
+    if existing is not None and not existing.backend_id:
+        existing.backend_id = bid
+        return existing
+    return None
+
+
 def _resolve_project(session: Session, payload: dict) -> Project | None:
     pbid = payload.get("project_backend_id")
     if pbid:
@@ -67,16 +99,21 @@ def _norm_priority(raw: Any) -> str:
 def _upsert_task(session: Session, bid: str, payload: dict) -> dict:
     task = _by_backend(session, Task, bid)
     if task is None:
+        task = _adopt_by_slug(session, Task, bid, payload)
+    if task is None:
         proj = _resolve_project(session, payload)
         if proj is None:
             return {"skipped": "no_project"}
+        slug = payload.get("slug")
         task = Task(
             backend_id=bid, project_id=proj.id,
             title=payload.get("title") or "(no title)",
             cpp_description=payload.get("cpp") or "—",
             priority=_norm_priority(payload.get("priority")),
             status=_norm_task_status(payload.get("status")),
-            slug=payload.get("slug"),
+            # slug занят ЧУЖОЙ задачей (с другим backend_id) — уникализируем,
+            # иначе UNIQUE(tasks.slug) роняет весь pull.
+            slug=_free_slug(session, Task, slug) if slug else None,
         )
         session.add(task)
         return {"created": "task"}
@@ -97,14 +134,17 @@ def _upsert_task(session: Session, bid: str, payload: dict) -> dict:
 def _upsert_epic(session: Session, bid: str, payload: dict) -> dict:
     epic = _by_backend(session, Epic, bid)
     if epic is None:
+        epic = _adopt_by_slug(session, Epic, bid, payload)
+    if epic is None:
         proj = _resolve_project(session, payload)
         if proj is None:
             return {"skipped": "no_project"}
+        slug = payload.get("slug")
         epic = Epic(
             backend_id=bid, project_id=proj.id,
             title=payload.get("title") or "(epic)",
             status=payload.get("status") or "active",
-            slug=payload.get("slug"),
+            slug=_free_slug(session, Epic, slug) if slug else None,
         )
         session.add(epic)
         return {"created": "epic"}

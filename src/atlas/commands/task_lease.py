@@ -166,6 +166,38 @@ def _render_stale(d: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _отказать_если_ждёт(session, tasks) -> None:
+    """Не дать взять задачу, которая ждёт незакрытую (#2429).
+
+    Именно отказ, а не предупреждение. Предупреждение, которое можно
+    проигнорировать, проигнорируют — и порядок работ вернётся в голову, откуда
+    его и вынимали. Цена ошибки несимметрична: взявшийся упрётся не сразу, а
+    через час работы, и всё это время его ёмкость и аренда задачи заняты.
+
+    Отказ называет, чего именно ждём и зачем: «заблокировано» без причины
+    невозможно ни проверить, ни снять.
+    """
+    from atlas.commands.task_dependency import блокирующие  # noqa: PLC0415
+
+    for задача in tasks:
+        держатели = блокирующие(session, задача)
+        if not держатели:
+            continue
+        строки = [
+            f"#{д['number']} [{д['status']}] {д['title']}"
+            + (f" — {д['reason']}" if д.get("reason") else "")
+            for д in держатели
+        ]
+        перенос = chr(10) + "  "
+        raise CliError(
+            "task_blocked_by_dependency",
+            f"#{задача.number} ждёт незакрытые задачи:" + перенос
+            + перенос.join(строки)
+            + chr(10)
+            + "Сними зависимость (`atlas task depends remove`), если ждать нечего.",
+        )
+
+
 def _run_claim(
     refs: list[str], ttl: str, best_effort: bool,
     actor: Optional[str], session_id: Optional[str], origin: Optional[str],
@@ -177,6 +209,7 @@ def _run_claim(
         L.expire_stale_leases(session)  # ленивый reaper
         actor_p = _resolve_actor_or_die(session, actor)
         tasks = [_resolve_task_or_die(session, r) for r in refs]
+        _отказать_если_ждёт(session, tasks)
         sess = L.resolve_session_id(session_id)
         orig = L.resolve_origin(origin)
 

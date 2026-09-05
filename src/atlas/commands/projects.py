@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
-from clikit import CliError, command, emit_data, emit_message, emit_table
+from clikit import CliError, command, emit_data, emit_message, emit_table, is_json
 from rich.console import Console
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -114,6 +114,11 @@ project_member_app = typer.Typer(
     no_args_is_help=True, help="Участники проекта (роли lead/member)."
 )
 projects_app.add_typer(project_member_app, name="member")
+#   project adr    init        — разложить журнал архитектурных решений
+project_adr_app = typer.Typer(
+    no_args_is_help=True, help="Журнал архитектурных решений (docs/adr/)."
+)
+projects_app.add_typer(project_adr_app, name="adr")
 
 # --------------------------------------------------------------------------- #
 # Constants                                                                   #
@@ -485,6 +490,9 @@ node_modules/
 dist/
 build/
 
+# Черновики и промежуточные выгрузки — им место в _scratch/, а не в корне
+_scratch/
+
 # Temporary / large
 *.log
 *.tmp
@@ -848,6 +856,86 @@ def _maybe_local_git_init(storage_path: Path) -> bool:
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+# Контракт временных файлов: черновики и промежуточные выгрузки живут в
+# `_scratch/`, готовые артефакты — в `_artifacts/`. Без этого договорённости не
+# было, и одноразовые скрипты/дампы копились в корне проекта, попадали в git и
+# делали дерево нечитаемым.
+SCRATCH_DIR_NAME = "_scratch"
+ARTIFACTS_DIR_NAME = "_artifacts"
+SCRATCH_GITIGNORE_MARKER = f"{SCRATCH_DIR_NAME}/"
+SCRATCH_GITIGNORE_EQUIVALENTS = {
+    SCRATCH_GITIGNORE_MARKER,
+    f"/{SCRATCH_DIR_NAME}/",
+    SCRATCH_DIR_NAME,
+    f"{SCRATCH_DIR_NAME}/*",
+}
+
+
+def ensure_scratch_contract(local_path: Path) -> dict[str, bool]:
+    """Создать `_scratch/` и внести его в `.gitignore` — идемпотентно.
+
+    Возвращает ``{"scratch_created": bool, "gitignore_updated": bool}``.
+    Черновики обязаны иметь своё место, иначе они оседают в корне и уезжают
+    в историю репозитория вместе с мусором.
+    """
+    result = {"scratch_created": False, "gitignore_updated": False}
+    local_path.mkdir(parents=True, exist_ok=True)
+
+    scratch = local_path / SCRATCH_DIR_NAME
+    if not scratch.exists():
+        scratch.mkdir()
+        result["scratch_created"] = True
+
+    gitignore = local_path / ".gitignore"
+    block = (
+        "# === atlas: черновики и промежуточные файлы ===\n"
+        f"{SCRATCH_GITIGNORE_MARKER}\n"
+    )
+    if gitignore.exists():
+        try:
+            existing = gitignore.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+        lines = [ln.strip() for ln in existing.splitlines()]
+        if any(ln in SCRATCH_GITIGNORE_EQUIVALENTS for ln in lines):
+            return result
+        suffix = "" if existing.endswith("\n") or existing == "" else "\n"
+        gitignore.write_text(existing + suffix + "\n" + block, encoding="utf-8")
+    else:
+        gitignore.write_text(block, encoding="utf-8")
+    result["gitignore_updated"] = True
+    return result
+
+
+# Журнал архитектурных решений. Без него «почему» проекта живёт только в
+# переписке и коммитах: агент приходит через месяц, видит странное решение и
+# «чинит» его — то есть откатывает осознанный трейдофф.
+ADR_DIR_REL = Path("docs") / "adr"
+ADR_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "adr"
+
+
+def ensure_adr_scaffold(local_path: Path) -> list[str]:
+    """Разложить `docs/adr/` (README + шаблон) — идемпотентно.
+
+    Возвращает список созданных файлов (относительными путями). Существующие
+    файлы не трогаем: журнал решений — исторический документ, перезапись
+    задним числом обесценивает его.
+    """
+    created: list[str] = []
+    target = local_path / ADR_DIR_REL
+    for name in ("README.md", "0000-template.md"):
+        src = ADR_TEMPLATE_DIR / name
+        if not src.exists():
+            continue
+        dst = target / name
+        if dst.exists():
+            continue
+        target.mkdir(parents=True, exist_ok=True)
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        created.append(str(ADR_DIR_REL / name).replace("\\", "/"))
+    return created
 
 
 def _ensure_gitignore_modules(local_path: Path) -> bool:
@@ -1379,6 +1467,21 @@ def add_cmd(
                 if created_files:
                     emit_message(f"Files: {', '.join(created_files)}")
 
+                # Контракт временных файлов: у черновиков должно быть своё
+                # место с первой секунды, иначе они оседают в корне проекта.
+                scratch = ensure_scratch_contract(local_p)
+                created_payload["scratch"] = scratch
+                if scratch["scratch_created"]:
+                    emit_message(f"Scratch: {SCRATCH_DIR_NAME}/ (в .gitignore)")
+
+                # Журнал решений заводим сразу: заведённый позже, он не
+                # догоняет уже принятые решения — «почему» к тому моменту
+                # растворяется в истории коммитов.
+                adr_files = ensure_adr_scaffold(local_p)
+                created_payload["adr_files"] = adr_files
+                if adr_files:
+                    emit_message(f"ADR: {', '.join(adr_files)}")
+
                 # ----- onboarding prompt block (#211) -----
                 # Идемпотентно вписываем блок-указатель «пользуйся Atlas» в
                 # AGENTS.md (создан из шаблона → уже с блоком; существовавший →
@@ -1785,6 +1888,17 @@ def get_cmd(
         ),
         "git_repo_url": project.git_repo_url,
         "local_path": project.local_path,
+        # Паспорт проекта: без него карточка не отдаёт то, что записал `update`,
+        # и связка с порталом выглядит незаполненной, хотя в базе она есть.
+        "point_a": project.point_a,
+        "point_b": project.point_b,
+        "done_criteria": project.done_criteria,
+        "appetite_days": project.appetite_days,
+        "hard_deadline": (
+            project.hard_deadline.strftime("%Y-%m-%d") if project.hard_deadline else None
+        ),
+        "b24_item_id": project.b24_item_id,
+        "b24_entity_type_id": project.b24_entity_type_id,
         "created_at": (
             project.created_at.isoformat() if project.created_at else None
         ),
@@ -1914,6 +2028,13 @@ def update_cmd(
         help="URL git remote (новое поле git_remote_url). Синхронизирует и legacy git_repo_url.",
     ),
     local_path: Optional[str] = typer.Option(None, "--local-path"),
+    no_local_path: bool = typer.Option(
+        False, "--no-local-path",
+        help=(
+            "Снять local_path (папки у проекта физически нет). "
+            "Взаимоисключает --local-path."
+        ),
+    ),
     prefix: Optional[str] = typer.Option(None, "--prefix"),
     entity_kind: Optional[str] = typer.Option(
         None, "--entity-kind",
@@ -1932,6 +2053,28 @@ def update_cmd(
     no_parent: bool = typer.Option(
         False, "--no-parent",
         help="Отвязать проект от родителя (parent IS NULL). Взаимоисключает --parent.",
+    ),
+    point_a: Optional[str] = typer.Option(
+        None, "--point-a", help="Паспорт: точка А — что сейчас, какие потери.",
+    ),
+    point_b: Optional[str] = typer.Option(
+        None, "--point-b", help="Паспорт: точка Б — измеримый результат.",
+    ),
+    done_criteria: Optional[str] = typer.Option(
+        None, "--done-criteria", help="Паспорт: что считается концом проекта.",
+    ),
+    appetite_days: Optional[int] = typer.Option(
+        None, "--appetite-days",
+        help="Паспорт: бюджет времени в рабочих днях (не оценка: упёрлись — режем объём).",
+    ),
+    hard_deadline: Optional[str] = typer.Option(
+        None, "--hard-deadline", help="Паспорт: крайний срок сдачи, YYYY-MM-DD.",
+    ),
+    b24_item_id: Optional[str] = typer.Option(
+        None, "--b24-item-id", help="Элемент смарт-процесса «Проекты» на портале.",
+    ),
+    b24_entity_type_id: Optional[int] = typer.Option(
+        None, "--b24-entity-type-id", help="Тип смарт-процесса на портале.",
     ),
 ) -> None:
     """Обновить поля проекта (любые, кроме slug)."""
@@ -1959,6 +2102,15 @@ def update_cmd(
             deadline_dt = datetime.fromisoformat(deadline)
         except ValueError:
             raise CliError("invalid_date", f"Невалидный deadline '{deadline}'.")
+
+    hard_deadline_dt: Optional[datetime] = None
+    if hard_deadline is not None:
+        try:
+            hard_deadline_dt = datetime.fromisoformat(hard_deadline)
+        except ValueError:
+            raise CliError(
+                "invalid_date", f"Невалидный hard-deadline '{hard_deadline}'."
+            )
 
     url = _db_url()
     engine = make_engine(url)
@@ -1988,6 +2140,15 @@ def update_cmd(
         _maybe_update("name", name)
         _maybe_update("priority", priority)
         _maybe_update("description", description)
+        # Паспорт проекта: без точки Б и критерия завершения проект нельзя
+        # увести в производство — это проверяет `atlas review`.
+        _maybe_update("point_a", point_a)
+        _maybe_update("point_b", point_b)
+        _maybe_update("done_criteria", done_criteria)
+        _maybe_update("appetite_days", appetite_days)
+        _maybe_update("hard_deadline", hard_deadline_dt)
+        _maybe_update("b24_item_id", b24_item_id)
+        _maybe_update("b24_entity_type_id", b24_entity_type_id)
         _maybe_update("entity_kind", entity_kind)
         _maybe_update("one_line_summary", one_line)
         _maybe_update("estimated_deadline", deadline_dt)
@@ -2001,7 +2162,20 @@ def update_cmd(
 
         # W45-32m: --local-path принимает относительный → resolve через
         # ATLAS_PROJECTS_ROOT (или ~/Documents/PROJECT).
-        if local_path is not None:
+        if local_path is not None and no_local_path:
+            raise CliError(
+                "conflict",
+                "--local-path и --no-local-path взаимоисключают друг друга.",
+            )
+        if no_local_path:
+            # Запись без физики честнее сломанного пути: путь, которого нет,
+            # заставляет layout/git-команды молча промахиваться мимо файлов.
+            # _maybe_update игнорирует None (это «поле не задано»), поэтому
+            # снимаем значение напрямую.
+            if project.local_path is not None:
+                diffs["local_path"] = {"old": project.local_path, "new": None}
+                project.local_path = None
+        elif local_path is not None:
             lp = Path(local_path)
             if not lp.is_absolute():
                 lp = (get_projects_root() / lp).resolve()
@@ -2793,6 +2967,57 @@ def _move_folder(src: Path, dst: Path) -> bool:
     return True
 
 
+def _same_path(a: Path, b: Path) -> bool:
+    """Один ли это путь. Сравнение терпимое к регистру и к несуществующим путям.
+
+    На Windows `Products/Foo` и `products/foo` — одно и то же, а `resolve()`
+    на снятом junction'е кидает/врёт. Наивное `==` из-за этого молча считало
+    канонический путь чужим и роняло защиту от переноса storage.
+    """
+    try:
+        if a.exists() and b.exists() and a.samefile(b):
+            return True
+    except OSError:
+        pass
+    return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(
+        os.path.normpath(str(b))
+    )
+
+
+def _unarchive_junction(
+    *, storage: Path, archived_link: Path, dst: Path
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Вернуть проект из архива, переставив junction, а не двигая данные.
+
+    Возвращает ``(moved_from, moved_to, warning)``. Порядок create→remove
+    выбран намеренно: если создание нового junction сорвётся, старая ссылка
+    в `_Archive` останется цела и проект не окажется вообще без представления.
+    """
+    from atlas.junctions import create_junction, junction_target as _jt
+
+    if dst.exists():
+        raise CliError("conflict", f"Target уже существует: {dst}.")
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        create_junction(dst, storage)
+    except (SafetyError, JunctionError, OSError) as exc:
+        raise CliError(
+            "layout_failed", f"Не удалось создать junction {dst} → {storage}: {exc}"
+        )
+
+    warning: Optional[str] = None
+    try:
+        if is_junction(archived_link):
+            tgt = _jt(archived_link)
+            if tgt is not None and _same_path(tgt, storage):
+                remove_junction(archived_link)
+    except (SafetyError, JunctionError, OSError) as exc:
+        warning = f"не удалось снять архивную ссылку {archived_link}: {exc}"
+
+    return str(archived_link), str(dst), warning
+
+
 # --------------------------------------------------------------------------- #
 # archive                                                                     #
 # --------------------------------------------------------------------------- #
@@ -2904,7 +3129,15 @@ def archive_cmd(
                     )
                 moved_from = str(src)
                 moved_to = str(dst)
-                project.local_path = str(dst)
+                # `_Archive/<group>/<slug>` — это ПРЕДСТАВЛЕНИЕ (junction), а не
+                # место жизни проекта. Раньше сюда переписывался local_path, и
+                # канонический путь `_storage/<slug>` терялся: карточка проекта
+                # начинала указывать на ссылку, а не на данные.
+                storage = get_storage_path(project.slug, root=root)
+                if target is not None and storage.exists() and _same_path(target, storage):
+                    project.local_path = str(storage)
+                else:
+                    project.local_path = str(dst)
             else:
                 dst = archive_path(root, group, project.slug)
                 try:
@@ -3044,19 +3277,34 @@ def unarchive_cmd(
         if not keep_path and not is_module and project.local_path:
             src = Path(project.local_path)
             dst = group_path(root, pt.slug, project.slug)
-            try:
-                moved = _move_folder(src, dst)
-            except FileExistsError as exc:
-                raise CliError("conflict", str(exc))
-            if moved:
-                moved_from = str(src)
-                moved_to = str(dst)
-                project.local_path = str(dst)
-            else:
-                warning = (
-                    f"Source path '{src}' не существует — продолжаю с БД update."
+            storage = get_storage_path(project.slug, root=root)
+
+            # Junction-раскладка: данные лежат в `_storage/<slug>`, а
+            # `_Archive/<group>/<slug>` — лишь ссылка. Двигать сюда физику
+            # НЕЛЬЗЯ: `_move_folder` утащил бы само хранилище в Products/ и
+            # разорвал бы все остальные junction'ы на него.
+            if storage.exists() and _same_path(src, storage):
+                archived_link = archive_path(
+                    root, project.archived_group or target_group, project.slug
                 )
-                console.print(f"[yellow]⚠ {warning}[/yellow]")
+                moved_from, moved_to, warning = _unarchive_junction(
+                    storage=storage, archived_link=archived_link, dst=dst
+                )
+                # local_path остаётся каноническим — он и так `_storage/<slug>`.
+            else:
+                try:
+                    moved = _move_folder(src, dst)
+                except FileExistsError as exc:
+                    raise CliError("conflict", str(exc))
+                if moved:
+                    moved_from = str(src)
+                    moved_to = str(dst)
+                    project.local_path = str(dst)
+                else:
+                    warning = (
+                        f"Source path '{src}' не существует — продолжаю с БД update."
+                    )
+                    console.print(f"[yellow]⚠ {warning}[/yellow]")
 
         # БД-обновления.
         now = local_now()
@@ -3582,3 +3830,94 @@ projects_app.add_typer(
 # `atlas types ...` (src/atlas/pm/commands/types.py)                         #
 # `atlas statuses ...` (src/atlas/pm/commands/statuses.py)                   #
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# project adr init                                                            #
+# --------------------------------------------------------------------------- #
+
+
+@project_adr_app.command("init")
+@command
+def adr_init_cmd(
+    ref: Optional[str] = typer.Argument(
+        None, help="slug | UUID проекта. Опустить вместе с --all нельзя.",
+    ),
+    all_projects: bool = typer.Option(
+        False, "--all",
+        help=(
+            "Разложить журнал во всех активных КОДОВЫХ проектах "
+            "(папка существует и под git). Идеи, выгрузки и папки без "
+            "репозитория пропускаются — журнал решений им не нужен."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Показать, куда лягут файлы, ничего не создавая.",
+    ),
+) -> None:
+    """Разложить `docs/adr/` (README + шаблон) — идемпотентно.
+
+    Журнал решений, заведённый задним числом, уже не догоняет принятые
+    решения: «почему» к тому моменту растворилось в истории коммитов. Поэтому
+    раскладываем его отдельной командой по всем живым проектам, а не только
+    новым.
+    """
+    if bool(ref) == all_projects:
+        raise CliError(
+            "precondition",
+            "Укажи либо <ref> проекта, либо --all (но не оба и не ни одного).",
+        )
+
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        if all_projects:
+            # Кодовый проект = папка под git. Раскладывать журнал решений в
+            # заметки-идеи и каталоги с выгрузками бессмысленно: архитектурных
+            # решений там не принимают, а шум в дереве появляется.
+            projects = [
+                p for p in session.execute(select(Project)).scalars().all()
+                if p.archived_at is None
+                and p.local_path
+                and (Path(p.local_path) / ".git").exists()
+            ]
+        else:
+            projects = [_resolve_project_or_die(session, ref)]
+        targets = [(p.slug, Path(p.local_path)) for p in projects if p.local_path]
+
+    rows: list[dict[str, Any]] = []
+    for slug, path in targets:
+        if not path.is_dir():
+            rows.append({"slug": slug, "path": str(path), "created": [],
+                         "skipped": "папки нет на диске"})
+            continue
+        if dry_run:
+            existing = (path / ADR_DIR_REL / "README.md").exists()
+            rows.append({
+                "slug": slug, "path": str(path / ADR_DIR_REL),
+                "created": [] if existing else ["docs/adr/README.md",
+                                                "docs/adr/0000-template.md"],
+                "skipped": "уже есть" if existing else None,
+            })
+            continue
+        created = ensure_adr_scaffold(path)
+        rows.append({
+            "slug": slug, "path": str(path / ADR_DIR_REL),
+            "created": created, "skipped": None if created else "уже есть",
+        })
+
+    total = sum(len(r["created"]) for r in rows)
+    if is_json():
+        emit_data({"dry_run": dry_run, "files_created": total, "projects": rows})
+        return
+
+    emit_table(
+        [{**r, "created": ", ".join(r["created"]) or (r["skipped"] or "—")}
+         for r in rows],
+        title=f"project adr init ({total} файлов)",
+        columns=[
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {"key": "path", "header": "docs/adr", "style": "dim"},
+            {"key": "created", "header": "результат"},
+        ],
+        empty_message="[yellow]Нечего раскладывать.[/yellow]",
+    )

@@ -1,6 +1,6 @@
 ---
 name: atlas
-description: "CLI `atlas` — local-first PM-система портфеля проектов и задач (локальный SQLite, без сети). Команды в ЕД. ЧИСЛЕ, RESTful-канон (подчинённые ресурсы вложены в родителя), --json по умолчанию: project (+ git/layout/tag/member) / task (+ member/checklist) / epic / sprint / hypothesis / person / type / status / tag / backlog / issue / log / backup / config / backend. EN triggers — atlas CLI, add project, create task with cpp, portfolio tasks, add checklist item, make project personal, add hypothesis, archive project, onboard project folder into atlas, local pm cli, sqlite task manager. RU triggers — атлас, добавь проект, создай задачу с ЦКП, задачи портфеля, добавь пункт чек-листа, сделай проект личным, добавь гипотезу, заархивируй проект, онбординг папки в atlas, локальная pm-система, портфель проектов."
+description: "CLI `atlas` — local-first PM-система портфеля проектов и задач (локальный SQLite, без сети). Команды в ЕД. ЧИСЛЕ, RESTful-канон (подчинённые ресурсы вложены в родителя), --json по умолчанию: project (+ git/layout/tag/member) / task (+ member/checklist) / epic / milestone / review / sprint / hypothesis / person / type / status / tag / backlog / issue / log / backup / config / backend. EN triggers — atlas CLI, add project, create task with cpp, portfolio tasks, milestone, what awaits my approval, portfolio review, project passport, add checklist item, make project personal, add hypothesis, archive project, onboard project folder into atlas, local pm cli, sqlite task manager. RU triggers — атлас, добавь проект, создай задачу с ЦКП, задачи портфеля, контрольная точка, что ждёт приёмки, сверка портфеля, где мы стоим, паспорт проекта, добавь пункт чек-листа, сделай проект личным, добавь гипотезу, заархивируй проект, онбординг папки в atlas, локальная pm-система, портфель проектов."
 # Состав УСТАНОВЛЕННОГО навыка (allowlist skillkit): всё, что не перечислено,
 # вырезается. Якорь `/` обязателен — без него `SKILL.md` матчится на любом
 # уровне и копия skills/atlas/ выживает. `/.venv/**` — per-skill venv, из него
@@ -21,7 +21,7 @@ CLI `atlas` — **local-first PM-система портфеля проекто�
 (`~/.atlas/atlas.db`) и работает без сети — самодостаточно, без внешних сервисов.
 
 ```
-Atlas (SQLite, local-first) — проекты · задачи · эпики · идеи · гипотезы
+Atlas (SQLite, local-first) — проекты · контрольные точки · задачи · эпики · идеи · гипотезы
 ```
 
 > **Соглашения CLI:** команды в **единственном числе** (`project`, `task`, `tag`…), а `--json` —
@@ -31,6 +31,11 @@ Atlas (SQLite, local-first) — проекты · задачи · эпики · 
 
 - Портфель: «какие у меня проекты», «создай/обнови/заархивируй проект», список по типу/статусу/тегу.
 - Задачи портфеля: создать задачу с ЦКП, список/карточка, жизненный цикл глаголами (start/done/block…), чек-листы, эпики.
+- **Контрольные точки** (`milestone`): обязательства перед человеком — дата, артефакт, приёмщик.
+  Не путать с эпиком: эпик отвечает «что строим», контрольная точка — «что и когда предъявляем».
+  Состав набирается из эпиков и задач (`include`), конвейер — `ready → start → submit → verify → accept`.
+- **Сверка портфеля** (`review`): что ждёт МОЕЙ приёмки, что в работе у агентов, что просрочено,
+  где дыры планирования и какие проекты забыты. Ответ на «как дела» одной командой.
 - Операционный обзор портфеля (`dashboard`); прописать дисциплину в агентов (`init`).
 - Управление проектом: сделать личным/командным (`project make-personal`, `--team`), теги, git/layout.
 - Гипотезы: фальсифицируемые гипотезы по продукту/маркетингу (`hypothesis`).
@@ -191,6 +196,10 @@ priority = "P1"             # override дефолта батча
 3. **Собери команду**: ref-резолв (slug/number/UUID), обязательные флаги (`--name` на `project add`, `--cpp` на `task add`). Slug придумай сам (kebab-case).
 4. **Выполни.** `--json` — дефолт; человеку добавь `--text`. Деструктивные мутации (`archive`, массовые правки, `--hard`) — сначала покажи что изменится и подтверди.
 5. **Не занимай `modules/`** внутри проекта: имя зарезервировано под junction'ы проектов-модулей (`project add --parent`). Свои пакеты и подсистемы — в `components/`. Иначе junction модуля попадёт внутрь твоего пакета и сломает импорты; `atlas project layout verify` репортит это как `modules_not_reserved`.
+
+6. **Черновики — в `_scratch/`, готовые артефакты — в `_artifacts/`.** `project add` и `project layout init` создают `_scratch/` и вносят его в `.gitignore`. Одноразовые скрипты, пробы и промежуточные выгрузки держи там: в корне они зарастают и уезжают в git. `atlas project layout verify` репортит россыпь как `scratch_clutter`.
+
+7. **Архитектурные решения — в `docs/adr/`.** `project add` раскладывает журнал (README + шаблон) сразу. ПЕРЕД архитектурной правкой прочитай ADR проекта и не «чини» сознательный выбор. Новое ADR — когда решение дорого откатить, без контекста выглядит странно и были реальные альтернативы; отменённому ставят `superseded`, задним числом не переписывают.
 
 ## Examples
 

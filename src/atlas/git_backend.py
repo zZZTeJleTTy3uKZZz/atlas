@@ -78,6 +78,29 @@ class LocalGitOps:
         if rc != 0:
             raise RuntimeError(f"git init failed (rc={rc}): {err}")
 
+    def has_commits(self, path: PathLike) -> bool:
+        """Есть ли в репозитории хотя бы один коммит.
+
+        Нужно, чтобы отличить «пустую папку под git init» от живого репозитория
+        с историей. Без этой проверки init переставлял HEAD на `main` и клал
+        сверху baseline-коммит — вся прежняя история переставала быть
+        достижимой из HEAD и не уезжала в remote.
+        """
+        rc, _, _ = run(["git", "rev-parse", "--verify", "HEAD"], cwd=path)
+        return rc == 0
+
+    def current_branch(self, path: PathLike) -> Optional[str]:
+        """Имя текущей ветки, либо None если HEAD отделён (detached).
+
+        Ветку надо знать, чтобы пушить именно её, а не выдуманный `main`:
+        у существующих репозиториев история может лежать на `master`.
+        """
+        rc, out, _ = run(["git", "symbolic-ref", "--short", "HEAD"], cwd=path)
+        if rc != 0:
+            return None
+        name = out.strip()
+        return name or None
+
     def add_all_commit(self, path: PathLike, message: str) -> str:
         """``git add -A`` + ``git commit -m`` + вернуть SHA HEAD."""
         rc, _, err = run(["git", "add", "-A"], cwd=path)

@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 
 from atlas._time import local_now
 from atlas.db import make_engine, make_session, resolve_db_url
-from atlas.junctions import JunctionError, SafetyError
+from atlas.junctions import JunctionError, SafetyError, is_link
 from atlas import layout as layout_mod
 from atlas.layout import (
     get_logical_path,
@@ -332,8 +332,15 @@ def init_cmd(
         project.local_path = new_local
         project.last_touched_at = local_now()
 
+        # Контракт временных файлов: раскладка без места под черновики
+        # заканчивается россыпью одноразовых скриптов в корне проекта.
+        from atlas.commands.projects import ensure_scratch_contract
+
+        scratch = ensure_scratch_contract(storage)
+
         details = {
             "kind": "init",
+            "scratch": scratch,
             "old_local_path": old_local,
             "new_local_path": new_local,
             "storage": str(storage),
@@ -370,6 +377,7 @@ def init_cmd(
             "no_junction": no_junction,
             "junction_created": junction_created,
             "files_count": files_count,
+            "scratch": scratch,
         },
         text_renderer=_render_init,
     )
@@ -612,9 +620,12 @@ def _check_modules_convention(storage: Path) -> list[dict[str, Any]]:
     if not modules.is_dir():
         return []
 
+    # `is_link`, а не `_is_junction` (atlas#125): вопрос здесь — «ссылка или
+    # настоящая папка», и symlink отвечает на него так же. Прежняя проверка
+    # объявляла symlink нарушением, из-за чего тест конвенции стоял красным.
     offenders = sorted(
         item.name for item in modules.iterdir()
-        if item.name not in _MODULES_IGNORED and not _is_junction(item)
+        if item.name not in _MODULES_IGNORED and not is_link(item)
     )
     if not offenders:
         return []
@@ -625,6 +636,53 @@ def _check_modules_convention(storage: Path) -> list[dict[str, Any]]:
             f"в modules/ лежат не-junction'ы: {', '.join(offenders)}. "
             f"Папка зарезервирована под модули Atlas — перенесите внутренние "
             f"части в components/ (и поправьте импорты)."
+        ),
+    }]
+
+
+# Черновики, которым место в `_scratch/`: одноразовые скрипты и дампы. Порог в
+# 5 штук выбран намеренно — один probe.py в корне это нормально, а вот россыпь
+# из десятка «probe2/dry_run/analyze_*» уже делает дерево нечитаемым и уезжает
+# в git.
+SCRATCH_SUSPECT_SUFFIXES = (".py", ".ps1", ".sh", ".js", ".json", ".csv", ".xlsx")
+SCRATCH_CLUTTER_THRESHOLD = 5
+# Файлы, которые в корне уместны и черновиками не являются.
+SCRATCH_ALLOWED_NAMES = frozenset({
+    "setup.py", "conftest.py", "manage.py", "noxfile.py", "main.py", "__init__.py",
+    "package.json", "package-lock.json", "tsconfig.json", "pyrightconfig.json",
+    "components.json", "biome.json", "eslint.config.js", "vite.config.js",
+})
+
+
+def _check_scratch_clutter(storage: Path) -> list[dict[str, Any]]:
+    """Найти россыпь черновых скриптов/выгрузок в корне проекта.
+
+    Беда: одноразовые `probe2.py`, `dry_run.py`, `analyze_*.py` копятся в корне,
+    уезжают в git и хоронят под собой настоящую структуру проекта. Контракт —
+    такие файлы живут в `_scratch/`.
+    """
+    if not storage.is_dir():
+        return []
+    try:
+        entries = list(storage.iterdir())
+    except OSError:
+        return []
+
+    loose = sorted(
+        item.name for item in entries
+        if item.is_file()
+        and item.suffix.lower() in SCRATCH_SUSPECT_SUFFIXES
+        and item.name not in SCRATCH_ALLOWED_NAMES
+    )
+    if len(loose) < SCRATCH_CLUTTER_THRESHOLD:
+        return []
+    shown = ", ".join(loose[:8]) + ("…" if len(loose) > 8 else "")
+    return [{
+        "name": "scratch_clutter",
+        "ok": False,
+        "issue": (
+            f"в корне проекта {len(loose)} черновых файлов ({shown}). "
+            f"Перенесите одноразовое в _scratch/ — оно не должно попадать в git."
         ),
     }]
 
@@ -692,6 +750,7 @@ def _verify_one(
             )
             checks.extend(extra)
             checks.extend(_check_modules_convention(storage))
+            checks.extend(_check_scratch_clutter(storage))
     ok = all(c.get("ok", False) for c in checks)
     return {
         "ok": ok,
@@ -1131,4 +1190,141 @@ def list_storage_cmd() -> None:
             {"key": "type", "header": "type", "style": "magenta"},
         ],
         empty_message="[yellow]В БД нет проектов.[/yellow]",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# orphans                                                                     #
+# --------------------------------------------------------------------------- #
+
+# Каталоги в `_storage/`, которые НЕ являются проектами: черновики, бэкапы,
+# worktree-пул и прочая служебка. Без этого списка аудит кричал бы на них как
+# на незарегистрированные проекты и тонул бы в шуме.
+SERVICE_DIR_PREFIXES = ("_", ".")
+
+ORPHAN_KINDS = ("unregistered", "slug_mismatch", "path_broken")
+
+
+def collect_orphans(session: Session, *, root: Path) -> list[dict[str, Any]]:
+    """Найти расхождения между реальными каталогами `_storage/` и записями БД.
+
+    Беда, которую ловим: БД и диск расходятся молча. Папка есть, а проекта нет
+    (её никто не ведёт); проект есть, а его local_path указывает в никуда или
+    на папку с другим именем — и тогда любая операция layout/git промахивается
+    мимо реальных файлов.
+
+    Классы находок:
+    - ``unregistered``  — каталог в `_storage/` без проекта с таким slug;
+    - ``slug_mismatch`` — local_path существует, но зовётся не как slug;
+    - ``path_broken``   — записанный путь (или `_storage/<slug>`) не существует.
+
+    Смотрим ВСЕ записи: и модули контейнеров (parent_id), и архивные —
+    исключение любой из этих групп раньше и создавало ложных «сирот».
+    """
+    storage_root = root / layout_mod.STORAGE_DIR_NAME
+    projects = list(session.execute(select(Project)).scalars().all())
+
+    # Каталог считается «занятым», если на него смотрит либо slug проекта, либо
+    # его записанный local_path. Иначе переименованная папка попадала бы сразу
+    # в два класса — и как сирота, и как несовпадение slug'а.
+    claimed: set[str] = set()
+    for project in projects:
+        claimed.add(str(layout_mod.get_storage_path(project.slug, root=root)).lower())
+        if project.local_path:
+            claimed.add(str(Path(project.local_path)).lower())
+
+    findings: list[dict[str, Any]] = []
+
+    if storage_root.exists():
+        for entry in sorted(storage_root.iterdir()):
+            if not entry.is_dir():
+                continue
+            if entry.name.startswith(SERVICE_DIR_PREFIXES):
+                continue
+            if str(entry).lower() in claimed:
+                continue
+            findings.append({
+                "kind": "unregistered",
+                "slug": entry.name,
+                "path": str(entry),
+                "detail": "каталог есть на диске, проекта с таким slug нет в БД",
+            })
+
+    for project in projects:
+        expected = layout_mod.get_storage_path(project.slug, root=root)
+        recorded = Path(project.local_path) if project.local_path else None
+        target = recorded or expected
+
+        if not target.exists():
+            if recorded is None:
+                # Запись без физики — законное состояние (проект-заготовка).
+                # Расхождение — это КОГДА путь записан, но ведёт в никуда:
+                # layout/git-команды по нему молча промахиваются мимо файлов.
+                continue
+            findings.append({
+                "kind": "path_broken",
+                "slug": project.slug,
+                "path": str(target),
+                "detail": "local_path не существует",
+            })
+            continue
+
+        # Записи-заготовки живут файлом `<slug>.md` (_Ideas) — расширение это не
+        # расхождение, иначе аудит тонул бы в ложных срабатываниях на идеях.
+        actual_name = target.stem if target.is_file() else target.name
+        # normcase, а не ==: на Windows `AI-ecosystem-CORE` и `ai-ecosystem-core`
+        # — одна и та же папка, и ругаться на регистр значит выдавать ложные
+        # расхождения там, где чинить нечего.
+        if os.path.normcase(actual_name) != os.path.normcase(project.slug):
+            findings.append({
+                "kind": "slug_mismatch",
+                "slug": project.slug,
+                "path": str(target),
+                "detail": f"каталог зовётся '{actual_name}', а проект — '{project.slug}'",
+            })
+
+    return findings
+
+
+@layout_app.command("orphans")
+@command
+def orphans_cmd(
+    kind: Optional[str] = typer.Option(
+        None, "--kind",
+        help=f"Показать только один класс: {' | '.join(ORPHAN_KINDS)}.",
+    ),
+) -> None:
+    """Аудит сирот: каталоги без проектов и проекты без каталогов."""
+    if kind is not None and kind not in ORPHAN_KINDS:
+        raise CliError(
+            "bad_kind",
+            f"Неизвестный класс '{kind}'. Допустимо: {', '.join(ORPHAN_KINDS)}.",
+        )
+
+    engine = make_engine(_db_url())
+    root = get_projects_root()
+    with make_session(engine) as session:
+        findings = collect_orphans(session, root=root)
+
+    if kind is not None:
+        findings = [f for f in findings if f["kind"] == kind]
+
+    if is_json():
+        emit_data({
+            "count": len(findings),
+            "by_kind": {k: sum(1 for f in findings if f["kind"] == k) for k in ORPHAN_KINDS},
+            "findings": findings,
+        })
+        return
+
+    emit_table(
+        findings,
+        title=f"layout orphans ({len(findings)})",
+        columns=[
+            {"key": "kind", "header": "kind", "style": "red", "no_wrap": True},
+            {"key": "slug", "header": "slug", "style": "cyan", "no_wrap": True},
+            {"key": "path", "header": "path", "style": "dim"},
+            {"key": "detail", "header": "detail"},
+        ],
+        empty_message="[green]✓ Расхождений между _storage и БД нет.[/green]",
     )

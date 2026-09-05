@@ -223,25 +223,40 @@ def perform_git_init(
     )
 
     local_ops = LocalGitOps()
-    if not (local / ".git").exists():
-        local_ops.init(local)
-    # ВАЖНО: set_default_branch ДО первого commit, иначе HEAD будет на
-    # `master` и ни одна refspec на `main` не пройдёт push (W45-32n).
-    local_ops.set_default_branch(local, "main")
-    # commit может упасть если staged пуст — это OK для каллера, который
-    # уже создал хотя бы один файл (canonical README).
-    local_ops.add_all_commit(local, commit_message)
+    # Репозиторий с историей трогать нельзя: раньше init безусловно переставлял
+    # HEAD на `main` и клал сверху baseline-коммит — прежние коммиты переставали
+    # быть достижимыми из HEAD, в remote уезжал «чистый» проект, а история
+    # оставалась только в локальном .git и выглядела потерянной.
+    adopted = (local / ".git").exists() and local_ops.has_commits(local)
+    if adopted:
+        branch = local_ops.current_branch(local)
+        if branch is None:
+            raise RuntimeError(
+                f"'{project.slug}': в {local} уже есть история, но HEAD отделён "
+                f"(detached). Переключись на ветку (`git switch <branch>`) и "
+                f"повтори — иначе непонятно, что публиковать."
+            )
+    else:
+        if not (local / ".git").exists():
+            local_ops.init(local)
+        # ВАЖНО: set_default_branch ДО первого commit, иначе HEAD будет на
+        # `master` и ни одна refspec на `main` не пройдёт push (W45-32n).
+        local_ops.set_default_branch(local, "main")
+        # commit может упасть если staged пуст — это OK для каллера, который
+        # уже создал хотя бы один файл (canonical README).
+        local_ops.add_all_commit(local, commit_message)
+        branch = "main"
 
     url = backend.create_remote(group_path, project.slug, private=private)
 
     # add_remote теперь idempotent (W45-32b).
     local_ops.add_remote(local, "origin", url)
-    local_ops.push(local, branch="main")
+    local_ops.push(local, branch=branch)
 
     now = local_now()
     project.git_remote_url = url
     project.git_repo_url = url  # W45-32k: sync legacy field too
-    project.git_default_branch = "main"
+    project.git_default_branch = branch
     project.git_provider = provider
     project.git_initialized_at = now
     project.git_last_pushed_at = now
@@ -257,14 +272,17 @@ def perform_git_init(
                 "group": group_path,
                 "provider": provider,
                 "private": private,
+                "adopted": adopted,
             },
         )
 
     return {
         "url": url,
         "group_path": group_path,
-        "branch": "main",
+        "branch": branch,
         "provider": provider,
+        # adopted=True — репозиторий уже существовал, baseline-коммит не делали.
+        "adopted": adopted,
     }
 
 
@@ -320,6 +338,7 @@ def init_cmd(
             "branch": result["branch"],
             "group": result["group_path"],
             "provider": result["provider"],
+            "adopted": result["adopted"],
         },
         text_renderer=lambda d: (
             console.print(f"[green]✓ Git initialized for '{d['slug']}'[/green]"),
@@ -327,6 +346,12 @@ def init_cmd(
             console.print(f"  URL:      {d['url']}"),
             console.print(f"  Branch:   {d['branch']}"),
             console.print(f"  Group:    {d['group']}"),
+            # Молчание тут было опасным: пользователь не понимал, сделали ли
+            # ему baseline-коммит поверх его истории или подхватили как есть.
+            console.print(
+                "  [yellow]Существующий репозиторий подхвачен: история "
+                "сохранена, baseline-коммит не создавался.[/yellow]"
+            ) if d["adopted"] else None,
         ),
     )
 

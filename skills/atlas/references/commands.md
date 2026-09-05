@@ -34,13 +34,16 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 | `project move <ref> --to-type <type>` | сменить тип + физ. mv между группами. |
 | `project reorganize [--dry-run\|--apply]` | синхронизировать БД ↔ ФС. |
 
-`project add` флаги: `--name*`, `--type` (деф. personal-project), `--slug`, `--prefix`, `--priority P0..P3` (P2), `--status` (experiment), `--description`, `--one-line`, `--deadline YYYY-MM-DD`, `--local-path`, `--tag/-t` (многократно), `--setup-layout/--no-setup-layout` (on), `--canonical/--no-canonical` (on), `--init-git/--no-init-git` (off), `--private/--public`, `--group`, `--commit-message`. **Владелец/видимость**: `--team` (командный, владелец — организация; по умолчанию личный/твой), `--owner <slug>` (чужой владелец → командный), `--parent <ref>` (модуль контейнера). Контейнер: `update --parent/--no-parent`; `get` показывает Parent (у модуля) и Modules (у контейнера); защита от цикла. Физика модулей (вложенные репо + junction) — в работе (spec #3).
+`project add` флаги: `--name*`, `--type` (деф. personal-project), `--slug`, `--prefix`, `--priority P0..P3` (P2), `--status` (experiment), `--description`, `--one-line`, `--deadline YYYY-MM-DD`, `--local-path`, `--tag/-t` (многократно), `--setup-layout/--no-setup-layout` (on), `--canonical/--no-canonical` (on), `--init-git/--no-init-git` (off), `--private/--public`, `--group`, `--commit-message`. **Владелец/видимость**: `--team` (командный, владелец — организация; по умолчанию личный/твой), `--owner <slug>` (чужой владелец → командный), `--parent <ref>` (модуль контейнера). Контейнер: `update --parent/--no-parent`; `get` показывает Parent (у модуля) и Modules (у контейнера); защита от цикла. Физика модулей (вложенные репо + junction) — в работе (spec #3). `project update` дополнительно умеет `--no-local-path` (снять путь: папки физически нет — запись честнее сломанного пути).
 
 ### project git — Git/GitLab (БД atlas = канон; не запускай `git init`/`glab` руками)
 `init <ref> [--group --private/--public]` · `status <ref>` · `push <ref>` · `link <ref> --url <u>` · `move <ref> --to-group <path>` · `status-all [--type --status --tag]` · `sync-from-remote [--dry-run/--apply]`. Backend: `glab` (env `GITLAB_TOKEN`). Namespace: `<org-namespace>/…` (общее) / `<personal-namespace>/…` (личное, тег `owner:personal`).
 
+### project adr — журнал архитектурных решений
+`adr init <ref>` · `adr init --all [--dry-run]` — разложить `docs/adr/` (README + шаблон `0000-template.md`), идемпотентно. `--all` берёт активные КОДОВЫЕ проекты (папка есть и под git); идеи и каталоги с выгрузками пропускает. Правило: ADR читают ПЕРЕД архитектурной правкой; заводят, когда решение дорого откатить + без контекста выглядит странно + были альтернативы; отменённому ставят `superseded`, задним числом не переписывают.
+
 ### project layout — junction-раскладка (`_storage/<slug>/` + junction-ссылки)
-`init <ref> [--copy-first --dry-run --confirm]` · `sync <ref>` (пересоздать junction по type+status) · `verify [<ref>] [--quick]` · `migrate-all [--type --status --tag --confirm]` · `list-storage`. Физика в `_storage/`, в логических папках (`Clients/Products/Tests/_Inbox/_Archive`) — junction (`mklink /J`). Смена статуса не двигает данные, только junction.
+`init <ref> [--copy-first --dry-run --confirm]` · `sync <ref>` (пересоздать junction по type+status) · `verify [<ref>] [--quick]` · `migrate-all [--type --status --tag --confirm]` · `list-storage` · `orphans [--kind unregistered|slug_mismatch|path_broken]` (аудит расхождений диск↔БД: каталог `_storage/` без проекта, проект с несуществующим `local_path`, каталог с именем не как slug; смотрит и модули, и архивные; служебные каталоги `_*`/`.* ` пропускает). Физика в `_storage/`, в логических папках (`Clients/Products/Tests/_Inbox/_Archive`) — junction (`mklink /J`). Смена статуса не двигает данные, только junction.
 
 ---
 
@@ -91,8 +94,55 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 задачи ссылаются на запись эпика; поднять обратно целиком — `backlog convert <ref> --as epic`.
 Суб-группа изоляции веток — `epic worktree create|list|merge|remove <ref>` (git worktree на ветке `epic/<slug>`; детали — [projects-and-layout.md](projects-and-layout.md)).
 
+## milestone — контрольные точки (обязательства перед человеком)
+
+**Не путать с эпиком.** Эпик отвечает на «что мы строим», контрольная точка — на «что и когда мы
+предъявляем человеку»: у неё обязательны дата, артефакт и приёмщик, и закрыть её вправе только
+приёмщик. «Показали клинике авторассылку и согласовали тексты» — контрольная точка; «написали
+коннектор к МИС» — эпик.
+
+`add --project* --title* [--criterion --due YYYY-MM-DD --acceptor --track --slug]` ·
+`list [--project --state --all]` · `get <ref>` ·
+`update <ref> [--title --criterion --due --acceptor --track --artifact]`.
+
+**Состав** (членство многие-ко-многим, НЕ иерархия — одна и та же работа может входить и в
+промежуточное демо, и в финальную сдачу):
+`include <ref> --epic <ref> | --task <ref>` · `exclude <ref> --epic|--task <ref>`.
+Состав не выходит за границы проекта. КТ готова к сдаче, когда закрыт весь состав.
+
+**Конвейер** (человек ставит цель → агент работает → человек принимает):
+`ready <ref>` (planning → ready_for_ai; **закрыт без критерия, даты и состава**) ·
+`start <ref>` (агент взял в цикл) ·
+`submit <ref> --artifact <url> [--force]` (→ ready_for_review; **без артефакта нельзя**, `--force` —
+осознанная сдача при незакрытом составе) ·
+`verify <ref>` (я посмотрел) · `accept <ref> [--outcome confirmed|adjusted|dropped]` ·
+`reject <ref> --reason*` (вернуть на доработку) · `block <ref> --reason*` / `unblock <ref>` ·
+`cancel <ref> --reason*` (обязательство снято: не сдана и не ждёт — её больше нет в плане).
+
+## review — сверка портфеля одной командой
+
+`atlas review [--project <slug>] [--all]` — ответ на «как дела» и на «где мы себя обманываем»:
+что ждёт МОЕЙ приёмки, что крутится у агентов, что просрочено и заблокировано, дыры планирования
+(КТ без критерия / даты / приёмщика / состава, проекты без КТ и без паспорта), **забытые проекты**
+(числятся активными, но никто не трогал 30+ дней — довести или приостановить осознанно), размер
+зависшей очереди синхронизации. По умолчанию смотрит только проекты, которые ведутся как проекты
+(клиентские, с живыми КТ или с начатым паспортом); `--all` — весь активный портфель.
+
+Паспорт проекта заполняется через `project update <ref> --point-a --point-b --done-criteria
+--appetite-days --hard-deadline` (+ мосты `--b24-item-id --b24-entity-type-id`).
+
 ## sprint — итерации (спринты, Scrum-тайм-боксы)
 `add --project* …` (окно дат) · `list` · `get <ref>` · **жизненный цикл**: `start <ref>` / `close <ref>` / `cancel <ref>` · `assign <sprint-ref> <task-ref…>` (набрать задачи) · `board <ref>` (доска задач спринта) · `velocity` (метрика скорости). Задачи связываются с вехами и через `epic` (`task --epic`). Точные флаги — `atlas sprint --help`.
+
+## task depends — зависимости задач: что кого ждёт (суб-ресурс task)
+
+`task depends add <ждущая> --on <держатель> [--reason «зачем ждём»]` · `task depends remove <ждущая> --on <держатель>` · `task depends list [<задача>]`.
+
+**`task start` ОТКАЗЫВАЕТ**, пока держатель не закрыт (done/cancelled) — это отказ, а не предупреждение: предупреждение, которое можно проигнорировать, проигнорируют, и порядок работ вернётся в голову. Отказ называет держателя и причину.
+
+Главный случай — межпроектный: задача клиентского проекта ждёт задачу в ките, и знает об этом только тот, кто заводил обе. `list` без аргумента показывает все связи; с задачей — обе стороны: `waits_for` («почему стою») и `blocks` («кого я задерживаю» — видно только отсюда).
+
+Круг ожидания не создаётся: связь, замыкающая круг, отбивается с показом пути. Две задачи, ждущие друг друга, обе перестали бы браться в работу, а по отдельности причина не видна. В сверке (`atlas review`) ждущие задачи идут отдельной группой: их не надо распределять, надо разблокировать.
 
 ## task checklist — пункты чек-листа задачи (суб-ресурс task)
 `task checklist add <task-ref> --text* [--due YYYY-MM-DD]` · `task checklist list <task-ref>` · `task checklist check <item-id> [--uncheck]` · `task checklist delete <item-id>`.
@@ -102,6 +152,14 @@ Ref-резолв (где принимается `<ref>`): project — slug | ful
 
 ## hypothesis — реестр гипотез (Atlas Hypothesis Ledger)
 `add --project* --title* [--statement «если X то метрика Y↑ на Z» --metric --baseline --target --method --task --confidence H|M|L --status draft|testing|measured|closed --slug]` · `list` · `get <ref>` · `update <ref> --…` (status-переходы авто-timestamp) · `close <ref> --verdict …` (status=closed, closed_at, опц. замер) · `delete <ref> [--hard]`.
+
+## counterparty — контрагенты: с кем у нас отношения (уровень НАД проектом)
+
+`counterparty add --name* [--kind person|company --slug --note]` · `counterparty list [--kind]` · `counterparty get <ref>` · `counterparty update <ref> --…` · `counterparty attach <проект> --customer <ref> | --owner <ref>` · `counterparty orphans`.
+
+Зачем отдельная сущность, а не тег: проект отвечает на «что делаем», контрагент — на «для кого» и «чьё это». Один контрагент держит несколько проектов, и вопрос «что у нас по клиенту» без него не отвечается — приходится помнить, какие слаги чьи.
+
+**Две роли, и путать их дорого.** `--customer` — заказчик, тот, кто платит и принимает; `--owner` — владелец, чьё это дело (у своих продуктов заказчика нет вовсе, а владелец есть). Проект без контрагента виден в `orphans`: это дыра, а не норма — пока принадлежность не проставлена, работа по проекту невидима на уровне отношений.
 
 ## person — люди портфеля (реестр; бывш. `participant`)
 `person add --name --kind human|ai_agent|contractor --slug --role …` · `person list` · `person get <ref>` · `person update <ref>` · `person delete <ref> [--hard --force --soft]`. `--force` каскадит FK (снимает с проектов/задач), `--soft` = is_active=False. (Доменная модель в БД/аудите — по-прежнему `Participant`; переименован только CLI-фасад.)

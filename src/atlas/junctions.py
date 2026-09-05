@@ -82,16 +82,15 @@ def is_junction(p: Path) -> bool:
     Не существующий путь / файл / обычная директория → False.
     """
     p = Path(p)
-    try:
-        if not p.exists():
-            # Симлинк на несуществующий target тоже бывает; islink проверяет
-            # сам линк независимо от target.
-            if os.path.islink(str(p)):
-                return True
-            return False
-    except OSError:
-        return False
-
+    # БЕЗ `p.exists()` (atlas#125). Он идёт ПО ЦЕЛИ, а `os.path.islink()` для
+    # junction всегда False — вместе они давали «нет ссылки» на БИТОЙ junction
+    # (цель удалена, ссылка осталась). Последствие не косметическое: layout
+    # считал место свободным и шёл создавать ссылку заново, получая
+    # `FileExistsError`, — а починить битую было некому, потому что её никто не
+    # видел. Проверено сравнением с реализацией skillkit: та отвечала «ссылка»,
+    # эта — «нет», и расхождение жило молча.
+    #
+    # Ниже всё решает `lstat`: он смотрит на САМУ ссылку, независимо от цели.
     if not is_windows():
         # На POSIX используем стандартный islink.
         return os.path.islink(str(p))
@@ -117,6 +116,33 @@ def is_junction(p: Path) -> bool:
     # директорию-reparse-point junction'ом. Этого достаточно для нашей задачи,
     # так как мы создаём только junction.
     return True
+
+
+def is_link(p: Path) -> bool:
+    """ЛЮБАЯ ссылка: junction ИЛИ symlink (atlas#125).
+
+    Отличается от :func:`is_junction` вопросом, а не строгостью. `is_junction`
+    спрашивает «это наша ссылка, созданная layout'ом» — там важен тип, потому
+    что удалять и пересоздавать мы вправе только свои. Здесь вопрос другой:
+    «лежит ли тут ссылка вместо настоящей папки», и на него symlink отвечает так
+    же, как junction, — он тоже не схлопывается с одноимённым пакетом.
+
+    На смешении этих двух вопросов держался красный тест
+    `test_junction_in_modules_is_clean`: он создаёт symlink (junction в тестовой
+    песочнице не всегда доступен), а проверка конвенции спрашивала про junction —
+    и объявляла ссылку «не-junction'ом», то есть нарушением.
+    """
+    p = Path(p)
+    if os.path.islink(str(p)):
+        return True
+    if not is_windows():
+        return False
+    try:
+        st = p.lstat()  # lstat, а не stat: не идём по цели (битая ссылка — тоже ссылка)
+    except OSError:
+        return False
+    attrs = getattr(st, "st_file_attributes", None)
+    return bool(attrs and attrs & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def junction_target(p: Path) -> Optional[Path]:

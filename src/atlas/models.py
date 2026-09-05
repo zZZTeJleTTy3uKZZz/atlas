@@ -114,6 +114,20 @@ class Project(Base):
     notion_project_id: Mapped[Optional[str]] = mapped_column(String(100))
     notebooklm_id: Mapped[Optional[str]] = mapped_column(String(100))
     b24_company_id: Mapped[Optional[str]] = mapped_column(String(100))
+    # --- Паспорт проекта (эпик «Контрольные точки») ------------------------
+    # Точка А → точка Б + критерий завершения: без них проект нельзя увести
+    # в производство. `appetite_days` — БЮДЖЕТ времени (Shape Up), а не оценка:
+    # упёрлись в срок — режем объём, дату не двигаем. Проверка инвариантов —
+    # в commands/milestone.py, не в модели (модель хранит, правила — в слое CLI).
+    point_a: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    point_b: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    done_criteria: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    appetite_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hard_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Связь с карточкой смарт-процесса «Проекты» на портале. Само знание о
+    # Битриксе живёт в коннекторе; здесь — только идентификаторы-мосты.
+    b24_item_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    b24_entity_type_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     renewal_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     archived_group: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     # --- Git integration (миграция 006) ------------------------------------
@@ -165,6 +179,12 @@ class Project(Base):
         DateTime, default=local_now, onupdate=local_now, nullable=False
     )
     last_touched_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # Когда последний раз РАБОТАЛИ над проектом, а не правили его карточку.
+    # Это разные вещи, и путать их дорого: last_touched_at обновляется при любом
+    # изменении записи, поэтому проект, которому вчера поставили git, выглядел
+    # свежим, а клиент, по чьему модулю работа шла сегодня, — заброшенным с июля.
+    # Заполняется извне по свежести файлов проекта и его модулей.
+    last_work_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     __table_args__ = (
@@ -661,6 +681,147 @@ class Sprint(Base):
             name="ck_sprints_status",
         ),
         Index("idx_sprints_project", "project_id"),
+    )
+
+
+class Milestone(Base):
+    """Контрольная точка — ОБЯЗАТЕЛЬСТВО перед человеком, а не кусок работы.
+
+    Отличие от эпика принципиальное, и путать их дорого:
+
+    | | Эпик | Контрольная точка |
+    |---|---|---|
+    | отвечает на | что мы строим | что и когда предъявляем человеку |
+    | дата | не обязательна | ОБЯЗАТЕЛЬНА |
+    | приёмщик | нет | ОБЯЗАТЕЛЕН |
+    | артефакт | нет | ОБЯЗАТЕЛЕН при сдаче |
+    | закрывает | автотесты / автор | ТОЛЬКО приёмщик |
+
+    «Показали клинике авторассылку и согласовали тексты» — контрольная точка.
+    «Написали коннектор к МИС» — эпик. Поэтому связь эпиков и КТ — многие-ко-
+    многим через `milestone_items` (см. ниже), без владения в любую сторону:
+    эпик может не входить ни в одну КТ, КТ может собирать куски трёх эпиков.
+
+    Наружу (в Битрикс) уезжает ТОЛЬКО этот уровень и агрегаты по нему; задачи
+    и эпики остаются локальными — иначе трекер превращается в свалку, ради
+    ухода от которой всё и затевалось.
+    """
+
+    __tablename__ = "milestones"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    slug: Mapped[Optional[str]] = mapped_column(String(100), unique=True)
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Критерий готовности: что должно быть правдой, чтобы КТ считалась сданной.
+    # Формулируется как проверяемое снаружи: «демо прошло», а не «код написан».
+    criterion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    acceptor_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("participants.id"), nullable=True
+    )
+    # Доказательство прохождения: запись демо, стенд, документ, коммит.
+    artifact_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    # Конвейер: человек ставит цель → агент работает → человек принимает.
+    state: Mapped[str] = mapped_column(
+        String(20), default="planning", server_default="planning", nullable=False
+    )
+    # Итог ревизии. Ровно три исхода: «перенесли и забыли» — не исход.
+    outcome: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Трек/компонент большого продукта (backend, web, cli, …) — разрез, а не
+    # сущность: изолирует контекст агента и режет прогресс по компонентам.
+    track: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Мост к задаче-КТ в Битриксе (приёмка там штатная: «принимать работу»).
+    b24_task_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    backend_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=local_now, onupdate=local_now, nullable=False
+    )
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('planning','ready_for_ai','ai_running','ready_for_review',"
+            "'human_verified','client_accepted','blocked','cancelled')",
+            name="ck_milestones_state",
+        ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome IN ('confirmed','adjusted','dropped')",
+            name="ck_milestones_outcome",
+        ),
+        Index("idx_milestones_project", "project_id"),
+        Index("idx_milestones_state", "state"),
+        Index("idx_milestones_due", "due_date"),
+    )
+
+
+class MilestoneItem(Base):
+    """Состав контрольной точки: какие эпики и задачи в неё входят.
+
+    Именно членство, а не иерархия — поэтому отдельная таблица, а не поле
+    `milestone_id` в задаче: одна и та же работа может входить и в промежуточное
+    демо, и в финальную сдачу. КТ готова к сдаче, когда закрыт весь её состав.
+
+    FK на epics/tasks намеренно не создаётся на уровне БД (как и у tasks.epic_id):
+    SQLite в batch-режиме не умеет безымянные FK, а состав живёт дольше, чем
+    отдельные задачи. Целостность обеспечивает слой команд.
+    """
+
+    __tablename__ = "milestone_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    milestone_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("milestones.id", ondelete="CASCADE"), nullable=False
+    )
+    item_kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    item_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("item_kind IN ('epic','task')", name="ck_milestone_items_kind"),
+        Index("idx_milestone_items_ms", "milestone_id"),
+        Index("uq_milestone_items", "milestone_id", "item_kind", "item_id", unique=True),
+    )
+
+
+class TaskDependency(Base):
+    """Задача ждёт другую задачу. Именно ЖДЁТ, а не «связана с».
+
+    Зависимость односторонняя и означает ровно одно: пока та задача не закрыта,
+    за эту браться нельзя. Без такой связи порядок работ живёт в голове, и
+    выясняется он в момент, когда исполнитель уже взял задачу и упёрся —
+    потерянное время плюс занятая ёмкость.
+
+    Межпроектность здесь не оговорка, а главный случай. Внутри одного проекта
+    порядок ещё виден по эпику; настоящая беда — когда задача клиентского
+    проекта ждёт задачу в ките, и об этом знает только тот, кто заводил обе.
+
+    FK на tasks намеренно нет, как и у `milestone_items`: SQLite в batch-режиме
+    не умеет безымянные FK, а целостность держит слой команд — он же умеет
+    сказать про висячую ссылку понятной фразой вместо отказа драйвера.
+    """
+
+    __tablename__ = "task_dependencies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    #: Кто ждёт.
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    #: Кого ждут.
+    depends_on_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    #: Зачем ждём — одной фразой. Не украшение: через месяц «А ждёт Б» без
+    #: причины невозможно проверить на актуальность, и связь живёт вечно.
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("task_id != depends_on_id", name="ck_task_dep_not_self"),
+        Index("uq_task_dependencies", "task_id", "depends_on_id", unique=True),
+        Index("idx_task_dep_blocker", "depends_on_id"),
     )
 
 

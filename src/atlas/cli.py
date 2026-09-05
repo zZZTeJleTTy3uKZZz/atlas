@@ -18,7 +18,11 @@ from .commands.backlog import backlog_app
 from .commands.backup import backup_app
 from .commands.config import config_app
 from .commands.epic import epic_app
+from .commands.counterparty import counterparty_app
+from .commands.milestone import milestone_app
+from .commands.review import review_app
 from .commands import epic_worktree as _epic_worktree  # noqa: F401  # навешивает `epic worktree`
+from .commands import task_dependency as _task_dependency  # noqa: F401  # навешивает `task depends`
 from .commands.hypothesis import hypothesis_app
 from .commands.issue import issue_app  # импорт также навешивает `task handoff` на task_app
 from .commands.participants import app as participants_app
@@ -55,9 +59,12 @@ app = build_root_app(
 )
 
 # Команды-сущности — в единственном числе, единообразно.
+app.add_typer(counterparty_app, name="counterparty")   # контрагенты: с кем у нас отношения (уровень над проектом)
 app.add_typer(projects_app, name="project")          # проекты портфеля (CRUD, теги, архив)
 app.add_typer(task_app, name="task")             # задачи (CRUD, ЦКП)
 app.add_typer(epic_app, name="epic")                 # эпики (тематическая группировка)
+app.add_typer(milestone_app, name="milestone")       # контрольные точки — обязательства перед человеком (дата, артефакт, приёмка)
+app.add_typer(review_app, name="review")              # сверка портфеля: что ждёт меня и где дыры планирования
 app.add_typer(sprint_app, name="sprint")             # спринты (Scrum-тайм-боксы) + velocity/board
 app.add_typer(hypothesis_app, name="hypothesis")     # гипотезы (Atlas Hypothesis Ledger)
 app.add_typer(participants_app, name="person")       # люди портфеля (реестр; доменная модель — Participant)

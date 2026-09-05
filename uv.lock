@@ -48,8 +48,8 @@ wheels = [
 ]
 
 [[package]]
-name = "atlas"
-version = "0.2.1"
+name = "atlas-pm"
+version = "0.3.14"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

@@ -3,14 +3,14 @@
 # PyPI); import-пакет и команда остаются `atlas`. Ставится: uv tool install atlas-pm /
 # pipx install atlas-pm.
 name = "atlas-pm"
-version = "0.4.3"
+version = "0.4.4"
 description = "Atlas — local-first PM-система для портфеля проектов и задач"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Atlas CLI contributors" }]
 requires-python = ">=3.11"
 dependencies = [
-    "httpx>=0.27",
+    "httpx[socks]>=0.27",
     "typer>=0.12",
     "rich>=13.7",
     "python-dotenv>=1.0",

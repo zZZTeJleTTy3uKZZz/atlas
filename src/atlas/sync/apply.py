@@ -40,15 +40,17 @@ def _free_slug(session: Session, model, slug: str) -> str:
 def _adopt_by_slug(session: Session, model, bid: str, payload: dict):
     """Усыновить локальную запись, созданную ДО подключения к хабу.
 
-    Такая запись имеет тот же slug, но пустой backend_id: по backend_id она не
-    находится, а слепой insert падает на UNIQUE (slug) и намертво заклинивает
-    pull (курсор не двигается). Возвращает запись, если усыновили, иначе None.
+    Такая запись имеет тот же slug, но пустой backend_id либо старый локальный
+    ID вместо ID ядра. По backend_id она не находится, а слепой insert создаёт
+    дубль с суффиксом. Возвращает запись, если усыновили, иначе None.
     """
     slug = payload.get("slug")
     if not slug:
         return None
     existing = _by_slug(session, model, slug)
-    if existing is not None and not existing.backend_id:
+    if existing is not None and (
+        not existing.backend_id or existing.backend_id == existing.id
+    ):
         existing.backend_id = bid
         return existing
     return None

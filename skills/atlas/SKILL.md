@@ -68,8 +68,9 @@ Atlas (SQLite, local-first) — проекты · контрольные точ�
 (итерации) · `hypothesis` (ledger) · `person` (люди портфеля, бывш. `participant`) ·
 `type` / `status` / `tag` (справочники) · `backlog` (**единый интейк** идей, DB-first;
 `convert --as task | epic | project` со scaffolding layout/canonical/git) · `issue`
-(bug/feature/**handoff**) · `log` (`list` обогащённо + `raw` аудит) · `backup` (run/status +
-суб-группа `schedule`) · `profile`.
+(bug/feature/**handoff**) · `comm` (точки коммуникации: встречи, созвоны, заметки —
+`add`/`part`/`fact`/`link`/`list`/`show`/`search`/`import`) · `log` (`list` обогащённо +
+`raw` аудит) · `backup` (run/status + суб-группа `schedule`) · `profile`.
 
 ### Перенос и возврат — сущности НЕ приколочены к проекту
 
@@ -165,6 +166,15 @@ Ref-резолв: project — slug|UUID|short-UUID; task — number|slug|UUID; �
 - **`atlas backend connect <url> [--key]`** — опционально подключить внешний backend (синк); ключ — в
   защищённый secret-store. `atlas backend status` — статус; `atlas backend disconnect` — отключить.
   **Local-first**: всё работает и без подключения; `sync push/pull` — только после `connect`.
+- **Когда синк не доехал.** `atlas sync outbox status` — сколько в очереди (`pending`),
+  отправлено (`sent`) и провалилось (`failed`). Разрыв связи после пяти попыток кладёт
+  запись в `failed`, и сама она больше не поедет: вернуть в очередь — `atlas sync outbox
+  retry` (попытки обнуляются), выбросить — `atlas sync outbox prune --failed`.
+- **Когда событие не применяется.** `atlas sync quarantine list` — что приехало с хаба,
+  но не легло локально (например, задача из проекта, которого на этой машине нет), и
+  сколько было попыток. После трёх неудач событие уходит в карантин, чтобы НЕ держать
+  курсор: иначе одно неприменимое событие останавливает приём навсегда. Забыть список —
+  `atlas sync quarantine clear` (курсор при этом не отматывается).
 - **`atlas update`** — self-update CLI с PyPI (дистрибутив atlas-pm, команда atlas): детектит менеджер
   (uv/pipx/pip) и ставит свежую версию; `--check` — показать текущую/доступную; `--from-git` — legacy
   pipx-reinstall из git (заменяет убранную команду `atlas upgrade`).

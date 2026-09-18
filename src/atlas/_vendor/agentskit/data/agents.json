@@ -1,0 +1,714 @@
+{
+  "_schema": "agentskit.agents/1 — реестр AI-агентов как ДАННЫЕ (не код). config_dir → детект; detect_paths → ДОПОЛНИТЕЛЬНЫЕ папки детекта (у opencode пользовательский корень ~/.config/opencode, по одному ~/.opencode детект ложноотрицателен); repo_file/global_subpath → reference-инъекция (ФАЙЛ памяти агента); skill_layout → ОСНОВНАЯ раскладка навыка: путь = <base>/<config_dir>/<subdir…>/<filename>, где {skill} подставляется и в subdir (каталог на навык), и в filename (плоский файл); skill_layout.config_dir переопределяет папку агента (глобальные навыки antigravity лежат в .gemini/config, а не в .agents); global_install/project_install → в каких скоупах раскладка ДЕЙСТВУЕТ (опт-ин; глобальный и рабочий корни у агента бывают РАЗНЫМИ папками); installable (по умолчанию true) → является ли раскладка местом ЗАПИСИ: false = агент, возможно, оттуда читает, и путь называется для поиска/отчётов, но кит туда НЕ ставит (инвариант: у агента с доказанными живьём путями раскладка без улики не может быть installable — иначе непроверенный каталог молча становится местом установки, см. .agents/skills у antigravity); extra_skill_layouts → остальные живые места, откуда агент тоже читает навыки, в порядке убывания приоритета (ставим в первое подходящее скоупу); legacy_skill_layouts → УСТАРЕВШИЕ раскладки того же агента, нужны только чтобы РАСПОЗНАТЬ уже лежащее на дисках перед миграцией — кит по ним ничего не пишет и не удаляет; evidence (у записи агента и у КАЖДОЙ раскладки) → откуда это известно: {kind: empirical|docs|unverified, source, date, method, note} — empirical требует date+method (повторяемый опыт), docs требует ссылку, дефолт unverified = 'никто не проверял'; hooks → механизм ХУКОВ агента (файл настроек, формат, известные события, env-override корня): поля нет → у агента хуков нет, и движок отвечает 'не поддерживает'. Источник канона папок: ui-ux-pro-max AI_FOLDERS + global-память Atlas + снятое с машины владельца 2026-07-21 + ЖИВЫЕ прогоны agy/opencode с навыками-пробами 2026-07-21.",
+  "_note_evidence": "Признак доказательности заведён 2026-07-21 после серии ошибок одного класса (~/.antigravity/skills, ~/.agents/skills у antigravity, .codex/{skill}.md): реестр не отличал «прочитано в документации» от «кто-то предположил», установщик рапортовал успех в каталог, куда агент не смотрит. Правило: путь без улики (unverified) — это гипотеза, а не канон; empirical перебивает docs (документация Antigravity сама себе противоречит в двух страницах и в части путей опровергнута опытом). Метод опыта 2026-07-21: в каждый проверяемый каталог кладётся навык-проба с УНИКАЛЬНЫМ кодовым словом в description, затем агент спрашивается вживую (`agy --print`, `opencode run`) — виден каталог или нет. Контроль на поддакивание: проба INDIA (~/.codex/skills) opencode'ом НЕ найдена — значит модель различает, а не соглашается.",
+  "_note_gemini": "Решение владельца 2026-07-21: агента `gemini` (Gemini CLI) в реестре БОЛЬШЕ НЕТ — CLI закрыт, пользователи переведены на Antigravity. ВАЖНО: каталог ~/.gemini при этом ЖИВОЙ — это домашняя папка самого Antigravity (на машине владельца рядом лежат antigravity-cli/antigravity-ide/settings.json.antigravity.bak), и ИМЕННО в нём лежит доказанный корень навыков agy: ~/.gemini/config/skills. Убран АГЕНТ, а не папка; заводить `gemini` заново или отдавать ~/.gemini другому агенту нельзя — см. тесты test_gemini_agent_removed. ОПРОВЕРГНУТО опытом 2026-07-21: ~/.gemini/skills agy НЕ читает (проба CHARLIE не видна) — прежняя запись здесь утверждала обратное.",
+  "agents": {
+    "claude": {
+      "label": "Claude Code",
+      "config_dir": ".claude",
+      "repo_file": "CLAUDE.md",
+      "global_subpath": [
+        ".claude",
+        "CLAUDE.md"
+      ],
+      "aliases": [
+        "claude-code",
+        "claudecode"
+      ],
+      "skill_layout": {
+        "subdir": [
+          "skills",
+          "{skill}"
+        ],
+        "filename": "SKILL.md",
+        "install_type": "full",
+        "frontmatter": true
+      },
+      "_note_hooks": "Снято с машины владельца 2026-07-21: хуки Claude Code живут в settings.json (глобально ~/.claude/settings.json, в проекте <project>/.claude/settings.json) — событие → список ГРУПП {matcher, hooks:[{type:'command', command, timeout, statusMessage}]}. Корень настроек переопределяется env CLAUDE_CONFIG_DIR (переносные/uv-tool установки), поэтому он назван здесь данными, а не зашит в код.",
+      "hooks": {
+        "format": "claude-settings-json",
+        "settings_file": [
+          "settings.json"
+        ],
+        "config_dir_env": "CLAUDE_CONFIG_DIR",
+        "scopes": [
+          "global",
+          "project"
+        ],
+        "events": [
+          "SessionStart",
+          "SessionEnd",
+          "UserPromptSubmit",
+          "PreToolUse",
+          "PostToolUse",
+          "Notification",
+          "Stop",
+          "SubagentStop",
+          "PreCompact"
+        ],
+        "in_frontmatter": true,
+        "evidence": {}
+      },
+      "memory": {
+        "root": [
+          "projects"
+        ],
+        "per_project": true,
+        "subdir": [
+          "memory"
+        ],
+        "index_file": "MEMORY.md",
+        "project_key": "slug-dashes",
+        "root_setting": "autoMemoryDirectory",
+        "evidence": {
+          "kind": "live",
+          "source": "0034_core_memory.md + машина владельца (41 папка проектов)",
+          "note": "Имя папки проекта — путь, где каждый не буквенно-цифровой символ заменён дефисом. Сверено на трёх путях: одного примера мало, двойной дефис возникает от двух разных пар символов."
+        }
+      },
+      "resources": [
+        {
+          "kind": "agents",
+          "subdir": [
+            "agents"
+          ],
+          "suffix": ".md",
+          "evidence": {
+            "kind": "live",
+            "source": "0054_core_settings.md + машина владельца",
+            "note": "в ~/.claude/agents лежат готовые субагенты (.md)"
+          }
+        },
+        {
+          "kind": "commands",
+          "subdir": [
+            "commands"
+          ],
+          "suffix": ".md",
+          "evidence": {
+            "kind": "docs",
+            "source": "0055_core_skills.md"
+          }
+        },
+        {
+          "kind": "rules",
+          "subdir": [
+            "rules"
+          ],
+          "suffix": ".md",
+          "evidence": {
+            "kind": "docs",
+            "source": "0034_core_memory.md",
+            "note": "path-scoping и симлинки на каталог правил"
+          }
+        }
+      ],
+      "permissions": {
+        "settings_file": [
+          "settings.json"
+        ],
+        "format": "claude-settings-json",
+        "root_key": "permissions",
+        "buckets": [
+          "allow",
+          "deny",
+          "ask"
+        ],
+        "scopes": [
+          "global",
+          "project"
+        ],
+        "evidence": {
+          "kind": "docs",
+          "source": "0054_core_settings.md",
+          "note": "секция permissions в settings.json: списки allow/deny/ask"
+        }
+      }
+    },
+    "codex": {
+      "_note_skills": "Правка 2026-07-21. Живьём Codex проверить НЕ удалось — аккаунт отдаёт 402 deactivated_workspace, поэтому раскладка помечена evidence.kind=docs и НЕ выдаётся за опыт. Документация (020_build-skills.md, https://learn.chatgpt.com/docs/build-skills): «For repositories, Codex scans `.agents/skills` … `USER` | `$HOME/.agents/skills`» — то есть каталог на навык + SKILL.md в ПАПКЕ .agents (общей с antigravity/opencode), а не в .codex. Прежняя запись реестра давала `.codex/{skill}.md` — путь, которого нет ни в одной строке документации: ровно тот же класс ошибки, что снятый ~/.antigravity. Старое место оставлено ЛЕГАСИ, чтобы было чем показать человеку уже лежащее.",
+      "label": "Codex / AGENTS.md",
+      "config_dir": ".codex",
+      "repo_file": "AGENTS.md",
+      "global_subpath": [
+        ".codex",
+        "AGENTS.md"
+      ],
+      "aliases": [
+        "agents",
+        "agents.md"
+      ],
+      "evidence": {
+        "kind": "docs",
+        "source": "https://learn.chatgpt.com/docs/build-skills (020_build-skills.md); аудит docs/AGENTS_TOOLING_AUDIT.md §2.1 Р1",
+        "note": "Живой прогон невозможен: аккаунт отдаёт 402 deactivated_workspace (2026-07-21). Проверить, как только появится рабочий доступ."
+      },
+      "skill_layout": {
+        "subdir": [
+          "skills",
+          "{skill}"
+        ],
+        "filename": "SKILL.md",
+        "install_type": "full",
+        "frontmatter": true,
+        "global_install": true,
+        "project_install": true,
+        "config_dir": ".agents",
+        "evidence": {
+          "kind": "docs",
+          "source": "https://learn.chatgpt.com/docs/build-skills : «For repositories, Codex scans `.agents/skills` … `USER` | `$HOME/.agents/skills`»",
+          "note": "Скан идёт от cwd ВВЕРХ до корня репозитория — кит кладёт в <cwd>/.agents/skills, это ближняя точка скана. Живьём не проверено (402 deactivated_workspace)."
+        }
+      },
+      "legacy_skill_layouts": [
+        {
+          "subdir": [],
+          "filename": "{skill}.md",
+          "frontmatter": false,
+          "config_dir": ".codex",
+          "project_install": true,
+          "global_install": false,
+          "evidence": {
+            "kind": "unverified",
+            "note": "Прежняя запись ЭТОГО реестра (.codex/{skill}.md). В документации Codex такого пути нет — навык числился установленным и не работал. Только чтение, чтобы было чем показать перед уборкой."
+          }
+        },
+        {
+          "subdir": [
+            "skills",
+            "{skill}"
+          ],
+          "filename": "SKILL.md",
+          "frontmatter": true,
+          "config_dir": ".codex",
+          "project_install": true,
+          "global_install": true,
+          "evidence": {
+            "kind": "unverified",
+            "note": "Сюда писал skillkit (targets/codex.py: base_dir = <root>/.codex/skills/<slug>). В документации Codex пути нет (аудит Р1) — тот же мёртвый груз, только чтение."
+          }
+        }
+      ],
+      "toggle": {
+        "settings_file": [
+          "config.toml"
+        ],
+        "format": "codex-config-toml",
+        "section": "skills.config",
+        "path_key": "path",
+        "enabled_key": "enabled",
+        "scopes": [
+          "global"
+        ],
+        "evidence": {
+          "kind": "docs",
+          "source": "020_build-skills.md",
+          "note": "«Use `[[skills.config]]` entries in `~/.codex/config.toml` to disable a skill without deleting it». Состояние живёт в настройках агента, а не во frontmatter навыка. Живьём не проверено."
+        }
+      },
+      "memory": {
+        "root": [
+          "memories"
+        ],
+        "per_project": false,
+        "subdir": [],
+        "index_file": "MEMORY.md",
+        "evidence": {
+          "kind": "docs",
+          "source": "041_customization_memories.md",
+          "note": "~/.codex/memories/ — общая куча, без папки на проект. Живьём не проверено."
+        }
+      },
+      "resources": [
+        {
+          "kind": "agents",
+          "subdir": [
+            "agents"
+          ],
+          "suffix": ".toml",
+          "evidence": {
+            "kind": "docs",
+            "source": "006_agent-configuration_subagents.md",
+            "note": "форма файла TOML, а не markdown — маску агент задаёт сам"
+          }
+        },
+        {
+          "kind": "commands",
+          "subdir": [
+            "prompts"
+          ],
+          "suffix": ".md",
+          "deprecated": true,
+          "evidence": {
+            "kind": "docs",
+            "source": "038_custom-prompts.md",
+            "note": "помечено deprecated: находить поставленное надо, ставить новое — нет"
+          }
+        }
+      ]
+    },
+    "cursor": {
+      "label": "Cursor",
+      "config_dir": ".cursor",
+      "repo_file": ".cursorrules",
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [
+          ".shared"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "copilot": {
+      "label": "GitHub Copilot",
+      "config_dir": ".github",
+      "repo_file": ".github/copilot-instructions.md",
+      "global_subpath": null,
+      "aliases": [
+        "copilot-instructions"
+      ],
+      "skill_layout": {
+        "subdir": [
+          "prompts"
+        ],
+        "filename": "{skill}.prompt.md",
+        "install_type": "full",
+        "frontmatter": true
+      }
+    },
+    "windsurf": {
+      "label": "Windsurf",
+      "config_dir": ".windsurf",
+      "repo_file": ".windsurfrules",
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [
+          "rules"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "antigravity": {
+      "_note": "ДОКАЗАНО ЖИВЫМ ОПЫТОМ 2026-07-21 (agy --print + навыки-пробы с кодовым словом в description). agy читает РОВНО ОДИН каталог: ~/.gemini/config/skills/<имя>/SKILL.md (проба BRAVO видна). Следствие для установки: доказанное место ГЛОБАЛЬНОЕ (project_install=false), а единственная проектная раскладка (.agents/skills) помечена installable=false — значит в ПРОЕКТНОМ скоупе у antigravity места записи НЕТ ВОВСЕ, и skill_layout_for/skill_path_for честно отдают None вместо тихой подстановки непроверенного каталога. НЕ читает: ~/.agents/skills (ALPHA), ~/.gemini/skills (CHARLIE), рабочие <project>/.agents/skills (DELTA) и <project>/.gemini/skills (GOLF) — в т.ч. из настоящего git-проекта; НЕ читает плоский <имя>.md вместо каталога — проба FOXTROT лежала В ТОМ ЖЕ ~/.gemini/config/skills, что видимая BRAVO, и отличалась ТОЛЬКО формой (контролируемый опыт: одна переменная). ПОЭТОМУ глобальная установка идёт в .gemini/config, и НЕ смей 'чинить' это обратно на .agents: до этой правки кит ставил навыки agy в ~/.agents/skills — каталог CODEX и OPENCODE, — установщик рапортовал успех, а agy навык не видел вовсе. Смежное, найдено на диске: ~/.gemini/config/mcp_config.json (ключ mcpServers), ~/.gemini/config/plugins/<имя>/plugin.json, ~/.gemini/settings.json (навыки требуют experimental.skills = true). global_subpath остаётся null осознанно: это путь reference-ФАЙЛА памяти (по документации ~/.gemini/GEMINI.md), а глобальные навыки едут по skill_layout.",
+      "label": "Antigravity",
+      "config_dir": ".agents",
+      "repo_file": "AGENTS.md",
+      "global_subpath": null,
+      "aliases": [
+        "agent",
+        "agy"
+      ],
+      "detect_paths": [
+        ".gemini/config"
+      ],
+      "evidence": {
+        "kind": "empirical",
+        "date": "2026-07-21",
+        "source": "живые прогоны `agy --print` на машине владельца",
+        "method": "навык-проба с уникальным кодовым словом в description раскладывается по каждому кандидату-каталогу, затем agy спрашивается вживую; учитывается только то, что агент назвал сам"
+      },
+      "skill_layout": {
+        "subdir": [
+          "skills",
+          "{skill}"
+        ],
+        "filename": "SKILL.md",
+        "install_type": "full",
+        "frontmatter": true,
+        "global_install": true,
+        "project_install": false,
+        "config_dir": ".gemini/config",
+        "evidence": {
+          "kind": "empirical",
+          "date": "2026-07-21",
+          "source": "проба BRAVO в ~/.gemini/config/skills/bravo/SKILL.md — agy --print назвал кодовое слово",
+          "method": "контрольная пара в ОДНОМ каталоге: BRAVO (каталог + SKILL.md) виден, FOXTROT (плоский foxtrot.md) не виден — различие только в форме, значит нужен каталог + SKILL.md",
+          "note": "Требует ~/.gemini/settings.json → experimental.skills = true (снято с диска владельца)."
+        }
+      },
+      "extra_skill_layouts": [
+        {
+          "subdir": [
+            "skills",
+            "{skill}"
+          ],
+          "filename": "SKILL.md",
+          "frontmatter": true,
+          "config_dir": ".agents",
+          "project_install": true,
+          "global_install": false,
+          "installable": false,
+          "evidence": {
+            "kind": "unverified",
+            "source": "документация IDE 69_ide_skills.md (https://antigravity.google/docs/ide/skills) + скриншот IDE от владельца",
+            "note": "ТОЛЬКО ЧТЕНИЕ (installable=false). ОПРОВЕРГНУТО для CLI: проба DELTA в <project>/.agents/skills не видна agy --print (2026-07-21), в т.ч. из настоящего git-проекта. Путь назван ради IDE (там живьём никто не проверял) и ради поиска уже лежащего — но местом установки он не становится: у antigravity доказанное место одно, глобальное ~/.gemini/config/skills, а в проектном скоупе ставить НЕКУДА. Раньше эта раскладка молча оказывалась 'первой подходящей' в проектном скоупе, и кит писал навык в каталог codex/opencode, которого agy не читает."
+          }
+        }
+      ],
+      "_note_legacy": "Старые места НЕ удаляются молча — их надо уметь НАЗВАТЬ, иначе показать человеку нечего: навык там лежит, числится установленным и не работает. Только ЧТЕНИЕ (resolve_legacy_skill_targets). Здесь три: (1) ~/.agents/skills/<имя>/SKILL.md — куда кит ошибочно ставил глобальные навыки agy до 2026-07-21 (проба ALPHA не видна); (2) ~/.gemini/skills — прежний shared-корень Gemini CLI, agy его не читает (проба CHARLIE); (3) плоский .agents/{skill}.md — самая первая запись этого реестра. Путь .antigravity убран ВОВСЕ (даже как legacy): он появился по нашей ошибке в skillkit и агентом не читался никогда — мигрировать с него нечего.",
+      "legacy_skill_layouts": [
+        {
+          "subdir": [
+            "skills",
+            "{skill}"
+          ],
+          "filename": "SKILL.md",
+          "frontmatter": true,
+          "config_dir": ".agents",
+          "project_install": false,
+          "global_install": true,
+          "evidence": {
+            "kind": "empirical",
+            "date": "2026-07-21",
+            "source": "проба ALPHA в ~/.agents/skills/alpha/SKILL.md — agy --print её НЕ назвал",
+            "method": "навык-проба с кодовым словом; каталог agy не читает вовсе",
+            "note": "Сюда agentskit ставил глобальные навыки antigravity до 2026-07-21 — рапорт об успехе был ложным."
+          }
+        },
+        {
+          "subdir": [
+            "skills",
+            "{skill}"
+          ],
+          "filename": "SKILL.md",
+          "frontmatter": true,
+          "config_dir": ".gemini",
+          "project_install": false,
+          "global_install": true,
+          "evidence": {
+            "kind": "empirical",
+            "date": "2026-07-21",
+            "source": "проба CHARLIE в ~/.gemini/skills/charlie/SKILL.md — agy --print её НЕ назвал",
+            "method": "навык-проба с кодовым словом; прежний shared-корень Gemini CLI мёртв"
+          }
+        },
+        {
+          "subdir": [],
+          "filename": "{skill}.md",
+          "frontmatter": false,
+          "config_dir": ".agents",
+          "project_install": true,
+          "global_install": true,
+          "evidence": {
+            "kind": "unverified",
+            "note": "Самая первая запись этого реестра (плоский .agents/{skill}.md). Форма опровергнута опытом (FOXTROT), каталог — тоже (ALPHA/DELTA); осталась только для распознавания."
+          }
+        }
+      ],
+      "resources": [
+        {
+          "kind": "agents",
+          "subdir": [
+            "agents"
+          ],
+          "per_unit_dir": true,
+          "filename": "agent.md",
+          "evidence": {
+            "kind": "docs",
+            "source": "44_cli_commands_agents.md",
+            "note": "каталог на единицу: <имя>/agent.md, а не плоский файл"
+          }
+        },
+        {
+          "kind": "rules",
+          "subdir": [
+            "rules"
+          ],
+          "suffix": ".md",
+          "evidence": {
+            "kind": "docs",
+            "source": "70_ide_rules.md",
+            "note": "режимы Always On / Glob / Model Decision"
+          }
+        }
+      ],
+      "permissions": {
+        "settings_file": [
+          "settings.json"
+        ],
+        "format": "claude-settings-json",
+        "root_key": "permissions",
+        "buckets": [
+          "allow",
+          "deny",
+          "ask"
+        ],
+        "scopes": [
+          "global",
+          "project"
+        ],
+        "evidence": {
+          "kind": "docs",
+          "source": "37_cli_permissions.md",
+          "note": "allow/deny/ask; формат файла тот же, что у claude"
+        }
+      }
+    },
+    "kiro": {
+      "label": "Kiro",
+      "config_dir": ".kiro",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [
+          "steering"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "roocode": {
+      "label": "Roo Code",
+      "config_dir": ".roo",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [
+        "roo"
+      ],
+      "skill_layout": {
+        "subdir": [
+          "rules"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "qoder": {
+      "label": "Qoder",
+      "config_dir": ".qoder",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "trae": {
+      "label": "Trae",
+      "config_dir": ".trae",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [
+          "rules"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "opencode": {
+      "_note": "ДОКАЗАНО ЖИВЫМ ОПЫТОМ 2026-07-21 (`opencode run` + навыки-пробы с кодовым словом в description). opencode читает ЧЕТЫРЕ корня: ~/.config/opencode/skills (JULIET), ~/.opencode/skills (KILO), ~/.agents/skills (HOTEL), рабочие <project>/.opencode/skills (MIKE) и <project>/.agents/skills (LIMA). НЕ читает ~/.codex/skills (проба INDIA) — этот отрицательный результат и есть контроль на поддакивание: модель реально различает каталоги, а не соглашается с вопросом. Прежняя запись давала плоский .opencode/{skill}.md — ни каталога skills/, ни SKILL.md; такого пути нет ни в документации, ни в опыте. Файл правил: AGENTS.md в корне (18_rules.md, https://opencode.ai/docs/ru/rules/) — было null, правила не инъектировались вовсе.",
+      "label": "OpenCode",
+      "config_dir": ".opencode",
+      "repo_file": "AGENTS.md",
+      "global_subpath": null,
+      "_note_global_subpath": "Документация даёт глобальные правила в ~/.config/opencode/AGENTS.md (18_rules.md), но эта поверхность живьём не проверялась — включать запись в $HOME без улики не стали. Открытый хвост, не забывчивость.",
+      "aliases": [],
+      "detect_paths": [
+        ".config/opencode"
+      ],
+      "_note_detect": "Опыт 2026-07-21: пользовательский корень opencode — ~/.config/opencode; детект по одному ~/.opencode ложноотрицателен (у пользователя с установленным opencode агент в глобальном скоупе не находился).",
+      "evidence": {
+        "kind": "empirical",
+        "date": "2026-07-21",
+        "source": "живые прогоны `opencode run` с навыками-пробами на машине владельца",
+        "method": "навык-проба с уникальным кодовым словом в description в каждом каталоге-кандидате; отрицательный контроль — проба INDIA в ~/.codex/skills, которую opencode не назвал"
+      },
+      "skill_layout": {
+        "subdir": [
+          "skills",
+          "{skill}"
+        ],
+        "filename": "SKILL.md",
+        "install_type": "full",
+        "frontmatter": true,
+        "global_install": true,
+        "project_install": false,
+        "config_dir": ".config/opencode",
+        "evidence": {
+          "kind": "empirical",
+          "date": "2026-07-21",
+          "source": "проба JULIET в ~/.config/opencode/skills/juliet/SKILL.md — opencode run назвал кодовое слово",
+          "method": "навык-проба с кодовым словом",
+          "note": "Первый в глобальном скоупе: единственный корень, подтверждённый И документацией (https://opencode.ai/docs/ru/config/), И опытом."
+        }
+      },
+      "extra_skill_layouts": [
+        {
+          "subdir": [
+            "skills",
+            "{skill}"
+          ],
+          "filename": "SKILL.md",
+          "frontmatter": true,
+          "config_dir": ".opencode",
+          "project_install": true,
+          "global_install": true,
+          "evidence": {
+            "kind": "empirical",
+            "date": "2026-07-21",
+            "source": "пробы MIKE (<project>/.opencode/skills) и KILO (~/.opencode/skills) — обе названы opencode",
+            "method": "навык-проба с кодовым словом в каждом скоупе отдельно",
+            "note": "Собственная папка агента — сюда кит и ставит в проектном скоупе."
+          }
+        },
+        {
+          "subdir": [
+            "skills",
+            "{skill}"
+          ],
+          "filename": "SKILL.md",
+          "frontmatter": true,
+          "config_dir": ".agents",
+          "project_install": true,
+          "global_install": true,
+          "evidence": {
+            "kind": "empirical",
+            "date": "2026-07-21",
+            "source": "пробы LIMA (<project>/.agents/skills) и HOTEL (~/.agents/skills) — обе названы opencode",
+            "method": "навык-проба с кодовым словом в каждом скоупе отдельно",
+            "note": "Общая папка .agents (её же по документации сканирует codex). Перечислена, чтобы искать УЖЕ поставленный навык, а не класть пятую копию."
+          }
+        }
+      ],
+      "legacy_skill_layouts": [
+        {
+          "subdir": [],
+          "filename": "{skill}.md",
+          "frontmatter": false,
+          "config_dir": ".opencode",
+          "project_install": true,
+          "global_install": false,
+          "evidence": {
+            "kind": "unverified",
+            "note": "Прежняя запись этого реестра (.opencode/{skill}.md): ни подкаталога skills/, ни каталога на навык, ни SKILL.md. Только чтение — показать уже лежащее."
+          }
+        }
+      ],
+      "resources": [
+        {
+          "kind": "agents",
+          "subdir": [
+            "agents"
+          ],
+          "suffix": ".md",
+          "evidence": {
+            "kind": "docs",
+            "source": "19_agents.md"
+          }
+        },
+        {
+          "kind": "commands",
+          "subdir": [
+            "commands"
+          ],
+          "suffix": ".md",
+          "evidence": {
+            "kind": "docs",
+            "source": "23_commands.md"
+          }
+        }
+      ]
+    },
+    "continue": {
+      "label": "Continue",
+      "config_dir": ".continue",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [
+          "rules"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "codebuddy": {
+      "label": "CodeBuddy",
+      "config_dir": ".codebuddy",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "droid": {
+      "label": "Factory Droid",
+      "config_dir": ".factory",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [
+        "factory"
+      ],
+      "skill_layout": {
+        "subdir": [],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "kilocode": {
+      "label": "Kilo Code",
+      "config_dir": ".kilocode",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [
+        "kilo"
+      ],
+      "skill_layout": {
+        "subdir": [
+          "rules"
+        ],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "warp": {
+      "label": "Warp",
+      "config_dir": ".warp",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    },
+    "augment": {
+      "label": "Augment",
+      "config_dir": ".augment",
+      "repo_file": null,
+      "global_subpath": null,
+      "aliases": [],
+      "skill_layout": {
+        "subdir": [],
+        "filename": "{skill}.md",
+        "install_type": "full",
+        "frontmatter": false
+      }
+    }
+  }
+}

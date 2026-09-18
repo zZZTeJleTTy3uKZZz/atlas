@@ -226,7 +226,7 @@ def setup_cmd(
         "all", "--scope", help="global | repo | all — как у `atlas init`."
     ),
     agents: str = typer.Option(
-        "", "--agents", help="CSV агентов (claude,gemini,…) или 'all'. Пусто → все существующие."
+        "", "--agents", help="CSV агентов (claude,antigravity,…) или 'all'. Пусто → все существующие."
     ),
     no_rules: bool = typer.Option(False, "--no-rules", help="Не прописывать правила (только хук)."),
     no_hooks: bool = typer.Option(False, "--no-hooks", help="Не ставить хук (только правила)."),
@@ -245,7 +245,7 @@ def setup_cmd(
     if not no_rules:
         # Ленивый импорт: тяжёлые зависимости onboard не грузим на уровне модуля
         # (чтобы merge-хелперы оставались чисто-stdlib и тестировались отдельно).
-        from agentskit import onboard, resolve_agent_keys
+        from atlas._vendor.agentskit import onboard, resolve_agent_keys
 
         from atlas.discipline import ATLAS_NAMESPACE, DISCIPLINE_BODY
 

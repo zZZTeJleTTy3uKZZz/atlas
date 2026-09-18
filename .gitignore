@@ -70,6 +70,9 @@ logs/
 *.xlsx
 *.zip
 
+# Данные вендоренных китов (agentskit/issuekit) — это ЯДРО их работы
+# (реестр агентов, виды жалоб), а не выгрузка: без них пакет не работает.
+!src/atlas/_vendor/**/data/*.json
 !.claude.json
 !.claude/**/*.json
 !.eslintrc*.json

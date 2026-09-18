@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 
+from replicationkit import queue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -91,26 +92,41 @@ def mark_sent(session: Session, outbox_id: str) -> None:
         ob.sent_at = local_now()
 
 
-#: Порог неудачных попыток: после него запись считается «отравленной» (poison-pill)
-#: и уходит из очереди в status='failed', чтобы один битый event не держал батч.
-MAX_PUSH_ATTEMPTS = 5
+#: Порог неудачных попыток для ВРЕМЕННОГО отказа: после него запись уходит из
+#: очереди в status='failed', чтобы один битый event не держал батч.
+MAX_PUSH_ATTEMPTS = queue.MAX_ATTEMPTS
 
 
 def mark_failed(
-    session: Session, outbox_id: str, error: str, *, max_attempts: int = MAX_PUSH_ATTEMPTS
+    session: Session,
+    outbox_id: str,
+    error: str | BaseException,
+    *,
+    max_attempts: int = MAX_PUSH_ATTEMPTS,
 ) -> None:
-    """Учесть неудачную попытку отправки (attempts++, last_error).
+    """Учесть неудачную попытку отправки: attempts++, причина, судьба записи.
 
-    В ``failed`` переводим ТОЛЬКО по достижении порога: одиночная сетевая ошибка
-    не должна навсегда выбрасывать событие из очереди — до порога запись остаётся
-    ``pending`` и уйдёт следующим push (#894 [13])."""
+    Судьбу решает кит доставки (`replicationkit.queue.decide`), и решение
+    зависит от ВИДА отказа — это и есть закрытие дыры 2 волны 7 (Atlas #2718):
+
+    * постоянный отказ (сервер не примет это никогда: 400/403/404/409/422)
+      уходит в ``failed`` СРАЗУ. Раньше он гонял пять кругов наравне с обрывом
+      сети, а батч отправляется целиком — то есть одно такое событие роняло
+      каждый push и задерживало всю очередь;
+    * временный (сеть, таймаут, 5xx, 429) остаётся ``pending`` до порога.
+
+    ``error`` принимает и исключение, и строку: строку классифицировать не по
+    чему, поэтому она считается временной — прежнее поведение вызывающих,
+    которые уже передавали текст.
+    """
     ob = session.get(Outbox, outbox_id)
     if ob is None:
         return
     ob.attempts = (ob.attempts or 0) + 1
-    ob.last_error = str(error)[:500]
-    if ob.attempts >= max_attempts:
-        ob.status = "failed"
+    exc = error if isinstance(error, BaseException) else Exception(str(error))
+    verdict = queue.decide(exc, ob.attempts, max_attempts=max_attempts)
+    ob.status = verdict.status
+    ob.last_error = verdict.reason[:500]
 
 
 __all__ = ["enqueue", "pending", "mark_sent", "mark_failed"]

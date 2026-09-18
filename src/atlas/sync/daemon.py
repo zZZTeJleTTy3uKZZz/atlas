@@ -30,6 +30,11 @@ def _task_name(profile: str | None) -> str:
     return f"{TASK_NAME}-{profile}" if profile else TASK_NAME
 
 
+def _log_name(profile: str | None) -> str:
+    """Свой лог у каждого профиля — иначе два демона пишут в один файл вперемешку."""
+    return f"sync-watch{('-' + profile) if profile else ''}.log"
+
+
 def _vbs_name(profile: str | None) -> str:
     return f"sync_watch_headless-{profile}.vbs" if profile else "sync_watch_headless.vbs"
 
@@ -100,6 +105,15 @@ def install(*, profile: str | None = None, run=None) -> dict:
     root_unix = _to_unix(bash, root)
     profile_flag = f"--profile {profile} " if profile else ""
 
+    # Вывод демона идёт В ФАЙЛ, и это не удобство, а условие работоспособности.
+    # Окно скрыто (Run style 0), поэтому без лога у фонового синка нет НИКАКОГО
+    # следа: он может падать на первой секунде, а планировщик будет показывать
+    # «задача выполнена успешно». Разбирались с этим вслепую — демон числился
+    # живым, очередь копилась, и понять причину было нечем.
+    лог = root / "logs" / _log_name(profile)
+    лог.parent.mkdir(parents=True, exist_ok=True)
+    лог_unix = _to_unix(bash, лог)
+
     vbs = root / "scripts" / _vbs_name(profile)
     vbs.parent.mkdir(parents=True, exist_ok=True)
     vbs.write_text(
@@ -108,31 +122,85 @@ def install(*, profile: str | None = None, run=None) -> dict:
         "Option Explicit\n"
         "Dim sh\n"
         'Set sh = CreateObject("WScript.Shell")\n'
-        f'sh.Run "{bash} -l -c ""cd \'{root_unix}\' && uv run atlas {profile_flag}--text sync watch""", 0, False\n',
+        # Путь к bash ОБЯЗАН быть в кавычках: git-bash лежит в «C:\\Program
+        # Files\\Git», и без кавычек WScript.Shell берёт за имя программы
+        # «C:\\Program» — команда не запускается вовсе. Снаружи это выглядело
+        # как «задача выполнена успешно, а демона нет»: планировщик отчитывался
+        # нулём, лога не появлялось, очередь копилась. Демон не стартовал ни разу.
+        f'sh.Run """{bash}"" -l -c ""cd \'{root_unix}\' && uv run atlas {profile_flag}--text sync watch '
+        # Последний параметр — ЖДАТЬ завершения (True), и это принципиально.
+        # С False wscript запускал bash и сразу выходил; планировщик видел
+        # «задача завершилась успешно» и по своим правилам запускал её снова —
+        # демоны множились, за вечер набралось одиннадцать штук, и все они
+        # дёргали хаб наперегонки. С True задача остаётся Running ровно столько,
+        # сколько живёт синк, и второй экземпляр не стартует.
+        f'>> \'{лог_unix}\' 2>&1""", 0, True\n',
         encoding="ascii",
     )
 
+    # Автозапуск — через папку автозагрузки пользователя, а НЕ через планировщик.
+    #
+    # Планировщик выглядел естественным выбором и три часа обманывал: задача
+    # числилась Running, процессы жили, а синка не было. Причина обнаружилась
+    # только диагностикой изнутри — процесс, порождённый планировщиком, видит
+    # каталог настроек В УРЕЗАННОМ ВИДЕ: `config.toml` для него не существует
+    # (в листинге лежит один `Cache`). Конфиг не читается, base_url падает на
+    # умолчание `http://localhost:8000`, и каждый запрос даёт ConnectError,
+    # который снаружи выглядит как сетевая беда.
+    #
+    # Тот же VBS, запущенный из пользовательской сессии, работает без единой
+    # правки. Поэтому ярлык кладётся в Startup: он стартует в полноценном
+    # сеансе человека, со всеми его настройками и хранилищем ключей.
+    #
+    # Плата: демон поднимается при входе в систему, а не «всегда». Для рабочей
+    # машины это ровно то, что нужно, — синк нужен, когда за ней работают.
+    автозагрузка = (
+        Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+        / "Microsoft"
+        / "Windows"
+        / "Start Menu"
+        / "Programs"
+        / "Startup"
+    )
+    ярлык = автозагрузка / _vbs_name(profile)
+
     ps = f"""
 $ErrorActionPreference='Stop'
-$Action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument '"{vbs}"'
-$Trigger = New-ScheduledTaskTrigger -AtLogOn
-$Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
-    -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries `
-    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit (New-TimeSpan -Days 3650)
+# Прежние экземпляры гасятся ЯВНО и ВСЕЙ цепочкой: wscript запускает bash, тот —
+# uv, uv — atlas, atlas — python, и цикл крутит именно python. Пока гасили один
+# bash, осиротевшие python продолжали работать: за вечер их набралось шесть
+# штук, каждый со своим состоянием, и все дёргали хаб наперегонки.
+# Себя и оболочку, выполняющую этот скрипт, исключаем: её командная строка тоже
+# содержит искомую подстроку.
+Get-CimInstance Win32_Process |
+    Where-Object {{ $_.ProcessId -ne $PID -and $_.Name -ne 'powershell.exe' -and $_.CommandLine -like '*sync watch*' }} |
+    ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
+
+# Старая задача планировщика снимается, если осталась от прежних версий.
 Get-ScheduledTask -TaskName "{task}" -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
-Register-ScheduledTask -TaskName "{task}" -Description "atlas: фоновый long-poll синк с хабом" -Action $Action -Trigger $Trigger -Settings $Settings | Out-Null
-Start-ScheduledTask -TaskName "{task}"
+
+New-Item -ItemType Directory -Force -Path "{автозагрузка}" | Out-Null
+Copy-Item -Path "{vbs}" -Destination "{ярлык}" -Force
+Start-Process -FilePath "wscript.exe" -ArgumentList '"{vbs}"' -WindowStyle Hidden
 Write-Output "installed"
 """.strip()
     res = run(ps)
-    return {
+    итог = {
         "ok": res.returncode == 0,
         "task": task,
         "profile": profile,
+        "autostart": str(ярлык),
+        "log": str(лог),
         "stdout": res.stdout.strip(),
         "stderr": res.stderr.strip(),
     }
+    if not итог["ok"]:
+        # Человеку нужно СЛОВО о том, что демона нет: без него очередь копится
+        # молча, и обнаруживается это случайно, спустя сотни операций.
+        итог["error"] = "демон НЕ установлен — синк останется ручным (atlas sync push)"
+        if "denied" in res.stderr.lower() or "0x80070005" in res.stderr:
+            итог["error"] += "; отказ прав при записи автозапуска"
+    return итог
 
 
 def uninstall(*, profile: str | None = None, run=None) -> dict:

@@ -1,13 +1,15 @@
 """CLI `atlas init` — прописать Atlas-дисциплину во все агентские инструкции.
 
-Тонкая обёртка над китом ``agentskit`` (механизм онбординга — реестр агентов,
-детект, идемпотентная инъекция managed-блока, резолв global/project). Atlas
+Тонкая обёртка над бывшим китом ``agentskit`` (механизм онбординга — реестр
+агентов, детект, идемпотентная инъекция managed-блока, резолв global/project),
+теперь vendored-модулем ``atlas._vendor.agentskit`` (Atlas #2710, волна 5 —
+единственный потребитель, PyPI-пакет ``s-agentskit`` больше не тянется). Atlas
 приносит лишь КОНТЕНТ: ``DISCIPLINE_BODY`` + namespace ``"atlas"`` (см.
 ``atlas.discipline``). Маркеры ``ATLAS:*`` сохраняют обратную совместимость с
 уже прописанными блоками.
 
 Чужой текст вне маркеров не трогается. ``--dry-run`` — показать, что изменится.
-``--agents claude,gemini`` — точечный выбор агентов (без него — легаси: все
+``--agents claude,antigravity`` — точечный выбор агентов (без него — легаси: все
 существующие агентские файлы).
 """
 from __future__ import annotations
@@ -17,10 +19,10 @@ import os
 from typing import Any
 
 import typer
-from agentskit import onboard, resolve_agent_keys
 from clikit import CliError, command
 from rich.console import Console
 
+from atlas._vendor.agentskit import onboard, resolve_agent_keys
 from atlas.discipline import ATLAS_NAMESPACE, DISCIPLINE_BODY
 
 console = Console()
@@ -52,7 +54,7 @@ def init_cmd(
     ),
     agents: str = typer.Option(
         "", "--agents",
-        help="Точечный выбор: CSV ключей (claude,codex,gemini,cursor,copilot,…) "
+        help="Точечный выбор: CSV ключей (claude,codex,antigravity,cursor,copilot,…) "
              "или 'all'. Пусто → легаси (все существующие агентские файлы).",
     ),
     create: bool = typer.Option(
@@ -69,7 +71,7 @@ def init_cmd(
     """Прописать Atlas-дисциплину (managed-блок) в агентские инструкции.
 
     Делегирует механизм в ``agentskit.onboard`` (namespace=atlas). Без
-    ``--agents`` — все существующие агентские файлы; с ``--agents claude,gemini``
+    ``--agents`` — все существующие агентские файлы; с ``--agents claude,antigravity``
     — точечно (с ``--create`` создаст их файлы).
     """
     if scope not in ("global", "repo", "all"):

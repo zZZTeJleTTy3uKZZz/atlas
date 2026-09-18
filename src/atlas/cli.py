@@ -18,6 +18,7 @@ from .commands.backlog import backlog_app
 from .commands.backup import backup_app
 from .commands.config import config_app
 from .commands.epic import epic_app
+from .commands.comm import comm_app
 from .commands.counterparty import counterparty_app
 from .commands.milestone import milestone_app
 from .commands.review import review_app
@@ -59,6 +60,7 @@ app = build_root_app(
 )
 
 # Команды-сущности — в единственном числе, единообразно.
+app.add_typer(comm_app, name="comm")               # точки коммуникации: встречи, созвоны, заметки
 app.add_typer(counterparty_app, name="counterparty")   # контрагенты: с кем у нас отношения (уровень над проектом)
 app.add_typer(projects_app, name="project")          # проекты портфеля (CRUD, теги, архив)
 app.add_typer(task_app, name="task")             # задачи (CRUD, ЦКП)
@@ -103,6 +105,11 @@ _TEXT_FLAGS = frozenset({"--text", "--plain"})
 #: tests/test_text_flag_conflict.py.
 _OWN_TEXT_OPTION_PATHS: tuple[tuple[str, ...], ...] = (
     ("task", "checklist", "add"),
+    # У факта коммуникации --text — это САМ ФАКТ, а не режим вывода:
+    # «--text "решили начать с распознавания"». Без записи здесь
+    # общий разбор флагов съел бы значение и потребовал --text как
+    # переключатель формата.
+    ("comm", "fact"),
 )
 
 

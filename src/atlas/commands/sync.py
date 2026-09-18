@@ -143,6 +143,42 @@ def outbox_status_cmd() -> None:
     )
 
 
+@outbox_app.command("retry")
+@command
+def outbox_retry_cmd() -> None:
+    """Вернуть проваленные записи в очередь.
+
+    Нужна потому, что без неё разрыв связи означает ТИХУЮ ПОТЕРЮ задачи: пять
+    неудачных попыток подряд — и запись уходит в `failed` навсегда, а `prune`
+    умеет только выбросить её. Ровно так пропала задача, созданная в момент
+    обрыва VPN: локально она есть, на хабе её нет, и никто об этом не узнал бы.
+
+    Попытки обнуляются: причина отказа была внешней, и наказывать за неё запись
+    незачем.
+    """
+    from sqlalchemy import select, update
+
+    from atlas.models import Outbox
+
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        сколько = len(
+            session.execute(
+                select(Outbox.id).where(Outbox.status == "failed")
+            ).all()
+        )
+        session.execute(
+            update(Outbox)
+            .where(Outbox.status == "failed")
+            .values(status="pending", attempts=0)
+        )
+        session.commit()
+    emit_data(
+        {"requeued": сколько},
+        text_renderer=lambda r: print(f"вернулось в очередь: {r['requeued']}"),
+    )
+
+
 @outbox_app.command("prune")
 @command
 def outbox_prune_cmd(
@@ -201,3 +237,76 @@ def up_cmd() -> None:
         raise typer.Exit(1)
     emit_data(daemon_mod.install(),
               text_renderer=lambda r: print("✓ синк-демон запущен (фоновый long-poll)" if r["ok"] else f"✗ {r.get('error') or r.get('stderr')}"))
+
+
+quarantine_app = typer.Typer(
+    no_args_is_help=True,
+    help="События, которые не удалось применить: list / clear.",
+)
+sync_app.add_typer(quarantine_app, name="quarantine")
+
+
+@quarantine_app.command("list")
+@command
+def quarantine_list_cmd() -> None:
+    """Что не доехало и почему.
+
+    Существует потому, что молчаливый карантин был бы не лучше молчаливой
+    остановки: событие отложили, синк поехал дальше — и человеку надо где-то
+    увидеть, чего именно у него нет.
+    """
+    from sqlalchemy import select
+
+    from atlas.models import SyncQuarantine
+
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        строки = list(
+            session.execute(
+                select(SyncQuarantine).order_by(SyncQuarantine.occurred_at)
+            ).scalars()
+        )
+        данные = [
+            {
+                "envelope_id": с.envelope_id,
+                "kind": с.kind,
+                "reason": с.reason,
+                "occurred_at": с.occurred_at,
+                "attempts": с.attempts,
+            }
+            for с in строки
+        ]
+
+    def показать(итог: list[dict]) -> None:
+        if not итог:
+            print("карантин пуст")
+            return
+        for з in итог:
+            print(
+                f"{з['occurred_at'] or '—':<28} {з['kind'] or '?':<8} "
+                f"попыток {з['attempts']:<3} {з['reason'] or ''}"
+            )
+
+    emit_data(данные, text_renderer=показать)
+
+
+@quarantine_app.command("clear")
+@command
+def quarantine_clear_cmd() -> None:
+    """Забыть отложенное: события перестанут числиться недоехавшими.
+
+    Курсор при этом НЕ отматывается: очистка — про список для человека, а не
+    про повторную доставку. Чтобы получить события заново, нужен сброс курсора.
+    """
+    from sqlalchemy import delete
+
+    from atlas.models import SyncQuarantine
+
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        итог = session.execute(delete(SyncQuarantine))
+        session.commit()
+    emit_data(
+        {"cleared": итог.rowcount or 0},
+        text_renderer=lambda r: print(f"забыто записей: {r['cleared']}"),
+    )

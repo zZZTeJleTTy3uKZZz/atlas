@@ -5,6 +5,9 @@
 (шаблон issuekit handoff: что сделано / осталось / как проверить / ЦКП / контекст)
 проверяется ``issuekit.lint`` ПЕРЕД записью — неполную не пускаем (как обязательный
 ЦКП у задачи). Регистрируется импортом модуля (см. ``atlas/cli.py``).
+
+``issuekit`` — теперь vendored-модуль ``atlas._vendor.issuekit`` (Atlas #2710,
+волна 5 — единственный потребитель, PyPI-пакет ``s-issuekit`` больше не тянется).
 """
 from __future__ import annotations
 
@@ -13,12 +16,12 @@ from typing import Any, Optional
 
 import typer
 from clikit import CliError, command, emit_data, emit_table
-from issuekit import lint, list_kinds, new_template
 from rich.console import Console
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas._time import local_now
+from atlas._vendor.issuekit import lint, list_kinds, new_template
 from atlas.commands.task import _resolve_task_or_die, task_app
 from atlas.db import make_engine, make_session, resolve_db_url
 from atlas.lease import resolve_actor

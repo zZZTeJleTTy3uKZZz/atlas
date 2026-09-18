@@ -148,7 +148,7 @@ def init_cmd() -> None:
     _ask("team_owner", "Владелец командных (--team) проектов")
 
     # — выбор AI-агентов, которым прописать Atlas-дисциплину (механизм — agentskit) —
-    from agentskit import agent_registry, resolve_agent_keys
+    from atlas._vendor.agentskit import agent_registry, resolve_agent_keys
 
     console.print("[grey50]— AI-агенты (куда писать Atlas-дисциплину) —[/grey50]")
     agents_raw = typer.prompt(

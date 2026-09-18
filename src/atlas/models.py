@@ -1049,3 +1049,163 @@ class SyncCursor(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=local_now, onupdate=local_now, nullable=False
     )
+
+
+class SyncQuarantine(Base):
+    """События, которые не применяются раз за разом.
+
+    Нужна, потому что без неё одно неприменимое событие останавливает синк
+    НАВСЕГДА: курсор не может перешагнуть пропуск, значит хаб отдаёт тот же
+    кусок снова и снова. Так и вышло — три тестовые задачи из июня, чьего
+    проекта на машине нет, держали приём три месяца, и всё это время демон
+    выглядел работающим.
+
+    После нескольких неудачных попыток событие уходит сюда, курсор идёт дальше,
+    а человек видит список того, что не доехало, и решает сам: завести
+    недостающее и снять карантин или забыть.
+    """
+
+    __tablename__ = "sync_quarantine"
+
+    envelope_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False, default="atlas")
+    seq: Mapped[Optional[int]] = mapped_column(Integer)
+    kind: Mapped[Optional[str]] = mapped_column(String(50))
+    reason: Mapped[Optional[str]] = mapped_column(String(255))
+    occurred_at: Mapped[Optional[str]] = mapped_column(String(40))
+    attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime, default=local_now, nullable=False
+    )
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime, default=local_now, onupdate=local_now, nullable=False
+    )
+
+
+class Communication(Base):
+    """Точка коммуникации: встреча, созвон, переписка, заметка, показ клиенту.
+
+    Чего не хватало. Задачи и решения в базе были, а разговора, из которого они
+    родились, — нет: он оставался файлом в папке проекта или сообщением в чате.
+    Вопрос «что вообще было по этому клиенту» не имел ответа, и каждая новая
+    сессия начинала с чистого листа.
+
+    Сущность взята из CRM (Activity/Interaction), а не из трекеров: в Jira и
+    Linear взаимодействие привязано к задаче, а здесь связь шире — одна встреча
+    кормит несколько проектов, и привязать её к одному нельзя.
+
+    Текст живёт в файле (``source_path``), а не в базе: он версионируется вместе
+    с проектом, читается человеком и агентом напрямую и не редактируется. База
+    держит структуру, извлечённую из него, и путь к нему.
+    """
+
+    __tablename__ = "communications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    side: Mapped[str] = mapped_column(String(10), nullable=False)  # internal|client
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    duration_sec: Mapped[Optional[int]] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    source_path: Mapped[Optional[str]] = mapped_column(Text)
+    counterparty_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("counterparties.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="parsed", server_default="parsed", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=local_now, onupdate=local_now, nullable=False
+    )
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('meeting','call','chat','voice_note','presentation')",
+            name="ck_communications_kind",
+        ),
+        CheckConstraint("side IN ('internal','client')", name="ck_communications_side"),
+        CheckConstraint(
+            "status IN ('raw','parsed','reviewed')", name="ck_communications_status"
+        ),
+        Index("idx_communications_when", "occurred_at"),
+        Index("idx_communications_counterparty", "counterparty_id"),
+    )
+
+
+class CommunicationPart(Base):
+    """Кусок коммуникации, отнесённый к проекту.
+
+    Именно кусок, а не вся встреча. Разговор о клиенте прерывается и
+    возобновляется: обсуждая одного, вспоминают другого и возвращаются назад.
+    Проверено на встрече 05.09 — клиника упоминалась в семи местах, из них пять
+    внутри разговора о других. Привязка встречи целиком потеряла бы всё, кроме
+    самого длинного куска.
+
+    ``tile_from``/``tile_to`` — где кусок лежит в расшифровке; по ним из файла
+    достаётся исходный текст, который и отдаётся агенту вместо пересказа.
+    """
+
+    __tablename__ = "communication_parts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    communication_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("communications.id", ondelete="CASCADE"), nullable=False
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("projects.id"), nullable=True
+    )
+    subject: Mapped[Optional[str]] = mapped_column(String(200))
+    tile_from: Mapped[Optional[int]] = mapped_column(Integer)
+    tile_to: Mapped[Optional[int]] = mapped_column(Integer)
+    body: Mapped[Optional[str]] = mapped_column(Text)
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        Index("idx_comm_parts_comm", "communication_id"),
+        Index("idx_comm_parts_project", "project_id"),
+    )
+
+
+class CommunicationFact(Base):
+    """Что вынули из куска: решение, контрольная точка, риск, задача, вопрос.
+
+    У каждого факта — дословная цитата. Это не украшение: цитата ищется в
+    исходнике поиском, и такая проверка — единственная численная оценка
+    честности пересказа, не требующая человека. Она же ловит криво проведённые
+    границы: цитата, найденная в соседнем куске, означает, что разговор о
+    предмете шёл дальше, чем прочерчена граница.
+
+    ``task_id`` заполняется только когда задачу ДЕЙСТВИТЕЛЬНО завели. Разбор
+    задач не ставит: решение о постановке остаётся за человеком.
+    """
+
+    __tablename__ = "communication_facts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_gen_uuid)
+    part_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("communication_parts.id", ondelete="CASCADE"), nullable=False
+    )
+    fact_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    quote: Mapped[Optional[str]] = mapped_column(Text)
+    owner: Mapped[Optional[str]] = mapped_column(String(100))
+    due: Mapped[Optional[str]] = mapped_column(String(100))
+    task_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    milestone_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("milestones.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=local_now, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "fact_kind IN ('status','decision','checkpoint','risk','task','open')",
+            name="ck_comm_facts_kind",
+        ),
+        Index("idx_comm_facts_part", "part_id"),
+        Index("idx_comm_facts_task", "task_id"),
+    )

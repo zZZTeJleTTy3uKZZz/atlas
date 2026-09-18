@@ -3,7 +3,7 @@
 # PyPI); import-пакет и команда остаются `atlas`. Ставится: uv tool install atlas-pm /
 # pipx install atlas-pm.
 name = "atlas-pm"
-version = "0.3.15"
+version = "0.4.1"
 description = "Atlas — local-first PM-система для портфеля проектов и задач"
 readme = "README.md"
 license = { text = "MIT" }
@@ -22,16 +22,39 @@ dependencies = [
     "python-frontmatter>=1.1",
     "python-slugify>=8.0.4",
     # S-kits (PyPI; dist-name s-*, импорт-пакеты clikit/librarykit/adapterkit)
-    "s-clikit>=0.1.6",
-    "s-librarykit>=0.1.3",
-    "s-adapterkit>=0.1.2",
-    # agentskit — механизм онбординга AI-агентов (роль A) — с PyPI.
-    "s-agentskit>=0.1.0",
-    # issuekit — шаблоны/валидатор жалоб (богатая обратная связь передачи задач).
-    "s-issuekit>=0.2.0",
+    # >=0.2.0 — `clikit.config` без pydantic/pydantic-settings (кит-волна 5,
+    # #2710): `AtlasConfig(AppConfig)` — обычное наследование класса без
+    # `@dataclass`, поведение не меняется (только str/bool поля, без nested).
+    "s-clikit>=0.2.0,<0.3",
+    "s-librarykit>=0.1.3,<0.9",
+    "s-adapterkit>=0.2.0,<0.3",
+    # Кит доставки событий (волна 7, #2718): монотонный курсор, продвижение
+    # курсора после применения, разделение временного и постоянного отказа.
+    # Верхняя граница по правилу 0.x — минор кита может ломать контракт.
+    "s-replicationkit>=0.1,<0.2",
+    # agentskit (онбординг AI-агентов) и issuekit (шаблоны/валидатор жалоб)
+    # больше НЕ тянутся с PyPI: у обоих был ровно один потребитель — Atlas —
+    # и по спеке платформы (Atlas #2710, волна 5) код физически перенесён в
+    # atlas._vendor.{agentskit,issuekit}. Оригинальные киты остаются на диске
+    # в замороженном виде (см. их README) на случай второго потребителя.
 ]
 
 [project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-httpx>=0.32",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+]
+
+#: Инструменты прогона продублированы ГРУППОЙ (skl#2545): группу uv
+#: синхронизирует сама, а extra требует явного `--extra dev` — забыли флаг,
+#: и `uv run pytest` молча берёт СИСТЕМНЫЙ pytest с системными версиями
+#: зависимостей, то есть проверяет не то окружение, которое собирается.
+#: Extra `dev` НЕ удалён намеренно — на него ссылаются снаружи (.gitlab-ci.yml),
+#: ломать внешнего потребителя нельзя. Состав держим одинаковым.
+[dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-httpx>=0.32",

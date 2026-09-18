@@ -23,8 +23,13 @@ async def push_pending(session: Session, client, *, limit: int = 100) -> dict:
         # [13] Раньше ошибка просто вылетала: mark_failed нигде не вызывался,
         # attempts/last_error оставались пустыми, а батч отправлялся заново целиком —
         # одно перманентно-отвергаемое событие держало очередь вечно (poison-pill).
+        #
+        # Волна 7 (Atlas #2718), дыра 2: наверх уходит САМО исключение, а не его
+        # текст. Текст классифицировать не по чему, и до волны любой отказ вёл по
+        # одной лестнице попыток — невалидное навсегда событие крутилось пять
+        # кругов, а обрыв сети на пятом круге навсегда выбрасывал здоровое.
         for o in items:
-            outbox.mark_failed(session, o.id, str(exc))
+            outbox.mark_failed(session, o.id, exc)
         session.commit()
         raise
     for o in items:

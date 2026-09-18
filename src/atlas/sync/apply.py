@@ -111,6 +111,7 @@ def _upsert_task(session: Session, bid: str, payload: dict) -> dict:
             cpp_description=payload.get("cpp") or "—",
             priority=_norm_priority(payload.get("priority")),
             status=_norm_task_status(payload.get("status")),
+            due_date=_parse_due(payload.get("due_date")),
             # slug занят ЧУЖОЙ задачей (с другим backend_id) — уникализируем,
             # иначе UNIQUE(tasks.slug) роняет весь pull.
             slug=_free_slug(session, Task, slug) if slug else None,
@@ -128,6 +129,8 @@ def _upsert_task(session: Session, bid: str, payload: dict) -> dict:
             setattr(task, key, value)
     if payload.get("cpp"):
         task.cpp_description = payload["cpp"]
+    if "due_date" in payload:
+        task.due_date = _parse_due(payload.get("due_date"))
     return {"updated": "task"}
 
 

@@ -2016,6 +2016,9 @@ def update_cmd(
     name: Optional[str] = typer.Option(None, "--name"),
     priority: Optional[str] = typer.Option(None, "--priority", help="P0 | P1 | P2 | P3"),
     status_slug: Optional[str] = typer.Option(None, "--status"),
+    sync_policy: Optional[str] = typer.Option(
+        None, "--sync-policy", help="local | epics | media | full",
+    ),
     description: Optional[str] = typer.Option(None, "--description"),
     one_line: Optional[str] = typer.Option(None, "--one-line"),
     deadline: Optional[str] = typer.Option(None, "--deadline", help="YYYY-MM-DD"),
@@ -2136,9 +2139,15 @@ def update_cmd(
 
         if entity_kind is not None and entity_kind not in ("project", "idea", "inbox"):
             raise CliError("bad_kind", "--entity-kind: project | idea | inbox.")
+        if sync_policy is not None:
+            from atlas.models import SyncPolicy
+
+            if session.get(SyncPolicy, sync_policy) is None:
+                raise CliError("bad_sync_policy", f"Неизвестная sync-policy: {sync_policy}")
 
         _maybe_update("name", name)
         _maybe_update("priority", priority)
+        _maybe_update("sync_policy", sync_policy)
         _maybe_update("description", description)
         # Паспорт проекта: без точки Б и критерия завершения проект нельзя
         # увести в производство — это проверяет `atlas review`.

@@ -1040,7 +1040,7 @@ class Outbox(Base):
 
 
 class SyncCursor(Base):
-    """Курсор pull-канала (ISO occurred_at последнего применённого события)."""
+    """Курсоры доставки и хаба (числовой seq; старые ISO-метки допустимы в БД)."""
 
     __tablename__ = "sync_cursors"
 

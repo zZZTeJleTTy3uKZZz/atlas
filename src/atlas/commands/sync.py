@@ -18,6 +18,98 @@ def _db_url() -> str:
     return resolve_db_url()
 
 
+allowlist_app = typer.Typer(no_args_is_help=True, help="Разрешённые проекты исходящего синка.")
+sync_app.add_typer(allowlist_app, name="allowlist")
+
+
+@allowlist_app.command("set")
+@command
+def allowlist_set_cmd(
+    project: list[str] = typer.Option(..., "--project", help="Проект; можно повторять."),
+) -> None:
+    """Включить исходящий синк только для перечисленных проектов."""
+    from atlas.appconfig import AtlasConfig
+    from atlas.models import Project
+    from sqlalchemy import select
+
+    slugs = list(dict.fromkeys(project))
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        known = set(session.execute(
+            select(Project.slug).where(Project.slug.in_(slugs))
+        ).scalars())
+    missing = sorted(set(slugs) - known)
+    if missing:
+        raise ValueError(f"projects not found: {', '.join(missing)}")
+    cfg = load_config()
+    AtlasConfig(**{**cfg.model_dump(), "sync_projects": slugs}).save("atlas")
+    emit_data({"projects": slugs}, text_renderer=lambda r: print(
+        f"разрешено проектов: {len(r['projects'])}"
+    ))
+
+
+@allowlist_app.command("add")
+@command
+def allowlist_add_cmd(slug: str = typer.Argument(..., help="Slug нового проекта.")) -> None:
+    """Добавить один проект к текущему списку без переноса остальных."""
+    cfg = load_config()
+    if not cfg.sync_projects:
+        raise ValueError("сначала задайте исходный список через sync allowlist set")
+    allowlist_set_cmd(project=[*cfg.sync_projects, slug])
+
+
+@allowlist_app.command("list")
+@command
+def allowlist_list_cmd() -> None:
+    """Показать разрешённые проекты; пустой список означает старый режим всех."""
+    selected = load_config().sync_projects
+    emit_data({"projects": selected, "all": not selected})
+
+
+@sync_app.command("seed")
+@command
+def seed_cmd(
+    project: list[str] = typer.Option(..., "--project", help="Проект; можно указать несколько раз."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Показать объём без записи."),
+    include_closed: bool = typer.Option(
+        False, "--include-closed", help="Также отправить завершённые и отменённые задачи.",
+    ),
+) -> None:
+    """Поставить открытые задачи выбранных проектов в очередь синхронизации.
+
+    Повторите команду, когда подключаете новый проект; остальные проекты и
+    старая failed-очередь не затрагиваются. После неё выполните `sync push`.
+    """
+    from atlas.commands.connect import _require_connected
+    from atlas.sync.seed import seed_tasks
+
+    _require_connected()
+    cfg = load_config()
+    if not cfg.portal_id:
+        raise ValueError("portal_id не задан в конфигурации Atlas")
+    selected = set(cfg.sync_projects)
+    if selected and (missing := set(project) - selected):
+        raise ValueError(f"сначала разрешите проекты: {', '.join(sorted(missing))}")
+    engine = make_engine(_db_url())
+    with make_session(engine) as session:
+        results = [
+            seed_tasks(
+                session, slug, portal_id=cfg.portal_id,
+                dry_run=dry_run, include_closed=include_closed,
+            )
+            for slug in dict.fromkeys(project)
+        ]
+        if not dry_run:
+            session.commit()
+    emit_data(
+        {"projects": results, "total_queued": sum(r["queued"] for r in results),
+         "dry_run": dry_run},
+        text_renderer=lambda r: print(
+            f"проектов: {len(r['projects'])}, задач в очередь: {r['total_queued']}"
+        ),
+    )
+
+
 @sync_app.command("push")
 @async_command
 async def push_cmd() -> None:
@@ -29,7 +121,9 @@ async def push_cmd() -> None:
     engine = make_engine(_db_url())
     try:
         with make_session(engine) as session:
-            result = await push_mod.push_pending(session, client)
+            result = await push_mod.push_pending(
+                session, client, projects=set(cfg.sync_projects) or None,
+            )
     finally:
         await client.aclose()
     emit_data(result, text_renderer=lambda r: print(f"sent: {r['sent']}"))
@@ -52,6 +146,36 @@ async def pull_cmd(
     finally:
         await client.aclose()
     emit_data(result, text_renderer=lambda r: print(f"applied: {r['applied']}"))
+
+
+@sync_app.command("bootstrap")
+@async_command
+async def bootstrap_cmd(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Показать хвост без записи."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Подтвердить пропуск старой ленты."),
+) -> None:
+    """Пропустить прежнюю ленту перед загрузкой выбранных проектов.
+
+    Сначала создайте резервную копию локальной БД. Старые события больше не
+    применятся автоматически; затем выполните `sync seed` на исходной машине.
+    """
+    from atlas.commands.connect import _require_connected
+    from atlas.sync.bootstrap import bootstrap_cursor
+
+    _require_connected()
+    if not dry_run and not yes and not typer.confirm(
+        "Пропустить старую входящую ленту до текущего конца?"
+    ):
+        raise typer.Exit(1)
+    cfg = load_config()
+    client = BackendClient(cfg.base_url, resolve_api_key(cfg))
+    engine = make_engine(_db_url())
+    try:
+        with make_session(engine) as session:
+            result = await bootstrap_cursor(session, client, dry_run=dry_run)
+    finally:
+        await client.aclose()
+    emit_data(result)
 
 
 @sync_app.command("watch")
@@ -82,7 +206,10 @@ async def watch_cmd(
             pass
 
     try:
-        await pull_mod.watch_loop(engine, client, timeout=timeout, scope=cfg.scope, on_result=_log)
+        await pull_mod.watch_loop(
+            engine, client, timeout=timeout, scope=cfg.scope, on_result=_log,
+            projects=set(cfg.sync_projects) or None,
+        )
     except (KeyboardInterrupt, asyncio.CancelledError):
         emit_data({"stopped": True}, text_renderer=lambda r: print("watch остановлен"))
     finally:

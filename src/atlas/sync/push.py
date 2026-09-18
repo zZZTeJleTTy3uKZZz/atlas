@@ -8,12 +8,15 @@ from sqlalchemy.orm import Session
 from atlas.sync import outbox
 
 
-async def push_pending(session: Session, client, *, limit: int = 100) -> dict:
+async def push_pending(
+    session: Session, client, *, limit: int = 100,
+    projects: set[str] | None = None,
+) -> dict:
     """Выгрузить pending-события батчем; пометить sent. → {sent: N}.
 
     ``client`` — объект с async ``push_events(list[dict])`` (BackendClient).
     """
-    items = outbox.pending(session, limit=limit)
+    items = outbox.pending(session, limit=limit, projects=projects)
     if not items:
         return {"sent": 0}
     events = [json.loads(o.payload_json) for o in items]

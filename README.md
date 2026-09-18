@@ -140,6 +140,12 @@ atlas task triage
 atlas --text task list --project my-landing
 ```
 
+Для синхронизации выбранных проектов между машинами: `atlas sync allowlist set
+--project <slug>`, затем `atlas sync bootstrap --yes` на новой машине,
+`atlas sync seed --project <slug>` на исходной и `atlas sync push`.
+Когда начнётся работа над новым проектом, подключите его отдельно через
+`atlas sync allowlist add <slug>` и повторите `seed` для него.
+
 ## Технически
 
 - **Стек:** Python + Typer, хранилище — локальный SQLite (`~/.atlas/atlas.db`), миграции Alembic, без сети и внешних сервисов.

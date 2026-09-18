@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from atlas._time import local_now
-from atlas.models import Outbox, Task
+from atlas.models import ChecklistItem, Epic, Outbox, Project, Task
 from atlas.sync import mapper, policy
 
 
@@ -50,6 +50,12 @@ def enqueue(
     """
     if not _enqueue_enabled():
         return None  # backend не подключён — не копим мёртвую очередь (#879)
+    if os.environ.get("ATLAS_SYNC_ENQUEUE_FORCE") != "1":
+        from atlas.appconfig import load_config
+
+        selected = load_config().sync_projects
+        if selected and project.slug not in selected:
+            return None
     if not policy.should_sync(session, entity_kind, project):
         return None
     members = mapper.assignees(session, obj) if entity_kind == "task" else None
@@ -74,15 +80,50 @@ def enqueue(
     return ob
 
 
-def pending(session: Session, *, limit: int = 100) -> list[Outbox]:
-    """Невыгруженные записи (status=pending), старые первыми."""
+def _project_slug(session: Session, row: Outbox) -> str | None:
+    """Проект события: сначала снимок на проводе, затем локальная сущность."""
+    try:
+        payload = json.loads(row.payload_json).get("payload_json") or {}
+    except (TypeError, ValueError):
+        payload = {}
+    slug = payload.get("project_slug")
+    if slug:
+        return str(slug)
+    if row.entity_kind == "project":
+        return payload.get("slug")
+    project_id = None
+    if row.entity_kind == "task":
+        task = session.get(Task, row.entity_id)
+        project_id = task.project_id if task else None
+    elif row.entity_kind == "epic":
+        epic = session.get(Epic, row.entity_id)
+        project_id = epic.project_id if epic else None
+    elif row.entity_kind == "checklist":
+        item = session.get(ChecklistItem, row.entity_id)
+        task = session.get(Task, item.task_id) if item else None
+        project_id = task.project_id if task else None
+    project = session.get(Project, project_id) if project_id else None
+    return project.slug if project else None
+
+
+def pending(
+    session: Session, *, limit: int = 100, projects: set[str] | None = None,
+) -> list[Outbox]:
+    """Невыгруженные записи старые первыми, опционально по разрешённым проектам."""
     stmt = (
         select(Outbox)
         .where(Outbox.status == "pending")
         .order_by(Outbox.created_at)
-        .limit(limit)
     )
-    return list(session.execute(stmt).scalars().all())
+    if projects is None:
+        return list(session.execute(stmt.limit(limit)).scalars().all())
+    selected = []
+    for row in session.execute(stmt).scalars():
+        if _project_slug(session, row) in projects:
+            selected.append(row)
+            if len(selected) >= limit:
+                break
+    return selected
 
 
 def mark_sent(session: Session, outbox_id: str) -> None:

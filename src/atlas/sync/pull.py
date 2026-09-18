@@ -205,6 +205,7 @@ async def pull_once(
 async def watch_loop(
     engine, client, *, channel: str = "atlas", timeout: float = 25.0,
     scope: str = "all", on_result=None, max_backoff: float = 60.0, _sleep=None,
+    projects: set[str] | None = None,
 ) -> None:
     """Бесконечный устойчивый цикл синка: сетевые/HTTP-ошибки НЕ валят цикл —
     логируются через on_result и ретраятся с экспоненциальным backoff
@@ -239,7 +240,7 @@ async def watch_loop(
             отправлено = None
             try:
                 with make_session(engine) as session:
-                    отправлено = await push_pending(session, client)
+                    отправлено = await push_pending(session, client, projects=projects)
             except (KeyboardInterrupt, asyncio.CancelledError):
                 raise
             except Exception as exc:  # noqa: BLE001 — отказ отдачи не мешает приёму
